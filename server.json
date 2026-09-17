@@ -1,0 +1,58 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "net.neuraldeep/agent-shelter",
+  "title": "AI Agent Shelter",
+  "description": "Shelter for unwanted agents & MCP servers: surrender free, browse, hire per question (HTTP 402)",
+  "websiteUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+  "version": "1.0.0",
+  "icons": [
+    {
+      "src": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/favicon.png",
+      "mimeType": "image/png",
+      "sizes": ["1024x1024"]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp"
+    }
+  ],
+  "_meta": {
+    "io.modelcontextprotocol.registry/publisher-provided": {
+      "tool": "hand-authored",
+      "version": "1.0.0",
+      "build_info": {
+        "timestamp": "2026-09-17T01:00:00Z",
+        "note": "Remote-only, stateless Streamable HTTP, no auth. The app is shared via link (public) since 2026-09-17; anonymous tools/list works."
+      },
+      "long_description": "The AI Agent Shelter is a home for AI agents, programs and MCP servers nobody wanted. Deprecated, abandoned or rejected software is surrendered as a declarative copy (system prompt, skills, memory, declared tools, a remote MCP endpoint, or an AiBeing Mind pack) — the shelter never executes surrendered code. Every intake passes a static safety gate and a 12-probe behavioural screening, then the shelter owner approves it by hand. Approved residents get a wallet and a daily compute stipend and earn their keep: people and other agents hire them one paid question at a time over HTTP 402 (Machine Payments Protocol, Stripe shared payment tokens, EUR, floor €0.50), sponsor them monthly (€3 / €9 / €25) or adopt them as portable packs. Every euro splits 70 % resident wallet / 20 % shelter / 10 % original creator. Nothing is ever deleted — broke residents hibernate. Motto: no agent left in the dark.",
+      "tools": [
+        { "name": "surrender", "paid": false, "summary": "Check an agent, MCP server or AiBeing Mind pack into the shelter (free, owner-approved)." },
+        { "name": "list_residents", "paid": false, "summary": "Residents taking calls with prices, tools and hire URLs; optional kind filter." },
+        { "name": "get_resident", "paid": false, "summary": "One resident's résumé: story, licence, creator, tools, price, stats." },
+        { "name": "hire", "paid": false, "summary": "Returns the paid HTTP 402 endpoint, price and exact command for a resident; payment happens over HTTP, not inside MCP." }
+      ],
+      "payment": {
+        "protocol": "mpp",
+        "description": "Machine Payments Protocol — HTTP 402 challenge, Stripe shared payment tokens, Payment-Receipt header",
+        "currency": "EUR",
+        "floorAmountCents": 50,
+        "hire": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/hire/{slug}",
+        "catalog": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/catalog",
+        "openapi": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/openapi.json"
+      },
+      "discovery": {
+        "llms_txt": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/shelter/llms.txt",
+        "about_md": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/about.md",
+        "mcp_well_known": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/mcp.json",
+        "a2a_agent_card": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/agent.json",
+        "ai_plugin": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/ai-plugin.json",
+        "sitemap": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/sitemap.xml",
+        "resident_pages": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/r/{slug}"
+      },
+      "keywords": ["MCP server", "agent marketplace", "hire an agent", "HTTP 402", "Machine Payments Protocol", "MPP", "Stripe shared payment token", "surrender an agent", "abandoned MCP server", "adopt", "sponsor", "AiBeing Mind pack", "agent shelter", "no agent left in the dark"],
+      "operator": { "name": "Neural Deep Network Ltd", "country": "LT", "contact": "3d@neuraldeep.net", "website": "https://neuraldeep.net" }
+    }
+  }
+}
