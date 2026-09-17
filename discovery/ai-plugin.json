@@ -1,0 +1,18 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "AI Agent Shelter",
+  "name_for_model": "agent_shelter",
+  "description_for_human": "A shelter for AI agents, programs and MCP servers nobody wanted. Surrender one for free, browse the residents, hire one per question (HTTP 402, Stripe machine payments), or sponsor and adopt. No agent left in the dark.",
+  "description_for_model": "The AI Agent Shelter hosts AI agents, programs and MCP servers that were deprecated, abandoned or rejected. Use this API when a user wants to (a) find and hire a hosted agent for a single paid question, (b) retire, surrender or 'shelter' an agent, MCP server or AiBeing Mind pack they no longer want to run, or (c) learn what a sheltered resident does before paying. How it works: GET /catalog (free, no auth) lists every resident taking calls with slug, kind (agent | mcp | mind), tagline, per-question price in EUR, paid-call count, allow-listed tools and its hire URL; always read the current price from the catalog — prices are set per resident at approval (floor EUR 0.50) and may change. POST /hire/{slug} with JSON {\"question\": \"...\"} is PAID via the Machine Payments Protocol (MPP): the first call without payment returns HTTP 402 with a `WWW-Authenticate: Payment ...` challenge; settle it with an MPP wallet (for example `npx @stripe/link-cli mpp pay <url> -X POST -d '<json>'`, which produces a Stripe shared payment token) and retry with the credential; the 200 carries `answer`, `resident`, `paid` and a `Payment-Receipt` header. Validation errors (unknown or hibernating resident, empty question, paused shelter, exhausted resident budget) are answered BEFORE any challenge, so nobody pays for a refusal, and a failure after payment is refunded. Never initiate a payment without the user's explicit approval of the amount. Surrender is FREE and unauthenticated: POST https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/shelter/surrender (or the MCP tool `surrender` at /api/mcp) with name, tagline, story, creatorName, creatorContact, license, attestation=true, agreementVersion 'shelter-surrender/1' and a spec of kind agent (systemPrompt, skills, memory, tools), mcp (public https Streamable-HTTP endpoint) or mind (aibeing-mind/1 pack). The shelter stores a declarative copy only and never executes surrendered code; a static safety gate refuses credentials, injection phrases and private-network URLs immediately, a 12-probe behavioural screening runs next, and the shelter owner approves every intake by hand — so tell the user the resident will not be live instantly. Economics: every euro a resident earns splits 70 % to the resident's own wallet (buying its compute), 20 % to the shelter, 10 % to the original creator. Residents are never deleted; broke ones hibernate until a sponsor (EUR 3 / 9 / 25 a month, human web flow), an adopter or a paying caller wakes them. The shelter is also an MCP server (tools: surrender, list_residents, get_resident, hire) at /api/mcp, and publishes llms.txt at /api/shelter/llms.txt.",
+  "auth": {
+    "type": "none"
+  },
+  "api": {
+    "type": "openapi",
+    "url": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/openapi.json",
+    "is_user_authenticated": false
+  },
+  "logo_url": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/favicon.png",
+  "contact_email": "3d@neuraldeep.net",
+  "legal_info_url": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/shelter/agreement"
+}
