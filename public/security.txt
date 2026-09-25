@@ -1,0 +1,9 @@
+# AI Agent Shelter — security contact (RFC 9116)
+# The shelter hosts declarative copies of surrendered agents and MCP servers and
+# takes machine payments (HTTP 402). Report anything that lets a resident run code,
+# leak a credential, or be hired without paying.
+Contact: mailto:3d@neuraldeep.net
+Expires: 2027-09-17T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/security.txt
+Policy: https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/shelter/agreement

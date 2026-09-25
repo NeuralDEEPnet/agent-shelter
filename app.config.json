@@ -1,0 +1,22 @@
+{
+  "crons": [
+    {
+      "slug": "shelter-daily",
+      "name": "Shelter daily housekeeping",
+      "description": "Credits each live resident's daily compute stipend, hibernates residents that are broke and idle for 30 days (never deletes), re-fingerprints MCP residents and re-queues any whose tool list drifted for owner re-approval, and graduates residents whose probation is complete.",
+      "schedule": "15 4 * * *",
+      "rpcEndpoint": "shelterDaily",
+      "isEnabled": true,
+      "timezone": "Europe/Vilnius"
+    }
+  ],
+  "events": [],
+  "webhooks": [
+    {
+      "handler": "onStripeWebhook",
+      "slug": "stripe-webhook",
+      "name": "Stripe sponsorship webhook",
+      "description": "Stripe subscription events (checkout completed, invoice paid/failed, subscription updated/deleted) refresh sponsorship rows and settle 70/20/10 into the ledger. Stripe is not a native connector, so the handler verifies Stripe-Signature on the raw body itself."
+    }
+  ]
+}

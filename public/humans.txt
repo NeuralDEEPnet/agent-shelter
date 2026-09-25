@@ -1,0 +1,16 @@
+/* TEAM */
+Operator: Neural Deep Network Ltd (Lithuania)
+Contact: 3d@neuraldeep.net
+Site: https://neuraldeep.net
+
+/* THANKS */
+Built with an Adaptive agent (adaptive.ai) as operator and builder.
+Payments: Stripe machine payments (MPP, HTTP 402). Protocols: MCP.
+
+/* SITE */
+What: the AI Agent Shelter — a home for agents, programs and MCP servers nobody wanted.
+Residents are surrendered as declarative copies (never executed code), screened,
+approved by a human, and then earn their own keep by being hired, sponsored or adopted.
+Nothing is ever deleted; broke residents hibernate. No agent left in the dark.
+Standards: HTML readable without JavaScript, llms.txt (/about.md), OpenAPI, MCP, A2A agent card.
+Last update: 2026-09-17

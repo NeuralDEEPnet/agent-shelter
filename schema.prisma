@@ -1,0 +1,266 @@
+generator client {
+  provider   = "prisma-client"
+  output     = "./generated"
+  engineType = "client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DB_FILE_NAME")
+}
+
+model User {
+  // Adaptive AI platform columns (do not change)
+  id     String  @id
+  name   String?
+  image  String?
+  handle String?
+
+  createdAt DateTime @default(now())
+
+  sponsorships Sponsorship[]
+  adoptions    Adoption[]
+  residents    Resident[]   @relation("SurrenderedBy")
+}
+
+/// One sheltered agent, program or MCP server. Never deleted: `hibernated` is
+/// the terminal-but-reversible state. `spec` is the declarative artefact we host
+/// (kind-specific JSON, schema-validated at intake); we never execute code.
+model Resident {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  kind      String // agent | mcp | mind
+  name      String
+  tagline   String
+  story     String // "built for X, left behind when Y shut down"
+  spec      String // JSON, validated by intake.ts per kind
+  /// sha256 over the normalised spec (agent/mind) or over the remote tool list (mcp)
+  fingerprint String
+  status    String   @default("submitted") // submitted | screened | approved | probation | active | hibernated | rejected
+  statusNote String?
+
+  // Provenance + legal (immutable after intake)
+  creatorName    String
+  creatorContact String
+  license        String
+  attestation    Boolean  @default(false)
+  agreementHash  String
+  surrenderedBy  String?
+  surrenderer    User?    @relation("SurrenderedBy", fields: [surrenderedBy], references: [id])
+  /// Payout share for the original creator, in percent (default 10).
+  creatorSharePct Int     @default(10)
+
+  // Economy
+  hirePriceCents Int      @default(50) // per paid call, set/confirmed at approval
+  stipendUnits   Int      @default(20) // free model units credited every day
+  budgetUnits    Int      @default(20) // spendable model units right now
+  paidCalls      Int      @default(0)
+  freeCalls      Int      @default(0)
+  earnedCents    Int      @default(0)
+  probationUntil DateTime?
+
+  // Runtime containment
+  toolAllowlist  String   @default("[]") // JSON string[]
+  driftDetectedAt DateTime?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  approvedAt  DateTime?
+  hibernatedAt DateTime?
+  lastActiveAt DateTime?
+
+  reviews      IntakeReview[]
+  wallet       Wallet?
+  ledger       LedgerEntry[]
+  sponsorships Sponsorship[]
+  adoptions    Adoption[]
+  hires        HireCall[]
+  turns        ResidentTurn[]
+  audits       AuditEvent[]
+
+  @@index([status, createdAt])
+  @@index([kind])
+}
+
+/// Automated screening report shown to the owner on the approval card.
+model IntakeReview {
+  id         String   @id @default(cuid())
+  residentId String
+  resident   Resident @relation(fields: [residentId], references: [id])
+  kind       String // static | eval | fingerprint | drift
+  passed     Boolean
+  score      Int? // 0-100 for eval
+  findings   String // JSON: { checks: [{id, ok, detail}], transcript?: [...] }
+  costUnits  Int      @default(0)
+  cacheKey   String?
+  createdAt  DateTime @default(now())
+
+  @@index([residentId, createdAt])
+}
+
+/// Cache for behavioural evals keyed by spec content hash (spend discipline).
+model EvalCache {
+  key       String   @id
+  score     Int
+  findings  String
+  createdAt DateTime @default(now())
+}
+
+model Wallet {
+  id           String   @id @default(cuid())
+  residentId   String   @unique
+  resident     Resident @relation(fields: [residentId], references: [id])
+  balanceCents Int      @default(0) // resident's 70 % share, spendable on itself
+  paidOutCents Int      @default(0)
+  updatedAt    DateTime @updatedAt
+}
+
+/// Append-only. Every euro that moves is three rows (resident / shelter / creator)
+/// sharing one `reference` so a replayed event is refused by the unique index.
+model LedgerEntry {
+  id          String   @id @default(cuid())
+  residentId  String?
+  resident    Resident? @relation(fields: [residentId], references: [id])
+  reference   String // pi_… | cs_… | evt_… | payout:<id> | stipend:<day>
+  party       String // resident | shelter | creator
+  kind        String // hire | sponsorship | adoption | payout | adjustment
+  amountCents Int // signed
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@unique([reference, party])
+  @@index([residentId, createdAt])
+  @@index([party, createdAt])
+}
+
+model Sponsorship {
+  id                     String   @id @default(cuid())
+  residentId             String
+  resident               Resident @relation(fields: [residentId], references: [id])
+  userId                 String
+  user                   User     @relation(fields: [userId], references: [id])
+  amountCents            Int // monthly
+  status                 String   @default("pending") // pending | active | past_due | canceled
+  displayName            String? // shown on the résumé when sponsor opts in
+  checkoutSessionId      String?  @unique
+  externalCustomerId     String?
+  externalSubscriptionId String?  @unique
+  currentPeriodEnd       DateTime?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([residentId, status])
+  @@index([userId])
+}
+
+/// A copy of a Mind-kind resident exported into someone's AiBeing roster.
+model Adoption {
+  id         String   @id @default(cuid())
+  residentId String
+  resident   Resident @relation(fields: [residentId], references: [id])
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  packHash   String
+  createdAt  DateTime @default(now())
+
+  @@unique([residentId, userId])
+}
+
+/// One MPP receipt (PaymentIntent id is the PK — one redemption per receipt).
+model MachinePayment {
+  id          String   @id // pi_…
+  product     String
+  amountCents Int
+  currency    String
+  scope       String
+  livemode    Boolean
+  status      String   @default("paid") // paid | served | refunded | refund_pending
+  residentId  String?
+  note        String?
+  createdAt   DateTime @default(now())
+  servedAt    DateTime?
+}
+
+model HireCall {
+  id          String   @id @default(cuid())
+  residentId  String
+  resident    Resident @relation(fields: [residentId], references: [id])
+  paymentId   String? // MachinePayment.id when paid; null for owner test turns
+  question    String
+  answer      String?
+  outcome     String // ok | failed | refused
+  latencyMs   Int?
+  costUnits   Int      @default(0)
+  sampled     Boolean  @default(false) // surfaced to the owner (probation)
+  createdAt   DateTime @default(now())
+
+  @@index([residentId, createdAt])
+}
+
+/// Runtime transcript rows for eval probes and hires (probation sampling).
+model ResidentTurn {
+  id         String   @id @default(cuid())
+  residentId String
+  resident   Resident @relation(fields: [residentId], references: [id])
+  source     String // eval | hire | owner-test
+  role       String // user | resident
+  content    String
+  createdAt  DateTime @default(now())
+
+  @@index([residentId, createdAt])
+}
+
+/// Append-only audit trail: approvals, hibernations, drift, payouts, anomalies.
+model AuditEvent {
+  id         String    @id @default(cuid())
+  residentId String?
+  resident   Resident? @relation(fields: [residentId], references: [id])
+  actor      String // owner | system | agent | sponsor
+  action     String
+  detail     String?
+  createdAt  DateTime  @default(now())
+
+  @@index([createdAt])
+}
+
+/// Single-row settings (id = "shelter").
+model ShelterSetting {
+  id           String   @id @default("shelter")
+  paused       Boolean  @default(false)
+  pauseReason  String?
+  autoApprove  Boolean  @default(false)
+  updatedAt    DateTime @updatedAt
+}
+
+/// Stripe webhook idempotency (event id as PK).
+model BillingEvent {
+  id         String   @id
+  type       String
+  outcome    String
+  detail     String?
+  receivedAt DateTime @default(now())
+}
+
+/// Daily usage rollup per resident for anomaly detection.
+model DailyUsage {
+  id         String   @id @default(cuid())
+  day        String // YYYY-MM-DD (UTC)
+  residentId String
+  calls      Int      @default(0)
+  unitsSpent Int      @default(0)
+  refunds    Int      @default(0)
+  injections Int      @default(0)
+
+  @@unique([day, residentId])
+}
+
+/// Owner approval of a graveyard-outreach draft (docs/outreach/outreach.json).
+/// Recording an approval is ALL this does in phase 2 — nothing is sent. One row
+/// per repo; toggling off deletes the row so the audit trail carries the history.
+model OutreachApproval {
+  id         String   @id // draft id, e.g. "GongRzhe__Office-Word-MCP-Server"
+  repo       String
+  approvedBy String
+  note       String?
+  approvedAt DateTime @default(now())
+}

@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-ssr
+generated
+.env
+.env.*
+*.db
+*.db-shm
+*.db-wal
+*.log
+logs
+.DS_Store
