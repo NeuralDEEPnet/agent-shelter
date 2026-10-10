@@ -6,6 +6,7 @@ on:
     branches: [main]
   schedule:
     - cron: "30 5 * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -13,6 +14,7 @@ permissions:
 
 jobs:
   manifests:
+    if: github.event_name != 'schedule' || github.event.schedule == '30 5 * * *'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,8 +33,12 @@ jobs:
   live:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: Live discovery endpoints answer
+        id: probe
         env:
           ORIGIN: https://agent-shelter-neuraldeepnet.on.adaptive.ai
         run: |
@@ -41,3 +47,28 @@ jobs:
           done
           curl -fsS -X POST "$ORIGIN/api/mcp" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
             -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | grep -q '"surrender"'
+      - name: Open or update the outage issue
+        if: failure() && steps.probe.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const run = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const open = await github.rest.issues.listForRepo({ owner, repo, state: "open", labels: "outage", per_page: 1 });
+            if (open.data.length) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: open.data[0].number, body: `Still failing: ${run}` });
+            } else {
+              await github.rest.issues.create({ owner, repo, labels: ["outage"], title: "Live shelter is down (MCP / discovery endpoints failing)",
+                body: `The scheduled live check failed: ${run}\n\nThis issue closes automatically when the check passes again.` });
+            }
+      - name: Close the outage issue on recovery
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const open = await github.rest.issues.listForRepo({ owner, repo, state: "open", labels: "outage" });
+            for (const i of open.data) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: i.number, body: "Live check is passing again; closing." });
+              await github.rest.issues.update({ owner, repo, issue_number: i.number, state: "closed" });
+            }
