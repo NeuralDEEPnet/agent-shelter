@@ -140,7 +140,7 @@ async function run({ github, context, core, fetchImpl = fetch, origin }) {
     out = await res.json().catch(() => ({}));
   } catch (error) {
     core.setFailed(`Shelter unreachable: ${error instanceof Error ? error.message : String(error)}`);
-    await comment("The shelter could not be reached just now. A maintainer will retry — nothing was submitted.");
+    await comment("The shelter request could not be confirmed; it may have reached intake before the connection failed. Please don't retry or open another surrender issue yet. A maintainer should check the live shelter first to avoid creating a duplicate.");
     return;
   }
 
@@ -157,6 +157,12 @@ async function run({ github, context, core, fetchImpl = fetch, origin }) {
       ].join("\n"),
     );
     await label("landed");
+    return;
+  }
+
+  if (status >= 500) {
+    core.setFailed(`Shelter returned HTTP ${status}; intake may have been accepted before the failure.`);
+    await comment(`The shelter returned HTTP ${status}, so this issue cannot confirm whether intake succeeded. Please don't retry or open another surrender issue yet. A maintainer should check the live shelter first to avoid creating a duplicate.`);
     return;
   }
 
