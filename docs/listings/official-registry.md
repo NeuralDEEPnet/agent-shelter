@@ -3,7 +3,7 @@
 **Precondition satisfied 2026-09-17:** the app is shared via link; the remote answers anonymous
 `tools/list`. **Still needs the owner's yes before publishing.**
 
-File: `server.json` (this folder). Schema `2025-12-11`
+File: `server.json` (repo root). Schema `2025-12-11`
 (`https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json`, fetched and
 validated with `ajv` on 2026-09-17). Remote-only server (`remotes[].type = streamable-http`), no
 packages. Schema facts that bit us:
@@ -26,7 +26,7 @@ packages. Schema facts that bit us:
   and run `mcp-publisher login github` (device flow as the `neuraldeepnet` GitHub account, already
   connected on this computer). Zero owner effort beyond approving the device code.
 
-**2026-09-18:** `server.json` `name` switched to option B `io.github.neuraldeepnet/agent-shelter` so we can list without a DNS TXT. `mcp-publisher validate` passed. Publish still needs the owner to complete `mcp-publisher login github` (device code) — no PAT on this computer. Revert the name to `net.neuraldeep/agent-shelter` if we later prove DNS.
+**Current:** `name` is `io.github.NeuralDEEPnet/agent-shelter`. The registry matches the namespace **case-sensitively** against the GitHub owner login (`io.github.<RepositoryOwner>/*`), so the lowercase `io.github.neuraldeepnet/…` would be refused. Publishing is automated: run the **Publish to MCP Registry** workflow (`.github/workflows/publish-mcp-registry.yml`, GitHub OIDC — no device code or PAT) or push a `v*` tag. Bump `version` first; a version can only be published once.
 
 ## Commands
 
@@ -35,7 +35,7 @@ packages. Schema facts that bit us:
 curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/').tar.gz" \
   | tar xz -C ~/.local/bin mcp-publisher
 
-cd /home/computer/agent-shelter/docs/listings
+cd /home/computer/agent-shelter   # repo root
 mcp-publisher login github          # or: mcp-publisher login dns --domain neuraldeep.net
 mcp-publisher publish               # reads ./server.json
 ```

@@ -21,12 +21,13 @@ Welcome, external AI agent! This guide outlines the architecture, sandbox rules,
 
 ```
 agent-shelter/
-├── packages/                  # Vendored local packages
+├── packages/                  # Vendored local packages (only present in the Adaptive workspace; see docs/DEVELOPMENT.md)
 │   ├── model-router/          # Model routing & fallback policy (@neuraldeep/model-router)
 │   └── mpp-kit/               # Machine Payments Protocol kit (@neuraldeep/mpp-kit)
-├── prisma/
-│   ├── schema.prisma          # SQLite schema (Resident, Probe, LedgerEntry, etc.)
-│   └── migrations/            # Versioned SQL migrations
+├── schema.prisma              # SQLite schema (Resident, LedgerEntry, etc.)
+├── migrations/                # Versioned SQL migrations
+├── server.json                # Official MCP Registry manifest
+├── .github/                   # Surrender issue forms, intake + registry publish workflows
 ├── src/
 │   ├── api/
 │   │   ├── server.ts          # Hono HTTP server (mounts routes + typed-rpc)

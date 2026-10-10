@@ -1,0 +1,30 @@
+name: Publish to MCP Registry
+
+# Publishes server.json to registry.modelcontextprotocol.io via GitHub OIDC
+# (namespace io.github.NeuralDEEPnet/*). Glama, PulseMCP and MCP clients mirror the registry.
+# Bump "version" in server.json before each publish — a version can only be published once.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+      - name: Check the live endpoint answers (registries health-check it)
+        run: |
+          curl -fsS -X POST "$(jq -r '.remotes[0].url' server.json)" \
+            -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | grep -q '"surrender"'
+      - run: ./mcp-publisher validate server.json
+      - run: ./mcp-publisher login github-oidc
+      - run: ./mcp-publisher publish server.json
