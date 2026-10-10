@@ -1,7 +1,8 @@
 # Official MCP Registry — submission notes
 
-**Preconditions verified 2026-10-10:** the live service answers anonymous MCP requests, and the
-owner approved public Registry publication. The listing remains pending until the workflow succeeds.
+**Published 2026-10-10:** the live service answers anonymous MCP requests, and the owner-approved
+workflow published Registry version `1.1.0`. The official API reports the entry `active`:
+<https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.NeuralDEEPnet%2Fagent-shelter>.
 
 File: `server.json` (repo root). Schema `2025-12-11`
 (`https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json`, fetched and
