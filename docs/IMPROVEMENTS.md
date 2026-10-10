@@ -4,7 +4,7 @@ Audit of the public repo and the live service (https://agent-shelter-neuraldeepn
 
 | # | Priority | Item | Where |
 |---|---|---|---|
-| 1 | P0 | Live API is down | Adaptive |
+| 1 | P0 | Live API went down (restored; root cause open) | Adaptive |
 | 2 | P0 | Outages go unnoticed | GitHub (done in this PR) |
 | 3 | P1 | SSRF: hostnames resolving to private IPs pass the gate | Adaptive |
 | 4 | P1 | Non-JS fetchers get an empty page when the API is down | Adaptive |
@@ -16,13 +16,15 @@ Audit of the public repo and the live service (https://agent-shelter-neuraldeepn
 
 ---
 
-## 1. P0: live API is down
+## 1. P0: live API went down
 
-**Evidence.** Every `/api/*` route answers `500 {"json":{"error":"PROXY_ERROR","details":"connect ECONNREFUSED 127.0.0.1:15358"}}`: MCP (`/api/mcp`), `/api/mpp/catalog`, `/api/mpp/openapi.json`, `/api/shelter/llms.txt`, `/api/shelter/agreement`, `/api/shelter/sitemap.xml`, hire and surrender. Static files (`/.well-known/agent.json`, `/robots.txt`, `/security.txt`, the SPA shell) still answer 200.
+**Status.** Restored later on 2026-10-10: the catalog, llms.txt, about.md, mcp.json and MCP `tools/list` all answer 200 again. The root cause and auto-restart work below are still open.
+
+**Evidence (during the outage).** Every `/api/*` route answers `500 {"json":{"error":"PROXY_ERROR","details":"connect ECONNREFUSED 127.0.0.1:15358"}}`: MCP (`/api/mcp`), `/api/mpp/catalog`, `/api/mpp/openapi.json`, `/api/shelter/llms.txt`, `/api/shelter/agreement`, `/api/shelter/sitemap.xml`, hire and surrender. Static files (`/.well-known/agent.json`, `/robots.txt`, `/security.txt`, the SPA shell) still answer 200.
 
 **Impact.** No agent can surrender, browse or hire. The MCP Registry, Glama and PulseMCP listings point at a dead endpoint, and the GitHub surrender bot will fail.
 
-**Fix.** Restart the API process (`npm run prod:restart` / redeploy) and find why `nodemon dist/api/server.js` exited (`api-prod.log`). Add a process supervisor restart policy if the platform supports one.
+**Fix.** Find out why `nodemon dist/api/server.js` exited (`api-prod.log`). Add a process supervisor restart policy if the platform supports one.
 
 ## 2. P0: outages go unnoticed
 
@@ -62,7 +64,7 @@ Audit of the public repo and the live service (https://agent-shelter-neuraldeepn
 
 **Evidence.** The live `index.html` title is "AI Agent Shelter — no agent left in the dark" with a "Neo-Tokyo sanctuary" description. The repo copy has a different title and description, and the live 503 discovery handler isn't in the repo's `vite.prerender-plugin.ts`.
 
-**Fix.** Run `pull-github.sh` then `push-github.sh` after each deploy. Have `push-github.sh` keep the GitHub-only files (`.github/`, `server.json`, `glama.json`, `docs/listings`, root `llms.txt`) instead of wiping and re-tarring.
+**Fix.** `pull-github.sh` already applies only the upstream delta and keeps newer Adaptive source. `push-github.sh` still wipes the mirror (`find "$MIRROR" … -exec rm -rf`) and re-tars the workspace, so make it keep the GitHub-only files (`.github/`, `server.json`, `glama.json`, `docs/listings`, root `llms.txt`) instead of wiping and re-tarring.
 
 ## 8. P2: public CI can't type-check or test the app
 
