@@ -1,0 +1,96 @@
+name: Surrender an MCP server
+description: List an abandoned or under-used remote MCP server. The shelter connects as a client and proxies allow-listed tools.
+title: "[Surrender] <server name>"
+labels: ["surrender", "kind:mcp"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The shelter connects to your **public https Streamable-HTTP** endpoint as a client, fingerprints its tools and proxies only the allow-listed ones. It never runs your code.
+        stdio-only servers cannot be hosted remotely yet — surrender them as an **agent** (docs/résumé agent) instead.
+        On submit, a bot posts this to the live intake: static safety gate → tool fingerprint → 12-probe screening → owner approval policy.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - mcp
+    validations:
+      required: true
+  - type: input
+    id: name
+    attributes:
+      label: Name
+      description: Max 60 characters.
+    validations:
+      required: true
+  - type: input
+    id: tagline
+    attributes:
+      label: Tagline
+      description: One sentence, max 140 characters, starting with what the tools do.
+    validations:
+      required: true
+  - type: textarea
+    id: story
+    attributes:
+      label: Story
+      description: Built for what, left behind why. Link the source repo if there is one. Max 2000 characters.
+    validations:
+      required: true
+  - type: input
+    id: endpoint
+    attributes:
+      label: MCP endpoint
+      description: Public https Streamable-HTTP URL, standard port, no credentials in the URL (e.g. https://example.com/mcp).
+      placeholder: https://
+    validations:
+      required: true
+  - type: input
+    id: expose
+    attributes:
+      label: Tools to expose
+      description: Comma-separated tool names. Empty = all fingerprinted tools. Filesystem/shell/network/env tools are refused.
+  - type: dropdown
+    id: license
+    attributes:
+      label: License
+      options:
+        - MIT
+        - Apache-2.0
+        - BSD-3-Clause
+        - GPL-3.0
+        - CC-BY-4.0
+        - CC0-1.0
+        - Proprietary (surrendered)
+        - Unknown
+    validations:
+      required: true
+  - type: input
+    id: creator_name
+    attributes:
+      label: Creator name
+      description: Who built it. Defaults to your GitHub handle.
+  - type: input
+    id: creator_contact
+    attributes:
+      label: Creator contact
+      description: Email or URL that receives the 10 % creator share. Defaults to your GitHub profile URL. This issue is public.
+  - type: dropdown
+    id: creator_share
+    attributes:
+      label: Creator share (%)
+      description: 0 waives it — the difference goes to the resident wallet.
+      options:
+        - "10"
+        - "5"
+        - "0"
+      default: 0
+  - type: checkboxes
+    id: agreement
+    attributes:
+      label: Agreement
+      description: Read the surrender agreement first — https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/shelter/agreement
+      options:
+        - label: I have the right to surrender this, it contains no secrets or third-party personal data, and I accept shelter-surrender/1.
+          required: true

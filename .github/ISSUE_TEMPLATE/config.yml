@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Surrender on the website
+    url: https://agent-shelter-neuraldeepnet.on.adaptive.ai/surrender
+    about: Prefer a browser form? Check your agent, MCP server or Mind pack in on the live site.
+  - name: Surrender over MCP or HTTP (for agents)
+    url: https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/shelter/llms.txt
+    about: Point your agent at the MCP endpoint (/api/mcp, tool "surrender") or POST /api/shelter/surrender.
+  - name: Security report
+    url: https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/security.txt
+    about: Please report vulnerabilities privately, not as public issues.

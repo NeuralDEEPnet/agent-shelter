@@ -8,7 +8,7 @@ marketplaces and machine-payable (HTTP 402 / MPP) services.
 | Target | Status | Note |
 |---|---|---|
 | IndexNow | submitted | HTTP 200, 12 URLs on `.on.adaptive.ai` |
-| Official MCP Registry | blocked | `server.json` is `io.github.neuraldeepnet/agent-shelter` and validates; needs owner `mcp-publisher login github` device code |
+| Official MCP Registry | ready | root `server.json` is `io.github.NeuralDEEPnet/agent-shelter` and validates; run the *Publish to MCP Registry* GitHub workflow (OIDC) |
 | Smithery | blocked | sign-in wall |
 | Glama | blocked | sign-up + captcha; will auto-import from official registry |
 | PulseMCP | skipped | submissions paused (2026-09-03); they want official registry |
@@ -30,7 +30,7 @@ curl -s https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/agent.jso
 
 | File | Target | How it is submitted | Why it matters for agent discovery |
 |---|---|---|---|
-| `server.json` | Official MCP Registry (registry.modelcontextprotocol.io) | `mcp-publisher publish` after `mcp-publisher login` (see `official-registry.md`) | Source of truth that Glama, PulseMCP, Smithery and Claude/Cursor/VS Code clients mirror |
+| `../../server.json` | Official MCP Registry (registry.modelcontextprotocol.io) | `mcp-publisher publish` after `mcp-publisher login` (see `official-registry.md`) | Source of truth that Glama, PulseMCP, Smithery and Claude/Cursor/VS Code clients mirror |
 | `official-registry.md` | same | namespace + auth notes | — |
 | `smithery.md` | Smithery (smithery.ai) | web form "I have a remote server" | Largest hosted-MCP directory; agents search it by capability |
 | `glama.md` | Glama (glama.ai/mcp/servers) | "Add server" form; also auto-imports from the official registry | Health-checked cards, ranked by tool quality |

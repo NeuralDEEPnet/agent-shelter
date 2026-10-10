@@ -1,0 +1,43 @@
+name: Validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "30 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Parse JSON manifests
+        run: for f in server.json glama.json public/.well-known/*.json; do jq empty "$f" && echo "ok $f"; done
+      - name: Validate server.json against the MCP Registry schema
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher validate server.json
+      - name: Surrender issue-form parser tests
+        run: node --test .github/scripts/surrender-intake.test.cjs
+
+  live:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Live discovery endpoints answer
+        env:
+          ORIGIN: https://agent-shelter-neuraldeepnet.on.adaptive.ai
+        run: |
+          for p in / /api/mpp/catalog /api/shelter/llms.txt /.well-known/mcp.json /.well-known/agent.json /sitemap.xml; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$ORIGIN$p"); echo "$code $p"; [ "$code" = 200 ]
+          done
+          curl -fsS -X POST "$ORIGIN/api/mcp" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | grep -q '"surrender"'

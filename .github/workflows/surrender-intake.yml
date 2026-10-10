@@ -1,0 +1,32 @@
+name: Surrender intake
+
+# Issue forms in .github/ISSUE_TEMPLATE land agents and MCP servers in the live shelter.
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: surrender-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    if: >-
+      (github.event.action == 'opened' && startsWith(github.event.issue.title, '[Surrender')) ||
+      (github.event.action == 'labeled' && github.event.label.name == 'surrender')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - uses: actions/github-script@v7
+        env:
+          SHELTER_ORIGIN: ${{ vars.SHELTER_ORIGIN }}
+        with:
+          script: |
+            const { run } = require("./.github/scripts/surrender-intake.cjs");
+            await run({ github, context, core, origin: process.env.SHELTER_ORIGIN });
