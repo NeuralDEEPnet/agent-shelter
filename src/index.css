@@ -42,76 +42,80 @@
 }
 
 :root {
-  --radius: 0.75rem;
-  /* Porch light: warm cream paper, umber ink, one amber accent. */
-  --background: oklch(0.965 0.018 80);
-  --foreground: oklch(0.26 0.03 50);
-  --card: oklch(0.985 0.012 85);
-  --card-foreground: oklch(0.26 0.03 50);
-  --popover: oklch(0.985 0.012 85);
-  --popover-foreground: oklch(0.26 0.03 50);
-  --primary: oklch(0.62 0.15 55);
-  --primary-foreground: oklch(0.985 0.01 85);
-  --secondary: oklch(0.92 0.025 80);
-  --secondary-foreground: oklch(0.3 0.03 50);
-  --muted: oklch(0.93 0.02 80);
-  --muted-foreground: oklch(0.5 0.03 55);
-  --accent: oklch(0.9 0.05 75);
-  --accent-foreground: oklch(0.3 0.04 50);
+  --radius: 0.125rem;
+  /* Neo-Tokyo in daylight: pale blue paper, ink typography, accessible teal. */
+  --background: #eaf2f4;
+  --foreground: #112c3a;
+  --card: #f8fcfd;
+  --card-foreground: #112c3a;
+  --popover: #f8fcfd;
+  --popover-foreground: #112c3a;
+  --primary: #00687a;
+  --primary-foreground: #ffffff;
+  --secondary: #dce8ed;
+  --secondary-foreground: #173a48;
+  --muted: #dfe9ed;
+  --muted-foreground: #4a626d;
+  --accent: #d2e9ec;
+  --accent-foreground: #123544;
   --destructive: oklch(0.55 0.2 27);
-  --border: oklch(0.86 0.025 75);
-  --input: oklch(0.86 0.025 75);
-  --ring: oklch(0.7 0.13 60);
-  --chart-1: oklch(0.7 0.15 60);
+  --border: #b6cbd1;
+  --input: #a1b9c2;
+  --ring: #007b91;
+  --chart-1: #007b91;
   --chart-2: oklch(0.62 0.08 150);
   --chart-3: oklch(0.5 0.06 50);
   --chart-4: oklch(0.8 0.12 80);
   --chart-5: oklch(0.6 0.1 30);
-  --sidebar: oklch(0.95 0.02 80);
-  --sidebar-foreground: oklch(0.26 0.03 50);
-  --sidebar-primary: oklch(0.62 0.15 55);
-  --sidebar-primary-foreground: oklch(0.985 0.01 85);
-  --sidebar-accent: oklch(0.9 0.05 75);
-  --sidebar-accent-foreground: oklch(0.3 0.04 50);
-  --sidebar-border: oklch(0.86 0.025 75);
-  --sidebar-ring: oklch(0.7 0.13 60);
-  --glow: oklch(0.78 0.16 65);
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+  --glow: #8a520c;
+  --coral: #b84135;
+  --grid: #527e8d;
 }
 
 .dark {
-  /* The same porch at night: deep umber, cream text, the lantern glows. */
-  --background: oklch(0.17 0.018 45);
-  --foreground: oklch(0.94 0.02 80);
-  --card: oklch(0.215 0.022 48);
-  --card-foreground: oklch(0.94 0.02 80);
-  --popover: oklch(0.215 0.022 48);
-  --popover-foreground: oklch(0.94 0.02 80);
-  --primary: oklch(0.78 0.15 65);
-  --primary-foreground: oklch(0.2 0.03 50);
-  --secondary: oklch(0.27 0.025 48);
-  --secondary-foreground: oklch(0.94 0.02 80);
-  --muted: oklch(0.26 0.02 48);
-  --muted-foreground: oklch(0.7 0.03 70);
-  --accent: oklch(0.32 0.04 55);
-  --accent-foreground: oklch(0.95 0.03 80);
+  /* Midnight district: cyan neon, warm sanctuary amber, quiet ink surfaces. */
+  --background: #060d15;
+  --foreground: #eff1e9;
+  --card: #0b1722;
+  --card-foreground: #eff1e9;
+  --popover: #0e1e2b;
+  --popover-foreground: #eff1e9;
+  --primary: #30d8ec;
+  --primary-foreground: #05131c;
+  --secondary: #152837;
+  --secondary-foreground: #eff1e9;
+  --muted: #142635;
+  --muted-foreground: #9caeba;
+  --accent: #15313d;
+  --accent-foreground: #eff1e9;
   --destructive: oklch(0.7 0.19 22);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.7 0.13 60);
-  --chart-1: oklch(0.78 0.15 65);
+  --border: #29404e;
+  --input: #385060;
+  --ring: #30d8ec;
+  --chart-1: #30d8ec;
   --chart-2: oklch(0.7 0.09 150);
   --chart-3: oklch(0.6 0.05 50);
   --chart-4: oklch(0.85 0.12 80);
   --chart-5: oklch(0.65 0.1 30);
-  --sidebar: oklch(0.2 0.02 48);
-  --sidebar-foreground: oklch(0.94 0.02 80);
-  --sidebar-primary: oklch(0.78 0.15 65);
-  --sidebar-primary-foreground: oklch(0.2 0.03 50);
-  --sidebar-accent: oklch(0.32 0.04 55);
-  --sidebar-accent-foreground: oklch(0.95 0.03 80);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.7 0.13 60);
-  --glow: oklch(0.8 0.17 65);
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+  --glow: #ffc367;
+  --coral: #fa856b;
+  --grid: #1c536a;
 }
 
 @layer base {
@@ -127,20 +131,67 @@
 
 @layer components {
   .display {
-    font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, "Times New Roman", serif;
-    letter-spacing: -0.01em;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    letter-spacing: -0.04em;
   }
   .eyebrow {
-    @apply text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground;
+    @apply text-xs font-medium uppercase tracking-[0.14em] text-primary;
+    font-family: "SFMono-Regular", Consolas, monospace;
   }
   .lantern-glow {
-    background: radial-gradient(60% 55% at 85% 0%, color-mix(in oklch, var(--glow) 38%, transparent), transparent 70%);
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--primary) 5%, transparent));
+    border-bottom: 1px solid var(--border);
   }
   .paper {
-    @apply rounded-xl border bg-card text-card-foreground shadow-[0_1px_0_0_color-mix(in_oklch,var(--foreground)_6%,transparent)];
+    @apply rounded-sm border bg-card text-card-foreground;
+    box-shadow: 3px 3px 0 color-mix(in srgb, var(--border) 38%, transparent);
   }
   .pin::before {
     content: "";
-    @apply absolute -top-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rounded-full bg-primary shadow;
+    @apply absolute left-0 top-0 h-1 w-10 bg-primary;
   }
+}
+
+.shelter-shell { background-image: linear-gradient(color-mix(in srgb, var(--grid) 9%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--grid) 9%, transparent) 1px, transparent 1px); background-size: 40px 40px; }
+.shelter-header { box-shadow: 0 2px 0 color-mix(in srgb, var(--primary) 12%, transparent); }
+.shelter-nav a, .shelter-nav button { border-radius: 0; min-height: 44px; display: inline-flex; align-items: center; font-family: Consolas, monospace; font-size: 12px; text-transform: uppercase; letter-spacing: .035em; }
+.shelter-nav [aria-current="page"] { color: var(--primary); box-shadow: inset 0 -2px var(--primary); }
+.shelter-shell :is(a, button, input, textarea, select):focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; }
+.shelter-shell [data-slot="button"] { border-radius: 0; font-family: Consolas, monospace; letter-spacing: .02em; }
+.shelter-shell [data-slot="input"], .shelter-shell [data-slot="textarea"] { font-size: 16px; border-radius: 0; }
+.shelter-shell pre { border-radius: 0; border-left: 2px solid var(--primary); }
+.shelter-shell :is(.rounded-xl, .rounded-lg) { border-radius: 2px; }
+.neo-hero { display: grid; grid-template-columns: 1.05fr 1fr; gap: 16px; align-items: center; padding: 30px 0 24px; }
+.neo-heading { max-width: 570px; margin-top: 24px; display: flex; flex-direction: column; gap: 12px; }
+.pixel-type { display: block; width: 100%; height: auto; max-height: 95px; }
+.neo-heading > :last-child { width: 86%; }
+.hero-rule { margin-top: 24px; height: 3px; width: 72%; background: var(--primary); box-shadow: 6px 3px 0 color-mix(in srgb, var(--primary) 25%, transparent); }
+.pixel-city { display: block; width: 100%; height: auto; image-rendering: pixelated; border: 1px solid var(--border); box-shadow: 5px 5px 0 color-mix(in srgb, var(--primary) 12%, transparent); }
+.city-caption { font: 10px Consolas, monospace; color: var(--muted-foreground); display: flex; justify-content: space-between; gap: 8px; margin-top: 12px; text-transform: uppercase; letter-spacing: .08em; }
+.city-caption span:last-child { color: var(--glow); }
+.pixel-rain { animation: shelter-rain 2s steps(4, end) infinite; }
+@keyframes shelter-rain { from { transform: translateY(-4px); } to { transform: translateY(6px); } }
+.district-panel { position: relative; border: 1px solid var(--border); padding: 24px; background: color-mix(in srgb, var(--card) 94%, transparent); }
+.district-panel::before, .district-panel::after { content: ""; position: absolute; width: 12px; height: 12px; pointer-events: none; }
+.district-panel::before { left: -1px; top: -1px; border-left: 3px solid var(--primary); border-top: 3px solid var(--primary); }
+.district-panel::after { right: -1px; bottom: -1px; border-right: 3px solid var(--primary); border-bottom: 3px solid var(--primary); }
+.resident-avatar { display: grid; place-items: center; width: 60px; height: 60px; color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--card)); border: 1px solid color-mix(in srgb, var(--primary) 40%, var(--border)); flex-shrink: 0; }
+.resident-card:hover { border-color: var(--primary); box-shadow: 4px 4px 0 color-mix(in srgb, var(--primary) 18%, transparent); }
+.resident-card { min-width: 0; }
+.district-filter { font-family: Consolas, monospace; text-transform: uppercase; letter-spacing: .03em; min-height: 44px; border: 1px solid var(--border); padding: 8px 12px; font-size: 12px; }
+.stat-value { font-variant-numeric: tabular-nums; }
+.shelter-protocol { counter-reset: shelter-step; }
+.protocol-step { border-bottom: 1px solid var(--border); padding: 18px 0; }
+.protocol-step:last-child { border-bottom: 0; padding-bottom: 0; }
+.protocol-num { color: var(--primary); font-family: Consolas, monospace; font-size: 22px; }
+@media (max-width: 767px) {
+  .neo-hero { grid-template-columns: 1fr; padding-top: 12px; gap: 28px; }
+  .neo-heading { max-width: 460px; gap: 8px; margin-top: 20px; }
+  .neo-hero .hero-description { max-width: 460px; }
+  .city-caption { font-size: 9px; }
+  .district-panel { padding: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pixel-rain { animation: none; }
+  .shelter-shell *, .shelter-shell *::before, .shelter-shell *::after { scroll-behavior: auto !important; transition: none !important; }
 }

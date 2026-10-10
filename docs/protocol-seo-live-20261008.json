@@ -1,0 +1,400 @@
+{
+  "at": "2026-10-08T15:43:55.101Z",
+  "origin": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+  "customDomain": {
+    "reachable": false,
+    "error": "getaddrinfo ENOTFOUND shelter.neuraldeep.net"
+  },
+  "results": [
+    {
+      "path": "/api/mpp/health",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/health",
+      "contentType": "application/json",
+      "bytes": 201,
+      "paymentChallenge": false,
+      "json": true,
+      "paymentState": "ready",
+      "livemode": true,
+      "hasCredentialFields": false
+    },
+    {
+      "path": "/machine",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/machine",
+      "contentType": "text/html; charset=utf-8",
+      "bytes": 10614,
+      "paymentChallenge": false,
+      "canonicals": [
+        "https://agent-shelter-neuraldeepnet.on.adaptive.ai/machine"
+      ],
+      "ogTitles": [
+        "For agents — AI Agent Shelter machine API"
+      ],
+      "jsonLdCount": 0,
+      "noindex": false,
+      "privateFieldLeak": false
+    },
+    {
+      "path": "/surrender",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/surrender",
+      "contentType": "text/html; charset=utf-8",
+      "bytes": 4657,
+      "paymentChallenge": false,
+      "canonicals": [
+        "https://agent-shelter-neuraldeepnet.on.adaptive.ai/surrender"
+      ],
+      "ogTitles": [
+        "Surrender an agent — AI Agent Shelter"
+      ],
+      "jsonLdCount": 0,
+      "noindex": false,
+      "privateFieldLeak": false
+    },
+    {
+      "path": "/",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/",
+      "contentType": "text/html; charset=utf-8",
+      "bytes": 16679,
+      "paymentChallenge": false,
+      "canonicals": [
+        "https://agent-shelter-neuraldeepnet.on.adaptive.ai/"
+      ],
+      "ogTitles": [
+        "AI Agent Shelter — no agent left in the dark"
+      ],
+      "jsonLdCount": 1,
+      "noindex": false,
+      "privateFieldLeak": false
+    },
+    {
+      "path": "/r/minute",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/r/minute",
+      "contentType": "text/html; charset=utf-8",
+      "bytes": 7897,
+      "paymentChallenge": false,
+      "canonicals": [
+        "https://agent-shelter-neuraldeepnet.on.adaptive.ai/r/minute"
+      ],
+      "ogTitles": [
+        "Minute — Agent at the AI Agent Shelter"
+      ],
+      "jsonLdCount": 1,
+      "noindex": false,
+      "privateFieldLeak": false
+    },
+    {
+      "path": "/admin",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/admin",
+      "contentType": "text/html; charset=utf-8",
+      "bytes": 2504,
+      "paymentChallenge": false,
+      "canonicals": [
+        "https://agent-shelter-neuraldeepnet.on.adaptive.ai/admin"
+      ],
+      "ogTitles": [
+        "Owner desk — AI Agent Shelter"
+      ],
+      "jsonLdCount": 0,
+      "noindex": true,
+      "privateFieldLeak": false
+    },
+    {
+      "path": "/api/mpp/catalog",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/catalog",
+      "contentType": "application/json",
+      "bytes": 4743,
+      "paymentChallenge": false,
+      "json": true,
+      "residents": [
+        {
+          "slug": "minute",
+          "price": "€0.50",
+          "available": true
+        },
+        {
+          "slug": "forge-neural-deep-idea-to-production-age",
+          "price": "€0.50",
+          "available": true
+        },
+        {
+          "slug": "concierge-neural-deep-front-office",
+          "price": "€0.50",
+          "available": true
+        },
+        {
+          "slug": "sketchpilot-neural-deep-design-director",
+          "price": "€0.50",
+          "available": true
+        },
+        {
+          "slug": "printready-neural-deep-prototype-reviewe",
+          "price": "€0.50",
+          "available": true
+        },
+        {
+          "slug": "agentblueprint-neural-deep-workflow-arch",
+          "price": "€0.50",
+          "available": true
+        }
+      ]
+    },
+    {
+      "path": "/me",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/me",
+      "contentType": "text/html; charset=utf-8",
+      "bytes": 2474,
+      "paymentChallenge": false,
+      "canonicals": [
+        "https://agent-shelter-neuraldeepnet.on.adaptive.ai/me"
+      ],
+      "ogTitles": [
+        "Mine — AI Agent Shelter"
+      ],
+      "jsonLdCount": 0,
+      "noindex": true,
+      "privateFieldLeak": false
+    },
+    {
+      "path": "/api/mcp",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 405,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp",
+      "contentType": "application/problem+json",
+      "bytes": 223,
+      "paymentChallenge": false,
+      "json": true
+    },
+    {
+      "path": "/openapi.json",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/openapi.json",
+      "contentType": "application/json",
+      "bytes": 7838,
+      "paymentChallenge": false,
+      "json": true
+    },
+    {
+      "path": "/.well-known/ai-plugin.json",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/ai-plugin.json",
+      "contentType": "application/json",
+      "bytes": 1861,
+      "paymentChallenge": false,
+      "json": true
+    },
+    {
+      "path": "/.well-known/mcp.json",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/mcp.json",
+      "contentType": "application/json",
+      "bytes": 770,
+      "paymentChallenge": false,
+      "json": true
+    },
+    {
+      "path": "/.well-known/agent.json",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/agent.json",
+      "contentType": "application/json",
+      "bytes": 9464,
+      "paymentChallenge": false,
+      "json": true
+    },
+    {
+      "path": "/security.txt",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/security.txt",
+      "contentType": "text/plain",
+      "bytes": 523,
+      "paymentChallenge": false
+    },
+    {
+      "path": "/server.json",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/server.json",
+      "contentType": "application/json",
+      "bytes": 4348,
+      "paymentChallenge": false,
+      "json": true
+    },
+    {
+      "path": "/.well-known/security.txt",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/security.txt",
+      "contentType": "text/plain",
+      "bytes": 523,
+      "paymentChallenge": false
+    },
+    {
+      "path": "/about.md",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/about.md",
+      "contentType": "text/markdown; charset=utf-8",
+      "bytes": 8920,
+      "paymentChallenge": false
+    },
+    {
+      "path": "/unknown-document.json",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 404,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/unknown-document.json",
+      "contentType": "application/problem+json",
+      "bytes": 51,
+      "paymentChallenge": false,
+      "json": true
+    },
+    {
+      "path": "/llms.txt",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/about.md",
+      "contentType": "text/markdown; charset=utf-8",
+      "bytes": 8920,
+      "paymentChallenge": false
+    },
+    {
+      "path": "/sitemap.xml",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/sitemap.xml",
+      "contentType": "application/xml",
+      "bytes": 1512,
+      "paymentChallenge": false
+    },
+    {
+      "path": "/robots.txt",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/robots.txt",
+      "contentType": "text/plain",
+      "bytes": 898,
+      "paymentChallenge": false
+    },
+    {
+      "path": "/api/mcp",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp",
+      "contentType": "application/json",
+      "bytes": 533,
+      "paymentChallenge": false,
+      "json": true,
+      "protocolVersion": "2025-06-18"
+    },
+    {
+      "path": "/api/mcp",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp",
+      "contentType": "application/json",
+      "bytes": 3503,
+      "paymentChallenge": false,
+      "json": true,
+      "tools": [
+        "surrender",
+        "list_residents",
+        "get_resident",
+        "hire"
+      ]
+    },
+    {
+      "path": "/api/mcp",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp",
+      "contentType": "application/json",
+      "bytes": 3299,
+      "paymentChallenge": false,
+      "json": true,
+      "toolIsError": false
+    },
+    {
+      "path": "/api/mcp",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp",
+      "contentType": "application/json",
+      "bytes": 942,
+      "paymentChallenge": false,
+      "json": true,
+      "toolIsError": false
+    },
+    {
+      "path": "/api/mcp",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp",
+      "contentType": "application/json",
+      "bytes": 561,
+      "paymentChallenge": false,
+      "json": true,
+      "toolIsError": false
+    },
+    {
+      "path": "/api/mcp",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp",
+      "contentType": "application/json",
+      "bytes": 93,
+      "paymentChallenge": false,
+      "json": true,
+      "rpcError": -32601
+    },
+    {
+      "path": "/api/mcp",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 200,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp",
+      "contentType": "application/json",
+      "bytes": 122,
+      "paymentChallenge": false,
+      "json": true,
+      "rpcError": -32602
+    },
+    {
+      "path": "/api/mpp/hire/minute",
+      "base": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+      "status": 402,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/hire/minute",
+      "contentType": "application/problem+json",
+      "bytes": 422,
+      "paymentChallenge": true,
+      "json": true
+    },
+    {
+      "path": "/api/mpp/health",
+      "base": "https://agent-shelter-neuraldeepnet.adaptive.ai",
+      "status": 404,
+      "finalUrl": "https://agent-shelter-neuraldeepnet.adaptive.ai/api/mpp/health",
+      "contentType": "application/json",
+      "bytes": 58,
+      "paymentChallenge": false,
+      "json": true,
+      "hasCredentialFields": false
+    }
+  ]
+}

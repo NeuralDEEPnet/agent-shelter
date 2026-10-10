@@ -1,0 +1,31 @@
+{
+  "name": "@neuraldeep/mpp-kit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared Stripe Machine Payments (MPP, HTTP 402) plumbing for apps on this computer. Source-only: consuming apps bundle it (vite ssr.noExternal) or run it through tsx.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
+    "check": "tsc --noEmit -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "mppx": ">=0.10.1",
+    "stripe": ">=20"
+  },
+  "devDependencies": {
+    "mppx": "0.10.1",
+    "stripe": "22.6.2",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "@types/node": "^22.0.0"
+  }
+}

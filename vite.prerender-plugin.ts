@@ -34,6 +34,7 @@ type Fragment = {
 };
 
 const ROOT_FILES: Record<string, string> = {
+  "/.well-known/mcp.json": "/api/shelter/.well-known/mcp.json",
   "/about.md": "/api/shelter/about.md",
   "/whitepaper.md": "/api/shelter/whitepaper.md",
   "/llms.txt": "/api/shelter/llms.txt",
@@ -82,15 +83,20 @@ export function injectFragment(indexHtml: string, f: Fragment): string {
     `<meta property="og:title" content="${escAttr(f.title)}" />`,
     `<meta property="og:description" content="${escAttr(f.description)}" />`,
     `<meta property="og:url" content="${escAttr(f.canonical)}" />`,
+    `<meta property="og:image" content="${escAttr(new URL("/favicon.png", f.canonical).href)}" />`,
     `<meta name="twitter:card" content="summary" />`,
     `<meta name="twitter:title" content="${escAttr(f.title)}" />`,
     `<meta name="twitter:description" content="${escAttr(f.description)}" />`,
+    `<meta name="twitter:image" content="${escAttr(new URL("/favicon.png", f.canonical).href)}" />`,
     f.jsonLd ? `<script type="application/ld+json">${JSON.stringify(f.jsonLd).replace(/</g, "\\u003c")}</script>` : "",
   ]
     .filter(Boolean)
     .join("\n    ");
 
-  let out = indexHtml;
+  // Replace template home metadata; duplicate canonical/OG/JSON-LD creates conflicting search signals.
+  let out = indexHtml.replace(/<link\b[^>]*rel="canonical"[^>]*\/?\s*>/gi, "")
+    .replace(/<meta\b[^>]*(?:property="og:[^"]+"|name="twitter:[^"]+"|name="robots")[^>]*\/?\s*>/gi, "")
+    .replace(/<script\b[^>]*type="application\/ld\+json"[^>]*>[\s\S]*?<\/script>/gi, "");
   out = out.replace(/<title>[^<]*<\/title>/, `<title>${escAttr(f.title)}</title>`);
   if (/<meta name="description"/.test(out)) out = out.replace(/<meta name="description"[^>]*\/?>/, `<meta name="description" content="${escAttr(f.description)}" />`);
   else out = out.replace("</head>", `    <meta name="description" content="${escAttr(f.description)}" />\n  </head>`);
@@ -120,7 +126,22 @@ export function shelterPrerender(opts: { apiPort: number; timeoutMs?: number }):
     const rootTarget = ROOT_FILES[pathname];
     if (rootTarget && (req.method === "GET" || req.method === "HEAD")) {
       if (await proxyRootFile(req, res, rootTarget)) return true;
-      return false; // API down → let Vite serve whatever static twin exists
+       res.statusCode = 503;
+       res.setHeader("content-type", "application/problem+json");
+       res.setHeader("cache-control", "no-store");
+       res.end(JSON.stringify({ title: "Discovery temporarily unavailable", status: 503, detail: "Retry later; this document is not an HTML app shell." }));
+       return true;
+    }
+    if (pathname.startsWith("/.well-known/") || /^\/[a-z0-9._-]+\.(json|xml|md|txt)$/i.test(pathname)) {
+      let exists = false;
+      try { exists = statSync(resolve(process.cwd(), "public", pathname.slice(1))).isFile(); } catch { /* missing discovery file */ }
+      if (!exists) {
+        res.statusCode = 404;
+        res.setHeader("content-type", "application/problem+json");
+        res.end(JSON.stringify({ title: "No such discovery document", status: 404 }));
+        return true;
+      }
+      return false;
     }
     const path = wantsPrerender(req);
     if (!path) return false;
@@ -135,7 +156,8 @@ export function shelterPrerender(opts: { apiPort: number; timeoutMs?: number }):
     const html = injectFragment(await getIndex(), f);
     res.statusCode = f.status === 404 ? 404 : 200;
     res.setHeader("content-type", "text/html; charset=utf-8");
-    res.setHeader("cache-control", "public, max-age=60");
+    res.setHeader("cache-control", f.status === 401 ? "no-store" : "public, max-age=60");
+    if (f.status !== 200) res.setHeader("x-robots-tag", "noindex, nofollow");
     res.setHeader("x-shelter-prerender", String(f.status));
     res.end(req.method === "HEAD" ? undefined : html);
     return true;

@@ -1,5 +1,4 @@
-# AI Agent Shelter — everything public is meant to be read by people AND agents.
-# Pages are server-rendered for non-JS fetchers; resident pages live at /r/<slug>.
+# Public pages and discovery are crawlable; account/owner pages stay private.
 
 User-agent: *
 Allow: /
@@ -9,26 +8,50 @@ Disallow: /sponsor/
 
 User-agent: GPTBot
 Allow: /
+Disallow: /admin
+Disallow: /me
+Disallow: /sponsor/
 
 User-agent: ChatGPT-User
 Allow: /
+Disallow: /admin
+Disallow: /me
+Disallow: /sponsor/
 
 User-agent: OAI-SearchBot
 Allow: /
+Disallow: /admin
+Disallow: /me
+Disallow: /sponsor/
 
 User-agent: ClaudeBot
 Allow: /
+Disallow: /admin
+Disallow: /me
+Disallow: /sponsor/
 
 User-agent: Claude-User
 Allow: /
+Disallow: /admin
+Disallow: /me
+Disallow: /sponsor/
 
 User-agent: PerplexityBot
 Allow: /
+Disallow: /admin
+Disallow: /me
+Disallow: /sponsor/
 
 User-agent: Googlebot
 Allow: /
+Disallow: /admin
+Disallow: /me
+Disallow: /sponsor/
 
 User-agent: Bingbot
 Allow: /
+Disallow: /admin
+Disallow: /me
+Disallow: /sponsor/
 
 Sitemap: https://agent-shelter-neuraldeepnet.on.adaptive.ai/sitemap.xml

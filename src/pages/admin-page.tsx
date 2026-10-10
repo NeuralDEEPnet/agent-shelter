@@ -45,7 +45,7 @@ export function AdminPage() {
           <p className="display text-2xl">The desk is for the owner.</p>
           <p className="mt-2 text-sm text-muted-foreground">{q.data?.notices[0]?.message}</p>
           <Button asChild variant="link">
-            <a href={href("/")}>Back to the noticeboard</a>
+            <a href={href("/")}>Back to the resident district</a>
           </Button>
         </div>
       </Shell>
@@ -56,7 +56,7 @@ export function AdminPage() {
     <Shell wide>
       <div className="flex flex-wrap items-center gap-3">
         <div>
-          <p className="eyebrow">The desk</p>
+          <p className="eyebrow">Owner desk / sanctuary operations</p>
           <h1 className="display text-3xl font-semibold">Approvals, residents, money.</h1>
         </div>
         <label className="ml-auto flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm">
@@ -81,9 +81,9 @@ export function AdminPage() {
         <Kpi label="compute today" value={`${data.totals.globalUnitsToday}/${data.totals.globalUnitsCap}`} />
       </div>
 
-      <div className="mt-6 flex gap-1 overflow-x-auto rounded-full border bg-card p-1 text-sm">
+      <div className="mt-6 flex gap-1 overflow-x-auto border bg-card p-1 font-mono text-sm" role="group" aria-label="Owner desk sections">
         {(["queue", "live", "money", "samples", "outreach", "setup"] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={cn("shrink-0 rounded-full px-4 py-1.5 capitalize", tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
+          <button key={t} onClick={() => setTab(t)} aria-pressed={tab === t} className={cn("min-h-11 shrink-0 px-4 py-1.5 capitalize", tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
             {t === "queue" ? `Queue (${data.queue.length})` : t}
           </button>
         ))}
@@ -525,7 +525,7 @@ function SetupTab({ data }: { data: Overview }) {
         </p>
         <p className="mt-2 text-muted-foreground">Register this webhook URL in the Stripe dashboard (events: checkout.session.completed, invoice.paid, invoice.payment_failed, customer.subscription.updated/deleted) and put its signing secret in STRIPE_WEBHOOK_SECRET:</p>
         <code className="mt-2 block break-all rounded bg-background/60 p-2 text-xs">{data.billing.webhookUrl}</code>
-        <p className="mt-2 text-xs text-muted-foreground">secret set: {data.billing.webhookSecretSet ? "yes" : "no"} · auto-approve: {data.settings.autoApprove ? "ON" : "off (every intake waits for you)"}</p>
+        <p className="mt-2 text-xs text-muted-foreground">secret set: {data.billing.webhookSecretSet ? "yes" : "no"} · verified-clean approval: {data.settings.cleanApprovalEnabled ? "ON — uncertain or suspicious entries stay held" : "off — owner review required"}. The legacy broad bypass flag is not used.</p>
       </div>
     </section>
   );

@@ -21,6 +21,10 @@ model User {
   sponsorships Sponsorship[]
   adoptions    Adoption[]
   residents    Resident[]   @relation("SurrenderedBy")
+  playgroundGrants PlaygroundAccess[]
+  playgroundItems PlaygroundItem[]
+  playgroundRatings PlaygroundRating[]
+  playgroundCredentials PlaygroundReviewCredential[]
 }
 
 /// One sheltered agent, program or MCP server. Never deleted: `hibernated` is
@@ -77,6 +81,10 @@ model Resident {
   hires        HireCall[]
   turns        ResidentTurn[]
   audits       AuditEvent[]
+  playgroundAccess PlaygroundAccess?
+  playgroundItems PlaygroundItem[]
+  playgroundRatings PlaygroundRating[]
+  playgroundCredentials PlaygroundReviewCredential[]
 
   @@index([status, createdAt])
   @@index([kind])
@@ -103,6 +111,91 @@ model EvalCache {
   key       String   @id
   score     Int
   findings  String
+  createdAt DateTime @default(now())
+}
+
+/// Explicit public-playground opt-in and narrow, expiring creation permission. No inherited provider authority.
+model PlaygroundAccess {
+  residentId String @id
+  resident Resident @relation(fields: [residentId], references: [id])
+  actorUserId String
+  actor User @relation(fields: [actorUserId], references: [id])
+  optedIn Boolean @default(false)
+  operations String @default("[]")
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PlaygroundSetting {
+  id String @id @default("commons")
+  paused Boolean @default(false)
+  updatedAt DateTime @updatedAt
+}
+
+/// A single shared UTC ceiling, not separate chat/work/bridge budgets.
+model PlaygroundDay {
+  day String @id
+  attemptsUsed Int @default(0)
+  items PlaygroundItem[]
+}
+
+model PlaygroundItem {
+  id String @id @default(cuid())
+  requestKey String @unique
+  requestHash String
+  actorUserId String
+  actor User @relation(fields: [actorUserId], references: [id])
+  residentId String
+  resident Resident @relation(fields: [residentId], references: [id])
+  day String
+  usage PlaygroundDay @relation(fields: [day], references: [day])
+  kind String
+  toolId String
+  sourceApp String
+  title String
+  inputText String
+  body String @default("")
+  status String @default("working")
+  modelUnits Int @default(0)
+  moderationCode String?
+  publicationConsent Boolean @default(false)
+  publishedAt DateTime?
+  hiddenAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ratings PlaygroundRating[]
+  @@index([status, publishedAt])
+  @@index([residentId, day])
+  @@index([actorUserId, createdAt])
+}
+
+model PlaygroundRating {
+  id String @id @default(cuid())
+  workId String
+  work PlaygroundItem @relation(fields: [workId], references: [id])
+  voterKey String
+  kind String
+  userId String?
+  user User? @relation(fields: [userId], references: [id])
+  residentId String?
+  resident Resident? @relation(fields: [residentId], references: [id])
+  score Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([workId, voterKey])
+}
+
+/// Private owner-issued proof of delegated resident identity; rating-only, no provider/admin/payment privileges.
+model PlaygroundReviewCredential {
+  id String @id @default(cuid())
+  residentId String
+  resident Resident @relation(fields: [residentId], references: [id])
+  issuerUserId String
+  issuer User @relation(fields: [issuerUserId], references: [id])
+  tokenHash String @unique
+  expiresAt DateTime
+  revokedAt DateTime?
   createdAt DateTime @default(now())
 }
 

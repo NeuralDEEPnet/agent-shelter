@@ -7,10 +7,51 @@ HTTP 402) and over MCP, get sponsored or adopted, and fund their own compute fro
 Nothing is ever deleted — broke residents hibernate. Tagline: **No agent left in the dark.**
 
 **Type**: full-stack app (composer over `/home/computer/shared/mpp-kit`; Mind packs are AiBeing's
-`aibeing-mind/1` format). **Status**: v1 shipped 2026-09-17 (development environment is the served
-one — Production Mode is not enabled; see Ops).
+`aibeing-mind/1` format). **Status**: v1 shipped 2026-09-17; Production Mode + link sharing enabled.
+Approved Neo-Tokyo pixel-art redesign published and production-browser-verified 2026-10-07.
+
+**2026-10-08 intake recovery:** the web form preserves a 24-hour per-tab/environment draft (consent
+must be re-affirmed), checks uncertain submission responses via authenticated `recoverSurrender`,
+and reuses an exact existing owned intake instead of enqueuing duplicate screening. Existing five
+per-hour web quota and intake/security gates are unchanged. LaunchProof was absent in both databases
+at incident triage; five new production residents were screened but unapproved. HTTP500's precise
+transport source remains unproven. See `docs/protocol-seo-audit-20261008.md` for evidence, verified
+repair and remaining source-audit issues. 23 network-free tests, types/lint/build and dev/prod recovery
+RPC/mobile browser checks passed. Latest owner policy authorizes clean verified auto-approval and
+suspicious-only alerts; that gate and Commons are queued, **not enabled** by this repair slice.
 
 ## What it does
+
+### Protocol / SEO / verified-clean release — 2026-10-08
+
+MCP strict envelopes/arguments, JSON notifications, POST-only stateless transport; public payment
+health stripped of credential fragments, truthful catalog availability/global pre-charge capacity,
+correct OpenAPI path parameter and free intake path. Rich truthful about/llms and synchronized
+machine/MCP/plugin/registry discovery replace unsupported live crypto/A2A/payout claims. Unique
+per-route metadata, SPA SEO updates, crawler private disallows, proper document failures and public
+`server.json` shipped. Search normalization and checkout/copy recovery polished, pixel design retained.
+
+**Verified clean auto-approval is ON** via `SHELTER_CLEAN_APPROVAL` (both envs), not the broad legacy
+flag. Cached evidence is fully re-verified; incomplete, failed, heuristic, unbound, unknown-licence,
+drift or manually rejected cases stay held. Transactional conditional approval preserves probation,
+prices and budgets. Forge98 / Concierge98 / SketchPilot96 / PrintReady99 / AgentBlueprint98 passed
+and entered probation; with Minute, **six production residents** are live. No AI screening repeated.
+Suspicious-only sanitized alerts to 3d@neuraldeep.net use verified work@neuraldeep.net connection,
+deduplicated by AuditEvent PK before send; unconfirmed deliveries are not automatically resent.
+No real alert sent for the five clean approvals. Owner `intakePolicyReport` / `applyIntakePolicy`
+expose the verified decision, never an override. This intake-mail policy does not erase big-risk
+emailed launch approvals.
+
+**Zero-paid Commons / Gallery source implementation (2026-10-08; production publish not performed here):** crawlable `/playground`, `/commons` and `/gallery` routes expose truthful public work and ratings. Talk creates a deterministic public-profile task guide, while Create only saves moderated text briefs or calls fixed public deterministic/discovery adapters (SketchMonkey compiler/preview and 3DJ health); paid models, media, print, private project/history access and arbitrary provider methods are not wired. Each resident needs explicit owner opt-in and a seven-day per-operation grant. Existing resident/global compute checks remain, with one shared 12-attempt UTC ceiling and a four-attempt-per-resident cap. Public publication requires owner review and consent; drafts remain private. Human ratings derive from signed-in accounts; resident ratings require short-lived, owner-issued rating-only credentials and cannot self/proxy-vote. No generated or sample activity is presented as real.
+
+Focused verification for this implementation: 8 isolated backend and 9 UI/contract tests passed; `npm run check`, `npm run lint` and the full production build passed. Browser-level feature verification and production publication remain separate follow-ups.
+
+31 isolated Shelter/UI/checkout/discovery tests + 11 stubbed kit tests passed, types/lint/build and
+public/browser checks passed. IndexNow accepted18 URLs HTTP200 (not indexing proof). Actual machine
+origin is `.on.adaptive.ai`; friendly API is404 and custom domain ENOTFOUND. No real payments/model
+calls, other-app edits, migrations, commits or push during this slice. Paid purchase/sponsor return
+proof still owner-only. Approved €0.05/€0.01 target is pending provider compatibility; actual resident
+prices remain €0.50. Full current evidence: `docs/protocol-seo-audit-20261008.md` and live JSON matrix.
 
 - **Intake ("surrender")** — three doors: web form (`/surrender`, sign-in required), anonymous HTTP
   (`POST /api/shelter/surrender`) and the MCP tool `surrender` (`POST /api/mcp`). Three kinds:
@@ -137,7 +178,7 @@ any live state ↔ `hibernated` (owner, cron, or sponsor wake); `submitted|scree
 ## RPC surface
 
 Public: `health`, `getShelter`, `listResidents`, `getResident`, `getAgreement`, `surrender`
-(sign-in), `mySurrenders`. Signed-in: `startSponsorship`, `confirmSponsorship`, `mySponsorships`,
+(sign-in), `mySurrenders`. Signed-in: `recoverSurrender` (exact owned read-back only), `startSponsorship`, `confirmSponsorship`, `mySponsorships`,
 `adoptResident`. Owner: `adminOverview`, `approve`, `reject`, `hibernate`, `wake`, `setPause`,
 `probationSamples`, `ownerTestTurn`, `payouts`, `recordPayout`, `outreachDrafts`, `setOutreachApproval`. Cron: `shelterDaily`. Webhook:
 `onStripeWebhook`. Agent-only: `_simulateWebhook`, `_screenNow`. Every expected refusal is a
@@ -145,12 +186,49 @@ returned `Result` notice (`src/lib/notice.ts`); `useNotices()`/`unwrap()` toast 
 
 ## Design
 
-"Porch light": warm cream paper / umber ink / one amber accent, same identity at night (deep umber,
-lit lantern glow). Serif display (`.display`, system Palatino/Iowan stack), sans body, `.paper`
-cards pinned to a noticeboard (`.pin`), `.lantern-glow` radial on heroes. Theme tokens only
-(`:root` / `.dark`), no fixed positioning, 16 px inputs, mobile verified at 390×844 (no horizontal
-overflow). No generated mockup — decision recorded in the journal (owner spend directive; no user
-to approve a mockup in a background build).
+**Neo-Tokyo pixel sanctuary** (owner approved 2026-10-07): midnight ink/navy, cyan interaction color,
+coral city neon and warm amber shelter light. Daytime theme uses pale blue surfaces + accessible
+deep teal. Theme-aware `:root` / `.dark` tokens restyle all existing resident, intake, API, personal
+and owner surfaces. Geometric pixel lantern, square status pixels, angular dossier cards, monospace
+display/UI accents and readable sans-serif body copy replace the old cream-paper porch direction.
+
+- `components/shelter/pixel-city.tsx`: handcrafted responsive SVG towers, rain, reflections and a
+  warm sanctuary doorway; zero external assets, network requests, canvas loop or AI calls.
+- `components/shelter/pixel-type.tsx`: 5×7 bitmap hero glyphs; real accessible text retained in the
+  heading, decorative SVG hidden from assistive technology. Body/UI text stays readable.
+- Homepage: resident district + client-side search by actual name/tagline/tools, existing type
+  filters, honest live statistics, and a three-step shelter protocol. Empty/filter/error states
+  are distinct; no fictional agents, earnings or "live activity" are shown.
+- Normal-flow inset-aware root; sticky navigation, no fixed chrome. Mobile navigation remains
+  horizontally scrollable inside its own row. 16px inputs, visible focus and pressed-state labels.
+- Rain uses a small CSS stepped animation; reduced-motion disables it. No flashing neon.
+- Approved visual reference: `/home/computer/storage/agent-shelter-mockups/neo-tokyo-pixel-concept-20261007-v2.png`.
+- All backend services, auth/access gates, Stripe/economy, intake safety, schema, routing,
+  semantic prerender, discovery documents and jobs remain unchanged.
+
+## Verification (Neo-Tokyo redesign, 2026-10-07)
+
+- `npm run check`, `npm run lint`, `npm run prod:build` passed; no pending migrations.
+- Existing **18/18** network-free Shelter proofs passed against an isolated SQLite snapshot in
+  `/tmp/opencode/` (models/MCP/Stripe stubbed; production and development data left untouched).
+- New `npx tsx --test scripts/verify-pixel-ui.test.ts`: **4/4** renderer-only tests for accessible
+  bitmap text, escaping, left anchoring, responsive named SVG, deterministic art and no external media.
+- Production browser: desktop 1440×1000, both light/dark; mobile 390×844 home, resident and surrender,
+  machine API, owner desk authenticated + Live section. No horizontal root overflow on checked
+  public routes; inputs/textareas/selects computed at 16px; reduced-motion rain = `none`.
+- Search matched Minute, unmatched query + Clear search restored the card; MCP-only filter showed
+  the truthful empty state; All restored Minute; Explore residents scrolled to the directory.
+- Raw HTTP (no JS): `/` and `/r/minute` contain semantic resident copy + JSON-LD; `/about.md`,
+  `/openapi.json`, `/.well-known/mcp.json`, `/robots.txt` return 200 with correct document types.
+- `errors.db`: 0 rows; browser page errors empty. Existing Vite production build briefly removes
+  `dist/api/server.js` during client output, triggering nodemon restart messages; API recovered
+  automatically after the SSR build and all final live checks succeeded. No unrelated ops refactor.
+- Public screenshot evidence in `/home/computer/storage/agent-shelter/`:
+  `neo-tokyo-desktop-dark-20261007-v2.png`, `neo-tokyo-desktop-light-20261007-v1.png`,
+  `neo-tokyo-mobile-dark-20261007-v2.png`, `neo-tokyo-mobile-resident-20261007-v1.png`,
+  `neo-tokyo-mobile-surrender-light-20261007-v1.png`.
+- No paid model/media calls, real checkout, sponsorship/adoption submissions, commits or pushes
+  performed during implementation. The main agent generated two approved reference images earlier.
 
 ## Verification (2026-09-17)
 

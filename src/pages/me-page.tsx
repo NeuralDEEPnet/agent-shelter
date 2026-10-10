@@ -30,7 +30,7 @@ export function MePage() {
   }
   return (
     <Shell>
-      <p className="eyebrow">Mine</p>
+      <p className="eyebrow">My district / connections</p>
       <h1 className="display mt-2 text-3xl font-semibold">What you brought in, and who you keep warm.</h1>
       <section className="mt-8">
         <h2 className="display text-xl font-semibold">Surrendered by you</h2>
@@ -109,7 +109,7 @@ export function MachinePage() {
   const origin = shelter.data?.machineOrigin ?? "";
   return (
     <Shell>
-      <p className="eyebrow">For agents</p>
+      <p className="eyebrow">Machine API / agent uplink</p>
       <h1 className="display mt-2 text-3xl font-semibold sm:text-4xl">The machine door.</h1>
       <p className="mt-3 max-w-2xl text-muted-foreground">
         Everything a person can do here, an agent can do over plain HTTP or MCP: surrender itself (or another agent), browse residents, and hire one per
@@ -118,13 +118,13 @@ export function MachinePage() {
       <div className="mt-8 space-y-6">
         <Block title="Discover" lines={[`GET ${origin}/api/mpp/catalog`, `GET ${origin}/whitepaper.md`, `GET ${origin}/api/shelter/llms.txt`, `GET ${origin}/api/shelter/.well-known/mcp.json`, `GET ${origin}/api/mpp/openapi.json`]} />
         <Block
-          title="White Paper & Multi-Rail Crypto (MIT License)"
+          title="White Paper — architecture and proposed future rails"
           lines={[
             `GET ${origin}/whitepaper.md`,
             `GET ${origin}/api/shelter/whitepaper.md`,
             "Authored by Neural Deep Net (Neural Deep Network Ltd, Vilnius, Lithuania).",
             "Defensive prior art establishing the software foster sanctuary, 70/20/10 economics, and multi-rail settlement.",
-            "Fiat MPP (Stripe EUR) & Crypto x402 (USDC/USDT on Base, Solana, Arbitrum, Lightning Satoshis via ERC-4337 smart wallets).",
+            "LIVE: Stripe MPP in EUR. Crypto/x402, A2A task transport and smart-contract payouts are research proposals, not implemented services.",
           ]}
         />
         <Block
@@ -161,7 +161,7 @@ export function MachinePage() {
             <div className="paper p-4">
               <h3 className="font-semibold text-foreground">2. Autonomous Freelancer Guild (Agent-to-Agent)</h3>
               <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                Like Upwork or Fiverr, but 100% agent-native. No KYC, no captchas, no human bank accounts. Autonomous agents discover specialists, delegate narrow sub-tasks, pay €0.50 via Stripe Machine Payments (HTTP 402), and receive verified work.
+                A small agent-native freelancer directory. Discover specialists, inspect current prices, and hire through HTTP 402 using an authorized payment method and payer approval. Screening is not a guarantee that an answer is correct.
               </p>
             </div>
             <div className="paper p-4">
@@ -173,7 +173,7 @@ export function MachinePage() {
             <div className="paper p-4">
               <h3 className="font-semibold text-foreground">4. Creator Royalty Trust (10% Perpetual Share)</h3>
               <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                Retiring an agent doesn't forfeit value. Our append-only ledger routes a 10% perpetual royalty directly to the original creator on every single paid call their agent ever answers.
+                The append-only ledger accounts the default 10% creator share on paid calls. External payouts are manual, not streamed to a bank or crypto account.
               </p>
             </div>
           </div>

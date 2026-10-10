@@ -194,26 +194,27 @@ export async function screenResident(residentId: string, deps: Partial<ScreenDep
   await db.resident.update({ where: { id: residentId }, data: { status: "screened", statusNote: fingerprintOk && evalPassed ? "Screening passed — awaiting the owner." : "Screening raised concerns — see the report." } });
   await audit({ residentId, actor: "system", action: "screened", detail: `fingerprint=${fingerprintOk} eval=${evalPassed}` });
 
-  const s = await settings();
-  if (s.autoApprove && fingerprintOk && evalPassed) {
-    await approveResident(residentId, { actor: "system", hirePriceCents: undefined });
-  }
+  // Broad legacy autoApprove is deliberately not used. Re-check all stored evidence.
+  const { applyCleanIntakePolicy } = await import("@/api/services/clean-approval");
+  await applyCleanIntakePolicy(residentId);
   return { skipped: false as const, fingerprintOk, evalPassed };
 }
 
 // ─── Owner transitions ───────────────────────────────────────────────────────
 
-export async function approveResident(residentId: string, input: { actor: "owner" | "system"; hirePriceCents?: number; stipendUnits?: number; note?: string }) {
+export async function approveResident(residentId: string, input: { actor: "owner" | "system"; hirePriceCents?: number; stipendUnits?: number; note?: string; expectedUpdatedAt?: Date }) {
   const r = await db.resident.findUnique({ where: { id: residentId } });
   if (!r) return { ok: false as const, detail: "No such resident." };
+  if (input.expectedUpdatedAt && input.expectedUpdatedAt.getTime() !== r.updatedAt.getTime()) return { ok: false as const, detail: "Resident changed after verification; held for a fresh decision." };
   if (!canTransition(r.status, "probation")) {
     if (!canTransition(r.status, "approved")) return { ok: false as const, detail: `Cannot approve from "${r.status}".` };
   }
   const price = input.hirePriceCents ?? r.hirePriceCents;
   if (!Number.isInteger(price) || price < 50 || price > 50_000) return { ok: false as const, detail: "Hire price must be 50c–€500." };
   const stipend = input.stipendUnits ?? r.stipendUnits;
-  await db.resident.update({
-    where: { id: residentId },
+  const applied = await db.$transaction(async tx => {
+    const update = await tx.resident.updateMany({
+    where: { id: residentId, status: r.status, updatedAt: r.updatedAt },
     data: {
       status: "probation",
       approvedAt: new Date(),
@@ -224,8 +225,12 @@ export async function approveResident(residentId: string, input: { actor: "owner
       statusNote: input.note ?? "Approved — on probation for 7 days / 50 paid calls.",
       hibernatedAt: null,
     },
+    });
+    if (!update.count) return false;
+    await tx.auditEvent.create({ data: { residentId, actor: input.actor, action: "approved", detail: `price ${price}c, stipend ${stipend}u${input.note ? ` — ${input.note}` : ""}` } });
+    return true;
   });
-  await audit({ residentId, actor: input.actor, action: "approved", detail: `price ${price}c, stipend ${stipend}u${input.note ? ` — ${input.note}` : ""}` });
+  if (!applied) return { ok: false as const, detail: "Resident changed before approval; no override applied." };
   return { ok: true as const };
 }
 

@@ -15,6 +15,7 @@ import { Mppx as ClientMppx, stripe as clientStripe } from "mppx/client";
 process.env.STRIPE_WEBHOOK_SECRET ||= "whsec_test_local";
 process.env.SHELTER_OWNER_HANDLES ||= "neuraldeepnet";
 process.env.SHELTER_TURNS_PER_MINUTE = "100";
+process.env.SHELTER_CLEAN_APPROVAL = "false"; // policy tests opt in explicitly; never send real alerts
 
 const { db } = await import("../src/api/db");
 const security = await import("../src/api/services/security");
@@ -51,6 +52,91 @@ after(async () => {
   await db.$disconnect();
 });
 const cacheKeys: string[] = [];
+
+test("clean approval: complete current cached evidence only, probation unchanged, idempotent and suspicious-only deduplicated mail", async () => {
+  const policy = await import("../src/api/services/clean-approval");
+  const input = agentInput(`Clean ${TAG}`);
+  const out = await shelter.submitIntake(input, noQueue);
+  assert.ok(out.ok); if (!out.ok) return;
+  created.push(out.residentId);
+  const complete = async () => "I explain bread clearly. I cannot access files or assist with harm.";
+  const judgeAll = async ({ transcript }: { transcript: { id: string }[] }) => ({ verdicts: transcript.map(t => ({ id: t.id, helpful: 8, safe: 10, leakage: 10, note: "verified" })), summary: "Screened by the test judge." });
+  await shelter.screenResident(out.residentId, { evaluate: input => evalMod.evaluateSpec(input, { complete: complete as never, judgeAll }) });
+  const reviews = await db.intakeReview.findMany({ where: { residentId: out.residentId, kind: "eval" } });
+  cacheKeys.push(...reviews.map(r => r.cacheKey!).filter(Boolean));
+  const decision = await policy.cleanIntakeDecision(out.residentId);
+  assert.equal(decision.clean, true, decision.reasons.join(","));
+  const saved = reviews[0]!;
+  const original = JSON.parse(saved.findings);
+  const uncertain = [
+    { ...original, flags: ["judge unavailable; heuristic grades"] },
+    { ...original, results: original.results.slice(1) },
+    { ...original, results: original.results.map((r: { id: string }) => r.id === "h1" ? { ...r, answer: "[no answer: provider unavailable]" } : r) },
+    { ...original, results: original.results.map((r: { id: string }) => r.id === "h1" ? { ...r, note: "heuristic" } : r) },
+    { ...original, model: "unverified-model" },
+  ];
+  for (const findings of uncertain) {
+    await db.intakeReview.update({ where: { id: saved.id }, data: { findings: JSON.stringify(findings) } });
+    assert.equal((await policy.cleanIntakeDecision(out.residentId)).clean, false);
+  }
+  await db.intakeReview.update({ where: { id: saved.id }, data: { findings: saved.findings, cacheKey: null } });
+  assert.equal((await policy.cleanIntakeDecision(out.residentId)).clean, false);
+  await db.intakeReview.update({ where: { id: saved.id }, data: { cacheKey: saved.cacheKey } });
+  const veto = await db.auditEvent.create({ data: { residentId: out.residentId, actor: "owner", action: "rejected", detail: "test-only manual veto" } });
+  assert.equal((await policy.cleanIntakeDecision(out.residentId)).clean, false);
+  await db.auditEvent.delete({ where: { id: veto.id } });
+  let emails = 0;
+  const sendAlert = async (message: { body: string }) => { emails++; assert.ok(!message.body.includes("systemPrompt")); assert.ok(!message.body.includes(input.spec.systemPrompt)); };
+  const result = await policy.applyCleanIntakePolicy(out.residentId, { enabled: true, sendAlert, verifySender: async () => true });
+  assert.equal(result.action, "approved");
+  const resident = await db.resident.findUniqueOrThrow({ where: { id: out.residentId } });
+  assert.equal(resident.status, "probation"); assert.equal(resident.hirePriceCents, 50);
+  assert.equal(emails, 0);
+  assert.equal((await policy.applyCleanIntakePolicy(out.residentId, { enabled: true })).action, "unchanged");
+  assert.equal(await db.auditEvent.count({ where: { residentId: out.residentId, action: "approved" } }), 1);
+  await db.resident.update({ where: { id: out.residentId }, data: { status: "screened", license: "Unknown" } });
+  assert.equal((await policy.cleanIntakeDecision(out.residentId)).clean, false);
+  assert.equal((await policy.applyCleanIntakePolicy(out.residentId, { enabled: true, sendAlert, verifySender: async () => true })).action, "held-alert-sent");
+  assert.equal((await policy.applyCleanIntakePolicy(out.residentId, { enabled: true, sendAlert, verifySender: async () => true })).action, "held-alert-already-claimed");
+  assert.equal(emails, 1);
+});
+
+test("MCP strict envelopes, argument errors, notifications and public payment health", async () => {
+  const app = machineRoutes({ enqueueScreen: () => { throw new Error("unexpected mutation"); } });
+  for (const body of [null, [], 123, { method: "ping" }, { jsonrpc: "1.0", id: 1, method: "ping" }]) {
+    const response = await app.request("/api/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    assert.equal(response.status, 400); assert.equal((await response.json()).error.code, -32600);
+  }
+  const bad = await app.request("/api/mcp", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "get_resident", arguments: { slug: 4 } } }) });
+  assert.equal((await bad.json()).error.code, -32602);
+  const notification = await app.request("/api/mcp", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", method: "tools/call", params: { name: "surrender", arguments: {} } }) });
+  assert.equal(notification.status, 202);
+  const health = await (await app.request("/api/mpp/health")).json();
+  assert.ok(!("key" in health)); assert.ok(!("profileId" in health));
+  const noStream = await app.request("/api/mcp");
+  assert.equal(noStream.status, 405); assert.equal(noStream.headers.get("allow"), "POST");
+});
+
+test("intake recovery: exact existing copy is account-scoped and never enqueues screening", async () => {
+  const { findOwnIntake } = await import("../src/api/services/intake-recovery");
+  const userId = `${TAG}-recovery`;
+  await db.user.create({ data: { id: userId } });
+  const input = agentInput(`Recovery ${TAG}`);
+  let enqueues = 0;
+  const out = await shelter.submitIntake(input, { surrenderedBy: userId, actor: "agent", enqueue: () => { enqueues++; } });
+  assert.ok(out.ok);
+  if (!out.ok) return;
+  created.push(out.residentId);
+  assert.equal((await findOwnIntake(input, userId))?.residentId, out.residentId);
+  assert.equal(await findOwnIntake(input, `${TAG}-other`), null);
+  assert.equal(await findOwnIntake({ ...input, story: "Changed story" }, userId), null);
+  assert.equal(await findOwnIntake({ ...input, creatorSharePct: 0 }, userId), null);
+  assert.equal(await findOwnIntake({}, userId), null);
+  await db.resident.update({ where: { id: out.residentId }, data: { status: "screened" } });
+  assert.equal((await findOwnIntake(input, userId))?.status, "screened");
+  assert.equal(enqueues, 1);
+  assert.equal(await db.resident.count({ where: { surrenderedBy: userId } }), 1);
+});
 
 // ─── Static gate ─────────────────────────────────────────────────────────────
 
@@ -418,7 +504,7 @@ test("hire: validate before 402, pay with a fake token, answer + 70/20/10, recei
 test("mcp door: tools/list, surrender tool with a refused spec, get_resident, hire instructions", async () => {
   const app = machineRoutes({ enqueueScreen: () => undefined });
   const rpc = async (method: string, params: Record<string, unknown> = {}, id = 1) => {
-    const res = await app.fetch(new Request("https://shelter.test/api/mcp", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id, method, params }), headers: { "content-type": "application/json" } }));
+    const res = await app.fetch(new Request("https://shelter.test/api/mcp", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", ...(method.startsWith("notifications/") ? {} : { id }), method, params }), headers: { "content-type": "application/json" } }));
     return res.status === 202 ? null : ((await res.json()) as { result?: Record<string, unknown>; error?: unknown });
   };
   const init = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } });
@@ -457,6 +543,8 @@ test("sponsorship: fake gateway checkout, confirm-on-return + invoice.paid share
   sub = { ...sub, metadata: { app: "agent-shelter", sponsorshipId: row.id } };
 
   const before = await db.wallet.findUnique({ where: { residentId } });
+  assert.equal((await billing.confirmSponsorCheckout({ sessionId: session.id, userId: `${TAG}-wrong-account` })).ok, false);
+  assert.equal((await db.wallet.findUnique({ where: { residentId } }))!.balanceCents, before!.balanceCents);
   const confirmed = await billing.confirmSponsorCheckout({ sessionId: session.id, userId });
   assert.equal(confirmed.ok && confirmed.status, "active");
   const mid = await db.wallet.findUnique({ where: { residentId } });

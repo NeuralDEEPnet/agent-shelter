@@ -1,7 +1,7 @@
 {
   "name": "full-stack-app-template",
   "private": true,
-  "version": "1.15.0",
+  "version": "1.22.0",
   "type": "module",
   "scripts": {
     "dev:vite": "vite --host 0.0.0.0 2>&1 | tee -a vite-dev.log",
@@ -20,6 +20,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
+    "build": "npm run prod:build",
     "postinstall": "prisma generate",
     "prod:build:vite": "vite build && vite build --config vite.config.api.ts",
     "prod:build:types": "mkdir -p dist && cp dev-api-exports.d.ts dist/api-exports.d.ts",
@@ -33,6 +34,8 @@
     "prod": "dotenv -e .env.production -- run-s prod:free-ports && dotenv -e .env.production -- run-p prod:vite prod:api"
   },
   "dependencies": {
+    "@adaptive-ai/sketchmonkey-neuraldeepnet": "*",
+    "@adaptive-ai/3dj-neuraldeepnet": "*",
     "@adaptive-ai/sdk": "0.1.44",
     "@hono/node-server": "^2.0.11",
     "@hookform/resolvers": "5.1.1",

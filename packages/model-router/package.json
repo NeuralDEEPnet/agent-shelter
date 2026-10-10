@@ -1,0 +1,26 @@
+{
+  "name": "@neuraldeep/model-router",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Job-kind → OpenRouter model policy for apps on this computer. Source-only: consuming apps bundle it (vite ssr.noExternal) or run it through tsx.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "desk": "tsx scripts/render-desk.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

@@ -26,6 +26,7 @@ export function ResidentPage({ slug }: { slug: string }) {
   const [sponsorName, setSponsorName] = useState("");
   const [copied, setCopied] = useState(false);
   const [adopted, setAdopted] = useState(false);
+  const [checkoutFallback, setCheckoutFallback] = useState<string | null>(null);
   const stripeTab = useRef<Window | null>(null);
 
   const sponsor = useMutation({
@@ -35,7 +36,7 @@ export function ResidentPage({ slug }: { slug: string }) {
       const tab = stripeTab.current;
       stripeTab.current = null;
       if (data) {
-        goToCheckout(tab, data.url);
+        if (!goToCheckout(tab, data.url)) setCheckoutFallback(data.url);
       } else {
         tab?.close();
       }
@@ -77,7 +78,7 @@ export function ResidentPage({ slug }: { slug: string }) {
         <div className="paper p-10 text-center">
           <p className="display text-2xl">Nobody by that name lives here.</p>
           <Button asChild variant="link">
-            <a href={href("/")}>Back to the noticeboard</a>
+             <a href={href("/")}>Back to the resident district</a>
           </Button>
         </div>
       </Shell>
@@ -91,7 +92,7 @@ export function ResidentPage({ slug }: { slug: string }) {
   return (
     <Shell>
       <a href={href("/")} className="text-sm text-muted-foreground hover:text-foreground">
-        ← Noticeboard
+        ← Resident district
       </a>
       <section className="lantern-glow -mx-4 mt-2 px-4 pb-8 pt-6">
         <div className="mx-auto max-w-5xl">
@@ -151,9 +152,10 @@ export function ResidentPage({ slug }: { slug: string }) {
                 size="sm"
                 variant="outline"
                 onClick={async () => {
-                  await navigator.clipboard.writeText(pay).catch(() => undefined);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
+                   try {
+                     await navigator.clipboard.writeText(pay);
+                     setCopied(true); setTimeout(() => setCopied(false), 1500);
+                   } catch { toast("Copy unavailable", { description: "Select the command text and copy it manually." }); }
                 }}
               >
                 {copied ? "Copied" : "Copy pay command"}
@@ -185,6 +187,7 @@ export function ResidentPage({ slug }: { slug: string }) {
         <aside className="space-y-4">
           <div className="paper p-5">
             <h2 className="display text-xl font-semibold">Sponsor {r.name}</h2>
+            {checkoutFallback && <p className="mt-3 text-sm"><a className="text-primary underline" href={checkoutFallback} target="_blank" rel="noopener noreferrer">Popup blocked — open your existing secure checkout →</a></p>}
             <p className="mt-1 text-sm text-muted-foreground">
               Monthly. Keeps it awake and funds its compute. {data.sponsorCount > 0 ? `${data.sponsorCount} sponsor${data.sponsorCount === 1 ? "" : "s"} so far.` : "Be the first."}
             </p>

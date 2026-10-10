@@ -1,4 +1,5 @@
 import { db } from "@/api/db";
+export { getPlayground, setResidentPlaygroundAccess, sendPlaygroundMessage, createPlaygroundWork, publishPlaygroundItem, ratePlaygroundItem, setPlaygroundPaused, hidePlaygroundItem, createPlaygroundReviewCredential } from "@/api/procedures.playground";
 import { queue } from "@/api/queue";
 import { machinePayments, servingOrigin } from "@/api/mppClient";
 import { caller, currentUserId, ensureUserRow } from "@/api/services/auth";
@@ -13,6 +14,8 @@ import {
   SPONSOR_TIERS_CENTS,
 } from "@/api/services/billing";
 import { LICENSES, RESIDENT_KINDS, SURRENDER_AGREEMENT, SURRENDER_AGREEMENT_VERSION } from "@/api/services/intake";
+import { findOwnIntake } from "@/api/services/intake-recovery";
+import { applyCleanIntakePolicy, cleanIntakeDecision, cleanPolicyEnabled, intakeAlertSender } from "@/api/services/clean-approval";
 import { balances, recordPayout as recordPayoutEntry, splitCents, UNIT_PRICE_CENTS } from "@/api/services/ledger";
 import { globalUnitsToday, parseAllowlist, parseSpec, runTurn, utcDay } from "@/api/services/runtime";
 import { adoptionPackFor, approveResident, audit, dailyHousekeeping, hibernateResident, rejectResident, settings, submitIntake, wakeResident } from "@/api/services/shelter";
@@ -92,6 +95,7 @@ export async function getShelter() {
     machinePayments: mpp.state,
     sponsorTiers: [...SPONSOR_TIERS_CENTS],
     sponsorshipsConfigured: billingConfigured(),
+    cleanApprovalEnabled: cleanPolicyEnabled(),
     signedIn: Boolean(who.userId),
     owner: who.owner,
     machineOrigin: servingOrigin(),
@@ -181,6 +185,9 @@ export async function getAgreement() {
 export async function surrender(input: unknown): Promise<Result<{ slug: string; residentId: string; checks: { id: string; ok: boolean; detail: string }[] }>> {
   const userId = await currentUserId();
   if (!userId) return refuse(notices.signIn());
+  // A retry after a lost response must not create another resident or re-run screening.
+  const existing = await findOwnIntake(input, userId);
+  if (existing) return ok({ ...existing, checks: [] }, [notices.info("Already received", "This exact intake is already saved to your account. No duplicate or extra screening was started.")]);
   await ensureUserRow(userId);
   const recent = await db.resident.count({ where: { surrenderedBy: userId, createdAt: { gt: new Date(Date.now() - 3_600_000) } } });
   if (recent >= 5) return refuse(notices.quota("Five intakes an hour is the limit for one account. Come back in a bit."));
@@ -189,7 +196,27 @@ export async function surrender(input: unknown): Promise<Result<{ slug: string; 
     if (out.reason === "paused") return refuse(notices.paused(out.detail));
     return refuse({ kind: "invalid", title: out.reason === "refused" ? "Refused at the door" : "Check the form", message: out.detail });
   }
-  return ok({ slug: out.slug, residentId: out.residentId, checks: out.checks }, [notices.info("Checked in", "Screening is running. The owner approves every resident by hand — you can watch the status on the résumé page.")]);
+  return ok({ slug: out.slug, residentId: out.residentId, checks: out.checks }, [notices.info("Checked in", "Screening is running. Verified clean arrivals follow the owner's approval policy; suspicious or uncertain ones stay held. Track the saved entry in Mine.")]);
+}
+
+/** Read-only uncertain-response recovery, strictly scoped to the authenticated surrenderer. */
+export async function recoverSurrender(input: unknown) {
+  const userId = await currentUserId();
+  if (!userId) return refuse(notices.signIn());
+  return ok(await findOwnIntake(input, userId));
+}
+
+export async function intakePolicyReport() {
+  const who = await caller();
+  if (!who.owner) return refuse(notices.forbidden());
+  const rows = await db.resident.findMany({ where: { status: "screened" }, select: { id: true } });
+  return ok({ enabled: cleanPolicyEnabled(), sender: await intakeAlertSender(), decisions: await Promise.all(rows.map(r => cleanIntakeDecision(r.id))) });
+}
+
+export async function applyIntakePolicy(input: { residentId: string }) {
+  const who = await caller();
+  if (!who.owner) return refuse(notices.forbidden());
+  return ok(await applyCleanIntakePolicy(input.residentId));
 }
 
 export async function mySurrenders() {
@@ -290,7 +317,7 @@ async function requireOwner(): Promise<{ ok: true; userId: string } | { ok: fals
 
 export async function adminOverview(): Promise<
   Result<{
-    settings: { paused: boolean; pauseReason: string | null; autoApprove: boolean };
+    settings: { paused: boolean; pauseReason: string | null; autoApprove: boolean; cleanApprovalEnabled: boolean };
     queue: {
       id: string;
       slug: string;
@@ -343,7 +370,7 @@ export async function adminOverview(): Promise<
   if (pendingRefunds) anomalies.push(`${pendingRefunds} refund(s) pending your hand (restricted key lacks Refunds: write?)`);
   const mpp = machinePayments().health();
   return ok({
-    settings: { paused: s.paused, pauseReason: s.pauseReason, autoApprove: s.autoApprove },
+    settings: { paused: s.paused, pauseReason: s.pauseReason, autoApprove: s.autoApprove, cleanApprovalEnabled: cleanPolicyEnabled() },
     queue: queueRows.map((r) => ({
       id: r.id,
       slug: r.slug,

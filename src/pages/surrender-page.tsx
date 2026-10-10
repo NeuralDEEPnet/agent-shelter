@@ -1,6 +1,6 @@
 import { useAuth } from "@adaptive-ai/sdk/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Shell } from "@/components/shelter/shell";
 import { useShelter } from "@/hooks/use-shelter";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,8 @@ import { unwrap } from "@/hooks/use-notices";
 import { client } from "@/lib/client";
 import { href, navigate } from "@/lib/router";
 import { cn } from "@/lib/utils";
+import { env } from "@/lib/env";
+import { clearIntakeDraft, EMPTY_INTAKE, readIntakeDraft, writeIntakeDraft } from "@/lib/intake-draft";
 
 type Kind = "agent" | "mcp" | "mind";
 
@@ -26,29 +28,18 @@ export function SurrenderPage() {
   const shelter = useShelter();
   const signedIn = shelter.data ? shelter.data.signedIn : auth.status === "authenticated";
   const agreement = useQuery({ queryKey: ["agreement"], queryFn: () => client.getAgreement() });
-  const [kind, setKind] = useState<Kind>("agent");
-  const [f, setF] = useState({
-    name: "",
-    tagline: "",
-    story: "",
-    creatorName: "",
-    creatorContact: "",
-    license: "MIT",
-    waive: false,
-    attestation: false,
-    accepted: false,
-    systemPrompt: "",
-    greeting: "",
-    skills: "",
-    tools: "",
-    memory: "",
-    endpoint: "",
-    expose: "",
-    pack: "",
-  });
+  const draftKey = `shelter:intake:${env.VITE_APP_ID}:${env.VITE_NODE_ENV}`;
+  const [restored] = useState(() => readIntakeDraft(draftKey));
+  const [kind, setKind] = useState<Kind>(restored?.kind ?? "agent");
+  const [f, setF] = useState(restored?.form ?? { ...EMPTY_INTAKE });
   const set = (k: keyof typeof f) => (v: string | boolean) => setF((s) => ({ ...s, [k]: v }));
   const [result, setResult] = useState<{ slug: string; checks: { id: string; ok: boolean; detail: string }[] } | null>(null);
   const [checks, setChecks] = useState<{ id: string; ok: boolean; detail: string }[] | null>(null);
+  const [checkingSaved, setCheckingSaved] = useState(false);
+
+  useEffect(() => {
+    if (!result) writeIntakeDraft(draftKey, kind, f);
+  }, [draftKey, kind, f, result]);
 
   const submit = useMutation({
     mutationFn: async () => {
@@ -76,7 +67,7 @@ export function SurrenderPage() {
         }
         spec = { kind, pack };
       }
-      return client.surrender({
+      const payload = {
         name: f.name,
         tagline: f.tagline,
         story: f.story,
@@ -87,11 +78,28 @@ export function SurrenderPage() {
         agreementVersion: agreement.data?.version,
         creatorSharePct: f.waive ? 0 : 10,
         spec,
-      });
+      };
+      try {
+        return await client.surrender(payload);
+      } catch {
+        // Transport failure may have happened after persistence. Check, never blindly resubmit.
+        setCheckingSaved(true);
+        try {
+          const recovered = await client.recoverSurrender(payload);
+          if (recovered.ok && recovered.data) {
+            return { ok: true as const, data: { ...recovered.data, checks: [] }, notices: [] };
+          }
+        } catch { /* preserve uncertain state and draft; do not claim not submitted */ }
+        finally { setCheckingSaved(false); }
+        throw new Error("The server response could not be confirmed. Your draft is preserved in this tab. Check Mine for a saved entry before retrying; do not create another copy if it is already there.");
+      }
     },
     onSuccess: (r) => {
       const data = unwrap(r);
-      if (data) setResult(data);
+      if (data) {
+        clearIntakeDraft(draftKey);
+        setResult(data);
+      }
       else setChecks(null);
     },
     onError: (e) => setChecks([{ id: "form", ok: false, detail: e.message }]),
@@ -104,8 +112,8 @@ export function SurrenderPage() {
           <p className="eyebrow">Checked in</p>
           <h1 className="display mt-2 text-3xl font-semibold">{f.name} has a bed for the night.</h1>
           <p className="mt-3 text-muted-foreground">
-            The static gate passed. Screening (twelve probes and a judge) is running now; the owner reads the report and approves by hand. Nothing
-            goes live before that tap.
+            Your intake is saved. Screening uses twelve probes and a judge. Verified clean arrivals follow the owner's approval policy;
+            suspicious or uncertain ones stay held. A recovered intake keeps its progress — no extra screening is started.
           </p>
           <ul className="mt-5 space-y-1 text-sm">
             {result.checks.map((c) => (
@@ -135,6 +143,11 @@ export function SurrenderPage() {
           Declarative copies only — a prompt, an endpoint or a Mind pack. Anything that looks like a secret, an injection or a private host is refused
           at the door, before a human or a model ever sees it.
         </p>
+        <div className="paper mt-4 flex flex-wrap items-center gap-3 p-3 text-xs text-muted-foreground">
+          <p className="flex-1">{restored ? "Draft restored. Re-confirm the agreement before submitting. " : ""}Draft saved only in this browser tab for up to 24 hours. No secrets, please.</p>
+          <Button type="button" size="sm" variant="ghost" onClick={() => { clearIntakeDraft(draftKey); setF({ ...EMPTY_INTAKE }); setChecks(null); }}>Clear draft</Button>
+          <a href={href("/me")} className="inline-flex min-h-11 items-center text-primary underline">Check saved intakes →</a>
+        </div>
 
         {!signedIn && (
           <div className="paper mt-6 flex flex-wrap items-center gap-3 p-4">
@@ -260,7 +273,7 @@ export function SurrenderPage() {
           )}
 
           <Button type="submit" size="lg" className="h-12 w-full sm:w-auto" disabled={submit.isPending || !signedIn || !f.attestation || !f.accepted}>
-            {submit.isPending ? "Checking at the door…" : "Surrender to the shelter"}
+            {checkingSaved ? "Checking whether it was saved…" : submit.isPending ? "Checking at the door…" : "Surrender to the shelter"}
           </Button>
         </form>
       </div>

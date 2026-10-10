@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
  */
 export type Route =
   | { name: "home" }
+  | { name: "playground"; tab: "talk" | "create" | "gallery" }
   | { name: "resident"; slug: string }
   | { name: "surrender" }
   | { name: "admin" }
@@ -27,6 +28,7 @@ export function parsePath(pathAndQuery: string): Route {
   const parts = pathPart.split("/").filter(Boolean);
   const params = new URLSearchParams(query);
   if (parts.length === 0) return { name: "home" };
+  if (["playground", "commons", "gallery"].includes(parts[0])) return { name: "playground", tab: parts[0] === "gallery" ? "gallery" : params.get("tab") === "create" ? "create" : "talk" };
   if (parts[0] === "r" && parts[1]) return { name: "resident", slug: decodeURIComponent(parts[1]) };
   if (parts[0] === "surrender") return { name: "surrender" };
   if (parts[0] === "admin") return { name: "admin" };

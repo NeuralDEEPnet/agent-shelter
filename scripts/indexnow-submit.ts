@@ -45,8 +45,8 @@ async function main() {
   for (const u of urlList) console.log(`  ${u}`);
   if (skipped.length) console.log(`skipped (other host or hash URL): ${skipped.join(", ")}`);
 
-  const sitemapPing = `https://www.google.com/ping?sitemap=${encodeURIComponent(`${ORIGIN}/sitemap.xml`)}`;
-  console.log(`google sitemap ping (deprecated, best effort): ${sitemapPing}`);
+   const keyProof = await fetch(keyLocation, { signal: AbortSignal.timeout(15_000) });
+   if (!keyProof.ok || (await keyProof.text()).trim() !== key) throw new Error("Published IndexNow key is not reachable or does not match; nothing submitted.");
   if (DRY) return console.log("--dry-run: nothing submitted");
 
   const res = await fetch("https://api.indexnow.org/indexnow", {
@@ -57,12 +57,8 @@ async function main() {
   // 200 = ok, 202 = accepted (key validation pending), 400 bad format, 403 key mismatch, 422 URL not on host, 429 spam.
   console.log(`indexnow: HTTP ${res.status} ${res.statusText}${res.status >= 400 ? ` — ${(await res.text()).slice(0, 300)}` : ""}`);
 
-  try {
-    const g = await fetch(sitemapPing, { method: "GET" });
-    console.log(`google ping: HTTP ${g.status} (ignored)`);
-  } catch (e) {
-    console.log(`google ping failed (ignored): ${e instanceof Error ? e.message : String(e)}`);
-  }
+  if (res.status >= 400) process.exitCode = 1;
+  console.log("Acceptance is not proof of indexing. Google sitemap ping was retired and is not called.");
 }
 
 main().catch((e) => {

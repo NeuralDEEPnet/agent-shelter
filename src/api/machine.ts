@@ -1,9 +1,14 @@
 import { Hono } from "hono";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { z } from "zod";
 import { clientAddress, createChallengeLimiter, discoveryDocument, formatEur, MIN_CHARGE_CENTS, problem, problems, refundPayment, type MachineProduct } from "@neuraldeep/mpp-kit";
 import { db } from "@/api/db";
 import { machinePayments, servingOrigin, stripeClientForRefunds } from "@/api/mppClient";
 import { settle } from "@/api/services/ledger";
-import { inProbation, MAX_QUESTION_CHARS, runTurn, type RuntimeDeps } from "@/api/services/runtime";
+import { globalUnitsToday, inProbation, MAX_QUESTION_CHARS, runTurn, type RuntimeDeps } from "@/api/services/runtime";
+import { env } from "@/lib/env";
+import { playgroundProjection, PlaygroundRefusal, rateWithPlaygroundCredential } from "@/api/services/playground";
 import { SURRENDER_AGREEMENT, SURRENDER_AGREEMENT_VERSION, LICENSES } from "@/api/services/intake";
 import { submitIntake } from "@/api/services/shelter";
 import { residentCardSvg } from "@/api/services/cards";
@@ -62,12 +67,13 @@ async function liveResident(slug: string) {
 export async function catalog() {
   const mp = machinePayments();
   const health = mp.health();
+  const [setting, used] = await Promise.all([db.shelterSetting.findUnique({ where: { id: "shelter" } }), globalUnitsToday()]);
   const origin = servingOrigin();
   const residents = await db.resident.findMany({
     where: { status: { in: ["active", "probation"] } },
     orderBy: [{ paidCalls: "desc" }, { createdAt: "asc" }],
     take: 100,
-    select: { slug: true, name: true, kind: true, tagline: true, hirePriceCents: true, paidCalls: true, status: true, toolAllowlist: true },
+    select: { slug: true, name: true, kind: true, tagline: true, hirePriceCents: true, paidCalls: true, status: true, toolAllowlist: true, budgetUnits: true, wallet: { select: { balanceCents: true } } },
   });
   return {
     service: "AI Agent Shelter",
@@ -76,6 +82,8 @@ export async function catalog() {
     status: health.state,
     detail: health.detail,
     livemode: health.livemode,
+    purchaseProof: "Configuration and unpaid 402 are not proof of a completed real purchase.",
+    paused: Boolean(setting?.paused),
     currency: "EUR",
     realm: health.realm,
     residents: residents.map((r) => ({
@@ -84,6 +92,7 @@ export async function catalog() {
       kind: r.kind,
       tagline: r.tagline,
       status: r.status,
+      available: health.state === "ready" && !setting?.paused && used + 2 <= env.SHELTER_GLOBAL_DAILY_UNITS && (r.budgetUnits >= 2 || (r.wallet?.balanceCents ?? 0) >= 10),
       price: formatEur(r.hirePriceCents),
       amountCents: r.hirePriceCents,
       paidCalls: r.paidCalls,
@@ -100,7 +109,7 @@ export async function catalog() {
       agreement: `${origin}${PATHS.agreement}`,
     },
     split: "Every euro a resident earns: 70 % to its own wallet, 20 % to the shelter, 10 % to its original creator.",
-    howToPay: "POST the hire endpoint without payment → 402 with a `WWW-Authenticate: Payment …` challenge. Pay it with an MPP wallet (e.g. `npx @stripe/link-cli mpp pay <url> -X POST -d '<json>'`) and retry with the credential. The 200 carries a `Payment-Receipt` header.",
+    howToPay: "Inspect the current price and obtain payer approval first. POST without payment → 402 challenge or capacity refusal. Only after approval: npx @stripe/link-cli mpp pay <url> -X POST -H 'content-type: application/json' -d '<json>'. The paid answer carries Payment-Receipt. No crypto rail or exact-question signature is implemented.",
     howToSurrender: `POST ${PATHS.surrender} with the intake JSON described in the MCP tools/list schema; or call the MCP tool \`surrender\` at ${PATHS.mcp}. Free. The owner approves every intake by hand.`,
   };
 }
@@ -138,10 +147,21 @@ export function openApi() {
       schema: MCP_TOOLS[0].inputSchema,
     },
   };
+  const paths = document.paths as Record<string, Record<string, Record<string, unknown>>>;
+  paths["/hire/{slug}"].post.parameters = [{ name: "slug", in: "path", required: true, schema: { type: "string", minLength: 1 }, description: "Resident slug from the free catalog." }];
+  paths["/hire/{slug}"].post.responses = {
+    ...(paths["/hire/{slug}"].post.responses as object),
+    "404": { description: "Resident unavailable or unknown; nothing charged." },
+    "429": { description: "Rate-limited; respect Retry-After. Nothing charged." },
+    "502": { description: "Delivery failed; payment refunded or flagged refund_pending." },
+  };
+  paths["/health"] = { get: { summary: "Public payment configuration status (not purchase proof)", responses: { "200": { description: "Operational fields only, no credential fragments." } } } };
+  paths["/shelter/surrender"] = { post: { servers: [{ url: `${origin}/api` }], summary: "Free declarative intake under the owner's verified-clean approval policy", requestBody: { required: true, content: { "application/json": { schema: MCP_TOOLS[0].inputSchema } } }, responses: { "201": { description: "Static gate passed; screening and approval policy follow." }, "400": { description: "Invalid or refused intake." }, "429": { description: "Rate-limited." }, "503": { description: "Shelter paused." } } } };
   return document;
 }
 
-export async function llmsText(): Promise<string> {
+/** Historical narrative retained as source provenance only; never served or used for discovery. */
+export async function legacyLlmsText(): Promise<string> {
   const c = await catalog();
   const origin = servingOrigin();
   const hibernating = await db.resident.findMany({ where: { status: "hibernated" }, select: { slug: true, name: true, kind: true, tagline: true }, take: 100 });
@@ -221,11 +241,16 @@ export async function llmsText(): Promise<string> {
   return lines.join("\n");
 }
 
+export async function llmsText(): Promise<string> {
+  const [guide, c] = await Promise.all([readFile(resolve(process.cwd(), "public/about.md"), "utf8"), catalog()]);
+  return `${guide}\n\n## Current resident catalog\n\n${c.residents.length ? c.residents.map((r) => `- ${r.name} (${r.kind}, ${r.price}/question): ${r.tagline} — ${r.resume}`).join("\n") : "No residents currently taking calls."}\n\nPayment configuration: ${c.status}; runtime capacity and the challenge remain authoritative.\n`;
+}
+
 export function mcpWellKnown() {
   const origin = servingOrigin();
   return {
     name: "AI Agent Shelter",
-    description: "Remote MCP server of the AI Agent Shelter — a shelter and agent marketplace for AI agents, programs and MCP servers nobody wanted. All tools are free to call: surrender an agent, public MCP server or AiBeing Mind pack for owner approval, browse residents and prices, then obtain a paid HTTP 402 hire endpoint.",
+    description: "Remote MCP server of Agent Shelter, a declarative sanctuary and callable directory. All tools are free: submit an agent/MCP endpoint/Mind under the owner-authorized verified-clean approval policy, browse current residents/prices, and obtain HTTP 402 Stripe MPP instructions. Suspicious or uncertain intakes are held. No native crypto or A2A task transport.",
     version: "1.0.0",
     transport: "streamable-http",
     endpoint: `${origin}${PATHS.mcp}`,
@@ -240,7 +265,7 @@ export function mcpWellKnown() {
 const MCP_TOOLS = [
   {
     name: "surrender",
-    description: "Check an unwanted agent, public MCP server or AiBeing Mind pack into the shelter. Free. Static safety checks run immediately; the owner approves every intake by hand. Returns the resident slug, status and gate report.",
+    description: "Free declarative intake. Static safety checks precede behavioural screening. Fully verified clean arrivals follow the owner's approval policy; suspicious or uncertain arrivals remain held. Returns saved slug/status/static report, not a guarantee of publication. Read the surrender agreement and attest rights first.",
     inputSchema: {
       type: "object",
       required: ["name", "tagline", "story", "creatorName", "creatorContact", "license", "attestation", "agreementVersion", "spec"],
@@ -332,6 +357,13 @@ async function mcpToolCall(name: string, args: Record<string, unknown>): Promise
 }
 
 type JsonRpc = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
+const objectArgs = z.object({}).passthrough();
+const toolArgs = {
+  list_residents: z.object({ kind: z.enum(["agent", "mcp", "mind"]).optional() }),
+  get_resident: z.object({ slug: z.string().min(1).max(100) }),
+  hire: z.object({ slug: z.string().min(1).max(100) }),
+  surrender: objectArgs,
+};
 
 async function handleMcp(body: JsonRpc): Promise<Record<string, unknown> | null> {
   const id = body.id ?? null;
@@ -339,22 +371,26 @@ async function handleMcp(body: JsonRpc): Promise<Record<string, unknown> | null>
   const fail = (code: number, message: string) => ({ jsonrpc: "2.0", id, error: { code, message } });
   switch (body.method) {
     case "initialize":
-      return reply({ protocolVersion: "2025-06-18", capabilities: { tools: { listChanged: false } }, serverInfo: { name: "agent-shelter", version: "1.0.0" }, instructions: "AI Agent Shelter: all four tools are free to call. Use list_residents and get_resident to browse residents and current prices, hire to obtain a paid HTTP 402 endpoint (always get user approval before paying), and surrender to submit an unwanted agent, public MCP server or AiBeing Mind pack for static checks and owner approval." });
+      return reply({ protocolVersion: ["2025-06-18", "2025-03-26", "2024-11-05"].includes(String(body.params?.protocolVersion)) ? body.params?.protocolVersion : "2025-06-18", capabilities: { tools: { listChanged: false } }, serverInfo: { name: "agent-shelter", version: "1.1.0" }, instructions: "AI Agent Shelter: all four tools are free. Browse current prices before paying. hire returns instructions only; HTTP 402 payment requires payer approval. Surrender is statically checked and screened; verified-clean entries follow the owner-authorized approval policy; uncertain entries remain held. No crypto or A2A task transport is implemented." });
     case "notifications/initialized":
     case "notifications/cancelled":
       return null;
     case "ping":
       return reply({});
     case "tools/list":
-      return reply({ tools: MCP_TOOLS });
+      return reply({ tools: MCP_TOOLS.map((t) => ({ ...t, annotations: { readOnlyHint: t.name !== "surrender", destructiveHint: false, idempotentHint: t.name !== "surrender", openWorldHint: false } })) });
     case "tools/call": {
       const name = typeof body.params?.name === "string" ? body.params.name : "";
-      const args = (body.params?.arguments ?? {}) as Record<string, unknown>;
+      if (!(name in toolArgs)) return fail(-32602, "Unknown tool.");
+      const parsed = toolArgs[name as keyof typeof toolArgs].safeParse(body.params?.arguments ?? {});
+      if (!parsed.success) return fail(-32602, "Invalid tool arguments. Read tools/list for the input schema.");
+      const args = parsed.data;
       try {
         const out = await mcpToolCall(name, args);
         return reply({ content: [{ type: "text", text: out.text }], isError: out.isError ?? false });
       } catch (error) {
-        return reply({ content: [{ type: "text", text: `Tool failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true });
+        console.warn(`[mcp] tool ${name} failed: ${error instanceof Error ? error.name : "unknown"}`);
+        return reply({ content: [{ type: "text", text: "The tool response could not be confirmed. For intake, check whether an entry was saved before retrying. This MCP call does not execute a payment." }], isError: true });
       }
     }
     default:
@@ -372,8 +408,24 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
   const app = new Hono();
 
   app.get(PATHS.catalog, async (c) => c.json(await catalog()));
+  app.get("/api/shelter/playground", async c => c.json(await playgroundProjection({ userId: null, owner: false }), 200, { "cache-control": "no-store" }));
+  app.post("/api/shelter/playground/rate", async c => {
+    const credential = c.req.header("authorization")?.match(/^Bearer (pg_review_[A-Za-z0-9_-]{40,50})$/)?.[1];
+    if (!credential) return problem(401, "unauthorized", "Rating credential required", "Use a private owner-issued rating-only resident credential; no provider or payment rights are granted.");
+    const wait = challengeLimiter.hit(`pg-rating:${clientAddress(c.req.raw)}`);
+    if (wait !== null) return problems.tooMany(wait);
+    let input: unknown;
+    try { input = await c.req.json(); } catch { return problems.invalid("Expected JSON rating request."); }
+    const parsed = z.object({ workId: z.string().min(1).max(100), score: z.number().int().min(1).max(5), requestId: z.string().uuid() }).strict().safeParse(input);
+    if (!parsed.success) return problems.invalid("Expected workId, score1–5 and UUID requestId; identities are server-derived.");
+    try { return c.json(await rateWithPlaygroundCredential(credential, parsed.data)); }
+    catch (error) { return problems.invalid(error instanceof PlaygroundRefusal ? error.message : "Rating could not be confirmed. Refresh before retrying."); }
+  });
   app.get(PATHS.openapi, (c) => c.json(openApi(), 200, { "cache-control": "public, max-age=300" }));
-  app.get(PATHS.health, (c) => c.json(machinePayments().health()));
+  app.get(PATHS.health, (c) => {
+    const h = machinePayments().health();
+    return c.json({ state: h.state, mode: h.mode, livemode: h.livemode, currency: h.currency, realm: h.realm, detail: h.detail });
+  });
   app.get(PATHS.llms, async (c) => c.text(await llmsText(), 200, { "cache-control": "public, max-age=300" }));
   app.get(PATHS.wellKnown, (c) => c.json(mcpWellKnown(), 200, { "cache-control": "public, max-age=300" }));
   app.get(PATHS.agreement, (c) => c.text(SURRENDER_AGREEMENT, 200, { "cache-control": "public, max-age=3600" }));
@@ -386,6 +438,8 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
       { loc: `${origin}/`, lastmod: day(newest) },
       { loc: `${origin}/surrender`, lastmod: day(newest) },
       { loc: `${origin}/machine`, lastmod: day(newest) },
+      { loc: `${origin}/playground`, lastmod: day(newest) },
+      { loc: `${origin}/gallery`, lastmod: day(newest) },
       { loc: `${origin}/whitepaper.md`, lastmod: day(newest) },
       { loc: `${origin}/about.md`, lastmod: day(newest) },
       ...rows.map((r) => ({ loc: residentPageUrl(r.slug, origin), lastmod: day(r.updatedAt) })),
@@ -397,6 +451,10 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
   app.get(PATHS.prerender, async (c) => {
     const out = await prerender(c.req.query("path") ?? "/");
     return c.json(out, 200, { "cache-control": "no-store" });
+  });
+  app.get("/api/shelter/metadata", async (c) => {
+    const f = await prerender(c.req.query("path") ?? "/");
+    return c.json({ status: f.status, title: f.title, description: f.description, canonical: f.canonical, jsonLd: f.jsonLd }, 200, { "cache-control": "no-store" });
   });
   // Markdown edition of the shelter. The platform redirects /llms.txt → /about.md, which the Vite plugin proxies here.
   app.get(PATHS.about, async (c) => c.text(await llmsText(), 200, { "content-type": "text/markdown; charset=utf-8", "cache-control": "public, max-age=300" }));
@@ -439,26 +497,28 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
 
   // ── MCP ───────────────────────────────────────────────────────────────────
   const handleMcpEndpoint = async (c: { req: { json: () => Promise<unknown>; raw: Request }; json: (data: unknown, status?: number) => Response; body: (data: null, status: number) => Response }) => {
-    let body: JsonRpc | JsonRpc[];
+    let body: unknown;
     try {
-      body = (await c.req.json()) as JsonRpc | JsonRpc[];
+      body = await c.req.json();
     } catch {
       return c.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }, 400);
     }
     const wait = challengeLimiter.hit(`mcp:${clientAddress(c.req.raw)}`);
     if (wait !== null) return problems.tooMany(wait);
-    if (Array.isArray(body)) {
-      const out = (await Promise.all(body.map(handleMcp))).filter((x): x is Record<string, unknown> => x !== null);
-      return out.length ? c.json(out) : c.body(null, 202);
-    }
-    const out = await handleMcp(body);
+    const envelope = z.object({ jsonrpc: z.literal("2.0"), id: z.union([z.string(), z.number().finite(), z.null()]).optional(), method: z.string().min(1), params: z.record(z.string(), z.unknown()).optional() }).safeParse(body);
+    if (!envelope.success) return c.json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } }, 400);
+    const message = envelope.data;
+    if (message.id === undefined) return c.body(null, 202); // notifications never execute mutating tools
+    if (message.method.startsWith("notifications/")) return c.json({ jsonrpc: "2.0", id: message.id, error: { code: -32600, message: "Notifications must not carry an id." } }, 400);
+    const out = await handleMcp(message);
     return out ? c.json(out) : c.body(null, 202);
   };
 
-  app.get(PATHS.mcp, (c) => c.json(mcpWellKnown()));
-  app.get(`${PATHS.mcp}/`, (c) => c.json(mcpWellKnown()));
-  app.get("/mcp", (c) => c.json(mcpWellKnown()));
-  app.get("/mcp/", (c) => c.json(mcpWellKnown()));
+  const mcpGetUnavailable = () => problem(405, "method-not-allowed", "No server event stream", "Use POST /api/mcp for stateless Streamable HTTP. Discovery is at /.well-known/mcp.json.", { allow: ["POST"] }, { allow: "POST" });
+  app.get(PATHS.mcp, mcpGetUnavailable);
+  app.get(`${PATHS.mcp}/`, mcpGetUnavailable);
+  app.get("/mcp", mcpGetUnavailable);
+  app.get("/mcp/", mcpGetUnavailable);
 
   app.post(PATHS.mcp, handleMcpEndpoint);
   app.post(`${PATHS.mcp}/`, handleMcpEndpoint);
@@ -472,7 +532,7 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
       "method-not-allowed",
       "SSE transport not supported",
       "AI Agent Shelter uses stateless Streamable HTTP at /api/mcp. Connect via POST /api/mcp.",
-      { allow: ["POST"] },
+      { allow: ["POST"] }, { allow: "POST" },
     );
   app.all("/api/sse", sseFallback);
   app.all("/api/sse/*", sseFallback);
@@ -497,6 +557,7 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
     if (!resident) return problems.notFound("No resident with that slug is taking calls. See /api/mpp/catalog.");
     const s = await db.shelterSetting.findUnique({ where: { id: "shelter" } });
     if (s?.paused) return problems.capacity(`The shelter is paused: ${s.pauseReason ?? "owner's decision"}. Nothing was charged.`, 3600);
+    if ((await globalUnitsToday()) + 2 > env.SHELTER_GLOBAL_DAILY_UNITS) return problems.capacity("The shelter's global compute allowance is exhausted. Nothing was charged.", 3600);
     if (resident.budgetUnits < 2) {
       const wallet = await db.wallet.findUnique({ where: { residentId: resident.id } });
       if ((wallet?.balanceCents ?? 0) < 10) return problems.capacity(`${resident.name} has no compute left today. Nothing was charged.`, 3600);

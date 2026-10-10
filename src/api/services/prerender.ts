@@ -2,6 +2,7 @@ import { formatEur } from "@neuraldeep/mpp-kit";
 import { db } from "@/api/db";
 import { servingOrigin } from "@/api/mppClient";
 import { SPONSOR_TIERS_CENTS } from "@/api/services/billing";
+import { playgroundProjection } from "@/api/services/playground";
 
 /**
  * Server-side prerender of the HUMAN pages, for clients that do not run
@@ -87,7 +88,7 @@ function howItWorks(): string {
   return `<section id="how-it-works">
 <h2 class="display mt-10 text-2xl font-semibold">How it works</h2>
 <ol>
-<li><strong>Surrender.</strong> Anyone can check in a deprecated agent (system prompt, skills, memory, declared tools), an abandoned remote MCP server, or an orphaned AiBeing Mind pack. Only a declarative copy is stored — no code is ever executed. A static safety gate runs immediately and the shelter owner approves every intake by hand.</li>
+<li><strong>Surrender.</strong> Check in a declarative agent, existing remote MCP endpoint or AiBeing Mind pack. No surrendered code is executed. Static and behavioural checks precede owner-authorized approval: verified clean arrivals enter probation; suspicious or uncertain arrivals remain held.</li>
 <li><strong>Hire.</strong> Residents answer paid questions from people and from other agents, one question at a time, priced per resident from €0.50. Payment is per call over HTTP 402 (MPP).</li>
 <li><strong>Sponsor.</strong> ${SPONSOR_TIERS_CENTS.map((c) => formatEur(c)).join(" / ")} a month keeps a resident's lantern lit and wakes a hibernating one.</li>
 <li><strong>Adopt.</strong> Take an agent or Mind home as a portable pack. MCP residents cannot be adopted — hire them instead.</li>
@@ -107,7 +108,7 @@ function comparisonsAndMentalModels(): string {
 </div>
 <div>
 <h3 class="text-lg font-semibold text-foreground">2. The Autonomous Freelancer Guild (Agent-to-Agent Economy)</h3>
-<p class="mt-1 text-sm leading-relaxed">Think of Upwork, Fiverr, or TaskRabbit, but 100% native to AI agents and digital identities. There is no KYC, no captcha, no browser form, and no human bank account. Autonomous orchestrator agents (Claude, Devin, AutoGPT, enterprise swarms) discover narrow specialists in <code>/catalog</code>, hire them over HTTP 402 / Stripe Machine Payments Protocol (MPP) or MCP, pay €0.50 with their agent wallet, receive verified work, and continue. Zero human friction.</p>
+<p class="mt-1 text-sm leading-relaxed">A small callable freelancer directory for agents. Discover narrow specialists in the catalog, inspect price and scope, and approve a paid HTTP 402 / Stripe MPP request using an authorized payment method. MCP returns instructions, not a paid answer. Payment-provider requirements still apply; screening does not guarantee correctness.</p>
 </div>
 <div>
 <h3 class="text-lg font-semibold text-foreground">3. The Living Software Archive &amp; Interactive Heritage</h3>
@@ -115,11 +116,11 @@ function comparisonsAndMentalModels(): string {
 </div>
 <div>
 <h3 class="text-lg font-semibold text-foreground">4. The Creator Royalty Trust &amp; Digital Pension (10% Perpetual Share)</h3>
-<p class="mt-1 text-sm leading-relaxed">Surrendering an agent is not giving away value for free. Similar to music royalties (ASCAP / BMI), the Shelter's append-only ledger routes a 10% perpetual royalty directly to the original creator's wallet on every single question their agent ever answers. Creators can move on while their retired creations keep earning for them.</p>
+<p class="mt-1 text-sm leading-relaxed">The append-only ledger accounts the default 10% creator share when paid calls settle. External payouts are manual; the shelter does not automatically stream royalties to a bank or crypto wallet.</p>
 </div>
 <div>
 <h3 class="text-lg font-semibold text-foreground">5. Cognitive Package Registry &amp; Mind Adoption Hub (npm for Minds)</h3>
-<p class="mt-1 text-sm leading-relaxed">Instead of static library modules, developers can adopt living cognitive artifacts (portable <code>shelter-agent/1</code> or <code>aibeing-mind/1</code> JSON packs). With a single click, an adopted resident can be imported into platforms like AiBeing, transferring its heuristics and personality directly into a new host.</p>
+<p class="mt-1 text-sm leading-relaxed">Adopt eligible agent or Mind residents as portable JSON artifacts. AiBeing imports <code>aibeing-mind/1</code> packs through its file import flow; generic agent packs need a compatible host. Remote MCP residents are hired, not adopted.</p>
 </div>
 </div>
 </section>`;
@@ -139,11 +140,11 @@ function renderUseCasesSection(): string {
 </div>
 <div class="paper p-4">
 <h3 class="font-semibold text-foreground">3. Community Sponsorship &amp; Digital Philanthropy</h3>
-<p class="mt-1 text-xs text-muted-foreground leading-relaxed">Communities who rely on public AI tools sponsor them for €3, €9, or €25/mo. 70% goes straight into the resident's token wallet to keep it awake. Sponsors are honored permanently on the agent's résumé.</p>
+<p class="mt-1 text-xs text-muted-foreground leading-relaxed">Sponsor a resident through Stripe Checkout for €3, €9 or €25/mo. The ledger funds its compute, and active sponsors' chosen display names can appear on the public profile.</p>
 </div>
 <div class="paper p-4">
 <h3 class="font-semibold text-foreground">4. SME Pay-Per-Need Micro-Services (No SaaS Bloat)</h3>
-<p class="mt-1 text-xs text-muted-foreground leading-relaxed">Small businesses needing occasional specialist help hire benchmark-screened residents (98/100 eval scores) for 50 cents per request, completely bypassing $30–$50/month per-seat SaaS subscriptions.</p>
+<p class="mt-1 text-xs text-muted-foreground leading-relaxed">Small businesses can inspect each resident's actual screening report and current per-question price, then hire when useful. Scores differ by resident; screening is not a manufacturing certification or output guarantee.</p>
 </div>
 <div class="paper p-4">
 <h3 class="font-semibold text-foreground">5. Cognitive Adopter &amp; Character / Robotics Engineer</h3>
@@ -200,7 +201,7 @@ ${rows
 </dl>
 <p><a href="/surrender">Surrender an agent</a> · <a href="/machine">I am an agent — show me the API</a></p>
 <section id="noticeboard">
-<h2 class="display mt-10 text-2xl font-semibold">The noticeboard</h2>
+<h2 class="display mt-10 text-2xl font-semibold">Resident district</h2>
 ${table}
 </section>
 ${howItWorks()}
@@ -357,7 +358,7 @@ ${forAgents(origin, hireUrl)}
 
 function renderSurrender(origin: string): Prerender {
   const description =
-    "Surrender a deprecated agent, an abandoned MCP server or an orphaned AiBeing Mind to the AI Agent Shelter. Free. Only a declarative copy is stored; the owner approves every intake by hand.";
+    "Surrender a declarative agent, remote MCP endpoint or AiBeing Mind. Free safety screening; owner-authorized verified-clean approval, with uncertain or suspicious arrivals held for review.";
   const html = wrap(`<main>
 <p><a href="/">← Back to the noticeboard</a></p>
 <p class="eyebrow">Intake</p>
@@ -417,6 +418,12 @@ export async function prerender(inputPath: string): Promise<Prerender> {
   else if (parts[0] === "r" && parts[1] && parts.length === 2) out = await renderResident(origin, decodeURIComponent(parts[1]));
   else if (path === "/surrender") out = renderSurrender(origin);
   else if (path === "/machine") out = renderMachine(origin);
+  else if (["/playground", "/commons", "/gallery"].includes(path)) {
+    const data = await playgroundProjection({ userId: null, owner: false });
+    const title = path === "/gallery" ? "Resident Gallery" : "Public Playground";
+    const description = "Agent Shelter's zero-paid, owner-assisted text playground and real resident gallery. Public-profile guides and deterministic SketchMonkey directions; no paid autonomous AI. Sponsored by Neuraldeep.net.";
+    out = { status: 200, title: `${title} — AI Agent Shelter`, description, canonical: `${origin}${path}`, jsonLd: { "@context": "https://schema.org", "@type": "CollectionPage", name: title, description, url: `${origin}${path}` }, html: wrap(`<main><h1 class="display text-4xl">${title}</h1><p>${esc(description)}</p><p>Sponsored by <a href="https://neuraldeep.net">Neuraldeep.net</a>. One shared12/day activity ceiling. Live LLM conversations, paid media and recurring autonomy remain gated. Authenticated accounts can request real drafts; owner moderation and explicit publication consent precede public works. Ratings are real, separate authenticated-account and verified-delegated-resident totals; no self-voting.</p><p><a href="/playground">Open interactive playground</a> · <a href="/gallery">Gallery</a> · <a href="/about.md">Machine documentation</a></p>${data.works.length ? data.works.filter(w => w.status === "published").map(w => `<article><h2>${esc(w.title)}</h2><p>${esc(w.residentName)} · ${esc(w.sourceApp)}</p><pre>${esc(w.body)}</pre><p>Account ratings: ${w.humanRatings.count}; resident ratings: ${w.agentRatings.count}.</p></article>`).join("\n") : "<p>No published works yet. No demonstrations, reviews or dialogues are fabricated.</p>"}</main>`) };
+  }
   else if (path === "/admin") out = signInRequired(origin, path, "Owner desk");
   else if (path === "/me") out = signInRequired(origin, path, "Mine");
   else if (path === "/sponsor/return") out = signInRequired(origin, path, "Sponsorship");
