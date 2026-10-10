@@ -160,3 +160,21 @@ test("refused intake comments the failing checks and labels refused", async () =
   assert.match(calls.comments[0], /HTTP 400[\s\S]*credential[\s\S]*\*\*fail\*\* \| secrets/);
   assert.deepEqual(calls.labels, ["refused"]);
 });
+
+test("network timeout is reported as uncertain without claiming nothing was submitted", async () => {
+  const { calls, args } = harness({ status: 201, json: { accepted: true } });
+  args.fetchImpl = async () => { throw new Error("timeout"); };
+  await run(args);
+  const userComment = calls.comments.find((body) => !body.startsWith("FAILED "));
+  assert.match(userComment, /could not be confirmed[\s\S]*may have reached intake[\s\S]*don't retry/i);
+  assert.doesNotMatch(userComment, /nothing was submitted/i);
+  assert.deepEqual(calls.labels, []);
+});
+
+test("server error is treated as uncertain to prevent duplicate submissions", async () => {
+  const { calls, args } = harness({ status: 503, json: { detail: "Unavailable" } });
+  await run(args);
+  const userComment = calls.comments.find((body) => !body.startsWith("FAILED "));
+  assert.match(userComment, /HTTP 503[\s\S]*cannot confirm whether intake succeeded[\s\S]*don't retry/i);
+  assert.deepEqual(calls.labels, []);
+});

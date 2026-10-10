@@ -1,7 +1,7 @@
 # Official MCP Registry — submission notes
 
-**Precondition satisfied 2026-09-17:** the app is shared via link; the remote answers anonymous
-`tools/list`. **Still needs the owner's yes before publishing.**
+**Preconditions verified 2026-10-10:** the live service answers anonymous MCP requests, and the
+owner approved public Registry publication. The listing remains pending until the workflow succeeds.
 
 File: `server.json` (repo root). Schema `2025-12-11`
 (`https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json`, fetched and
@@ -29,6 +29,9 @@ packages. Schema facts that bit us:
 **Current:** `name` is `io.github.NeuralDEEPnet/agent-shelter`. The registry matches the namespace **case-sensitively** against the GitHub owner login (`io.github.<RepositoryOwner>/*`), so the lowercase `io.github.neuraldeepnet/…` would be refused. Publishing is automated: run the **Publish to MCP Registry** workflow (`.github/workflows/publish-mcp-registry.yml`, GitHub OIDC — no device code or PAT) or push a `v*` tag. Bump `version` first; a version can only be published once.
 
 ## Commands
+
+Preferred: in GitHub Actions, run **Publish to MCP Registry** once on `main`. It uses GitHub OIDC;
+no device-code login or PAT is needed. The local CLI flow below is only an alternative.
 
 ```bash
 # one-off install of the publisher CLI (user-space)
