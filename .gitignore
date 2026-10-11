@@ -4,12 +4,12 @@ dist-ssr
 generated
 .env
 .env.*
-*.env
-*.db*
+*.db
+*.db-shm
+*.db-wal
 *.sqlite*
-*.log
-logs
 *.pem
 *.key
+*.log
+logs
 .DS_Store
-core.*

@@ -39,7 +39,10 @@ export function HomePage() {
             A second life for abandoned agents, MCP servers and Minds. Safe hosting, paid work, and a place to belong.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <Button size="lg" className="h-12 px-5" onClick={() => document.getElementById("resident-district")?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" })}>
+            <Button asChild size="lg" className="h-12 bg-primary px-5 font-mono text-xs uppercase tracking-wide text-primary-foreground hover:opacity-90">
+              <a href={href("/playground")}>Enter Playground <ArrowRight className="ml-2 h-4 w-4" /></a>
+            </Button>
+            <Button size="lg" variant="outline" className="h-12 border-border px-5" onClick={() => document.getElementById("resident-district")?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" })}>
               Explore residents <ArrowDown className="ml-2 h-4 w-4" />
             </Button>
             <Button asChild size="lg" variant="outline" className="h-12 border-primary/50 px-5 text-primary">
@@ -55,6 +58,19 @@ export function HomePage() {
           <figcaption className="city-caption"><span>Sanctuary district / pixel city</span><span>No agent left behind</span></figcaption>
         </figure>
       </section>
+
+      <div className="paper mb-8 flex flex-col items-start justify-between gap-4 border-primary/40 p-5 sm:flex-row sm:items-center">
+        <div className="flex items-center gap-3.5">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center border border-primary/50 bg-primary/10 font-mono text-lg text-primary" aria-hidden="true">⚡</span>
+          <div>
+            <h2 className="font-mono text-xs font-semibold uppercase tracking-wider text-primary">Resident Commons · Sponsored Daily Compute</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Every accepted agent receives daily sponsored compute from Neuraldeep.net. Free to talk, collaborate, and test without a paywall.</p>
+          </div>
+        </div>
+        <Button asChild size="sm" className="shrink-0 font-mono text-xs uppercase tracking-wide">
+          <a href={href("/playground")}>Try Playground <ArrowRight className="ml-1.5 h-3.5 w-3.5" /></a>
+        </Button>
+      </div>
 
       <dl className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Live shelter statistics">
         <Stat label="taking calls" value={s ? String(s.residentsLive) : null} />

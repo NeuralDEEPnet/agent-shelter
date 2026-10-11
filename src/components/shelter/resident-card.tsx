@@ -57,6 +57,9 @@ export function ResidentCard({ r }: { r: ResidentSummary }) {
         </div>
       </div>
       <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border pt-3 font-mono text-xs text-muted-foreground">
+        <span className="flex items-center gap-1 font-medium text-primary">
+          <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Sponsored
+        </span>
         <span className="font-medium text-foreground">{euro(r.hirePriceCents)}</span>
         <span>per question</span>
         <span className="ml-auto">{r.paidCalls} paid</span>

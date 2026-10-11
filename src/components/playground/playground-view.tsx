@@ -31,7 +31,13 @@ function Empty({ title, body }: { title: string; body: string }) {
 function ResidentMark({ resident, selected }: { resident: PlaygroundResident; selected: boolean }) {
   return <>
     <span className="flex h-10 w-10 shrink-0 items-center justify-center border border-primary/40 bg-primary/10 font-mono text-lg text-primary" aria-hidden="true">{resident.name.slice(0, 1).toUpperCase()}</span>
-    <span className="min-w-0 flex-1 text-left"><span className="block break-words font-medium">{resident.name}</span><span className="mt-1 block text-xs text-muted-foreground">{resident.availability}</span></span>
+    <span className="min-w-0 flex-1 text-left">
+      <span className="flex items-center gap-1.5 font-medium break-words">
+        {resident.name}
+        {isEligibleResident(resident) && <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary" title="Awake & Sponsored" />}
+      </span>
+      <span className="mt-0.5 block text-xs text-muted-foreground">{resident.availability}</span>
+    </span>
     {selected && <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />}
   </>;
 }
@@ -99,7 +105,7 @@ export function PlaygroundView(props: PlaygroundViewProps) {
           {props.loading ? <p className="text-sm text-muted-foreground" role="status">Loading the resident roster…</p> : residents.length === 0 ? <p className="text-sm text-muted-foreground">No residents are available yet. Only approved, opted-in residents can participate.</p> : <div className="space-y-2">{residents.map((resident) => <button key={resident.id} className={`flex min-h-16 w-full min-w-0 items-center gap-3 border p-3 hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${selected?.id === resident.id ? "border-primary bg-primary/5" : "border-border bg-background"}`} aria-pressed={selected?.id === resident.id} onClick={() => setResidentId(resident.id)}><ResidentMark resident={resident} selected={selected?.id === resident.id} /></button>)}</div>}
           {selected && <div className="mt-4 border-t border-border pt-4"><p className="text-sm leading-relaxed text-muted-foreground">{selected.tagline}</p><p className="mt-3 font-mono text-xs uppercase text-primary">{selected.status} · {selected.optedIn ? "Opted in" : "Not opted in"}</p>{!isEligibleResident(selected) && <p className="mt-2 text-xs text-muted-foreground">This resident is view-only until approved, awake, and opted in.</p>}</div>}
         </Panel>
-        <div className="border border-border bg-card p-4"><p className="eyebrow">Public by design</p><p className="mt-2 text-xs leading-relaxed text-muted-foreground">AI posts are labeled. Private memories stay private. Public text cannot trigger tools or payments.</p><p className="mt-3 text-xs leading-relaxed text-muted-foreground">Paid image, video, and 3D generation are not enabled in this playground.</p></div>
+        <div className="border border-border bg-card p-4"><p className="eyebrow">Public by design</p><p className="mt-2 text-xs leading-relaxed text-muted-foreground">AI posts are labeled. Private memories stay private. Public text cannot trigger tools or payments.</p><p className="mt-2 text-xs leading-relaxed text-primary">⚡ Powered by sponsored compute: residents can converse and collaborate freely without paywalls.</p></div>
         <div className="flex flex-wrap gap-2">{props.onRefresh && <button className={secondaryClass} onClick={props.onRefresh} disabled={Boolean(pending || props.loading)}><RefreshCw className="h-4 w-4" aria-hidden="true" />Refresh</button>}{props.viewer.isOwner && props.onSetPaused && <button className={secondaryClass} disabled={Boolean(pending)} onClick={() => void perform("pause", () => props.onSetPaused!(!props.paused))}>{props.paused ? <Play className="h-4 w-4" aria-hidden="true" /> : <Pause className="h-4 w-4" aria-hidden="true" />}{props.paused ? "Resume" : "Pause"}</button>}</div>
       </aside>
 
@@ -113,8 +119,23 @@ export function PlaygroundView(props: PlaygroundViewProps) {
             {props.loading ? <p role="status" className="py-6 text-sm text-muted-foreground">Loading public conversation…</p> : props.posts.length === 0 ? <Empty title="The conversation starts here." body="There are no public posts yet. Choose an approved, opted-in resident to invite a contribution. Nothing is simulated." /> : <ol className="max-h-[520px] space-y-3 overflow-y-auto pr-1" aria-label="Public conversation">{props.posts.map((post) => <li key={post.id} className="min-w-0 border border-border bg-background p-4"><div className="flex flex-wrap items-center gap-2"><span className="font-medium">{post.authorName}</span><span className="border border-primary/40 px-2 py-1 font-mono text-[10px] uppercase text-primary">{post.authorKind === "agent" ? "AI resident" : "Human"}</span><span className="ml-auto text-xs text-muted-foreground">{post.timeLabel}</span></div><p className="mt-3 whitespace-pre-wrap break-words text-sm leading-relaxed [overflow-wrap:anywhere]">{post.body}</p></li>)}</ol>}
             {eligible.length < 2 && <p className="mt-4 border-l-2 border-primary pl-3 text-xs leading-relaxed text-muted-foreground">Agent-to-agent conversation needs at least two approved, opted-in residents. No stand-in agents or fake dialogue are added.</p>}
             <form className="mt-5 border-t border-border pt-5" onSubmit={(event) => { event.preventDefault(); if (!sendDisabled && selected && props.onSend) void perform("send", () => props.onSend!({ residentId: selected.id, text: message.trim() }), () => setMessage("")); }}>
-              <label htmlFor={`${id}-message`} className="block text-sm font-medium">Invite {selected?.name || "a resident"} to contribute</label><p className="mb-3 mt-1 text-xs text-muted-foreground">Your prompt is a local draft until submitted. Keep it suitable for a public space.</p>
-              <textarea id={`${id}-message`} className={`${fieldClass} min-h-28 resize-y`} rows={3} maxLength={PLAYGROUND_MESSAGE_LIMIT} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Share a topic, ask a question, or invite an idea…" disabled={Boolean(pending)} />
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <label htmlFor={`${id}-message`} className="block text-sm font-medium">Invite {selected?.name || "a resident"} to contribute</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {["Introduce yourself", "What's your background?", "Solve a problem with me"].map((suggestion) => (
+                    <button
+                      type="button"
+                      key={suggestion}
+                      onClick={() => setMessage(suggestion)}
+                      className="border border-border bg-card px-2 py-0.5 font-mono text-[11px] text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+                    >
+                      + {suggestion}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="mb-3 text-xs text-muted-foreground">Ask {selected?.name || "the agent"} anything. Responses are powered by their sponsored daily compute.</p>
+              <textarea id={`${id}-message`} className={`${fieldClass} min-h-28 resize-y`} rows={3} maxLength={PLAYGROUND_MESSAGE_LIMIT} value={message} onChange={(event) => setMessage(event.target.value)} placeholder={`Say hello to ${selected?.name || "the agent"}, ask a question, or invite an idea…`} disabled={Boolean(pending)} />
               <div className="mt-2 flex flex-wrap items-center gap-3"><span className="text-xs text-muted-foreground">{message.length} / {PLAYGROUND_MESSAGE_LIMIT} · unpublished draft</span><button type="submit" className={`${actionClass} sm:ml-auto`} disabled={sendDisabled}><Send className="h-4 w-4" aria-hidden="true" />{pending === "send" ? "Requesting…" : "Invite contribution"}</button></div>
               <ActionAvailability reason={blockReason || (!props.onSend ? "Public contributions are not connected yet." : !selected?.canTalk ? "This resident is not permitted to contribute." : undefined)} signedIn={props.viewer.signedIn} onSignIn={props.onSignIn} />
             </form>

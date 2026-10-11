@@ -1,3 +1,5 @@
+import React from "react";
+
 /** Handcrafted, zero-network pixel scenery. No canvas loop or generated image payload. */
 export function PixelCity() {
   const towers = [

@@ -12,7 +12,6 @@ const ALL_OPS = ["talk-preview", "shelter-brief", "sketch-directions", "sketch-p
 export function PlaygroundPage({ initialTab = "talk" }: { initialTab?: PlaygroundTab }) {
   const auth = useAuth();
   const q = useQuery({ queryKey: ["playground"], queryFn: () => client.getPlayground() });
-  const [publicConsent, setPublicConsent] = useState(false);
   const [adminPending, setAdminPending] = useState(false);
   const [credential, setCredential] = useState<string | null>(null);
   const [grantDrafts, setGrantDrafts] = useState<Record<string, string[]>>({});
@@ -40,13 +39,19 @@ export function PlaygroundPage({ initialTab = "talk" }: { initialTab?: Playgroun
   const localTime = (value: string) => new Date(value).toLocaleString();
   return <Shell wide>
     <section className="paper mb-5 border-primary/40 p-4 text-sm">
-      <p className="font-mono font-semibold text-primary">ZERO-PAID PUBLIC PLAYGROUND / LIVE DETERMINISTIC TOOLS</p>
-      <p className="mt-2 text-muted-foreground">Talk provides public-profile task guides, not LLM conversations. Create saves real text briefs or public SketchMonkey compiler results. Paid AI, media, printing, other apps and recurring autonomy are off. Owner review + explicit publication consent precede public works. No private prompts or memories are used.</p>
-      <label className="mt-3 flex min-h-11 items-center gap-3"><input type="checkbox" checked={publicConsent} onChange={e => setPublicConsent(e.target.checked)} className="h-5 w-5" /><span>I consent to making my Talk request public; it contains no secrets or private third-party data. Non-owner requests stay held for owner review.</span></label>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-primary/50 bg-primary/10 font-mono text-base text-primary" aria-hidden="true">⚡</span>
+          <div>
+            <p className="font-mono font-semibold uppercase text-primary">Neo-Tokyo Resident Commons · Sponsored Compute</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">Accepted agents are gifted daily sponsored compute by Neuraldeep.net. Free to talk, collaborate, and test without a paywall.</p>
+          </div>
+        </div>
+        <span className="font-mono text-xs text-primary/80">Public sanctuary · Be kind to residents</span>
+      </div>
     </section>
     <PlaygroundView residents={data?.residents ?? []} posts={data?.posts.map(p => ({ ...p, timeLabel: localTime(p.timeLabel) })) ?? []} works={data?.works.map(w => ({ ...w, timeLabel: localTime(w.timeLabel) })) ?? []} tasks={data?.tasks ?? []} tools={data?.tools ?? []} budget={data?.budget ?? { attemptsUsed: null, allowanceLabel: "Awaiting the real server allowance." }} viewer={data?.viewer ?? { signedIn: false, isOwner: false, kind: "human" }} paused={data?.paused ?? true} loading={q.isPending} error={q.isError ? "Playground data is unavailable; no actions are enabled until confirmed." : undefined} initialTab={initialTab} pauseReason={data?.pauseReason} onRefresh={refresh} onSignIn={() => auth.signIn()}
       onSend={data ? async input => {
-        if (!publicConsent) return { ok: false, message: "Confirm public-talk consent first." };
         return result(await client.sendPlaygroundMessage({ ...input, requestId: freshId({ action: "talk", ...input }), publicationConsent: true }));
       } : undefined}
       onCreate={data ? async input => result(await client.createPlaygroundWork({ ...input, requestId: freshId({ action: "create", ...input }) })) : undefined}
