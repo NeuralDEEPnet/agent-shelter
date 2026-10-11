@@ -34,6 +34,12 @@ metadata, public SDK-free CI and licence selection remain separate follow-ups. T
 historical root cause is not inferred from a recovered endpoint; the managed lifecycle remains
 platform-owned, with no custom supervisor installed.
 
+During this follow-up, production logs reproduced a narrower build race: nodemon restarted
+while Vite had temporarily removed `dist/api/server.js`. The existing `prod:api` command now
+waits for its bundle on every startup/restart, watches only dist/api and uses a one-second debounce.
+This removes source/JSON-change restart churn and protects the observed rebuild window; it
+does not establish the cause of the October 10 outage or promise zero downtime during builds.
+
 ---
 
 ## 1. P0: live API went down

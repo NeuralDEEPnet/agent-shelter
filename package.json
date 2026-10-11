@@ -28,7 +28,7 @@
     "prod:migrations": "dotenv -e .env.production -- prisma migrate deploy 2>&1 | tee -a api-prod.log",
     "prod:free-ports": "for p in $PORT $((PORT+1)); do lsof -ti :$p | xargs -r kill -9 2>/dev/null; done; true",
     "prod:vite": "vite preview --host 0.0.0.0 2>&1 | tee -a vite-prod.log",
-    "prod:api": "nodemon dist/api/server.js 2>&1 | tee -a api-prod.log",
+    "prod:api": "nodemon --watch dist/api --ext js,mjs,cjs,json --delay 1 --exec sh scripts/run-built-api.sh 2>&1 | tee -a api-prod.log",
     "prod:stop": "dotenv -e .env.production -- npm run prod:free-ports",
     "prod:restart": "run-s prod:stop prod",
     "prod": "dotenv -e .env.production -- run-s prod:free-ports && dotenv -e .env.production -- run-p prod:vite prod:api"

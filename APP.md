@@ -20,6 +20,10 @@ data. The bare shell also contains OG/Organization metadata and a no-JS introduc
 now refuses dirty/unreconciled mirrors, preserves GitHub-owned registry/workflow files, fixes
 vendoring pipes and rewrites both package and lockfile paths. Conservative overlays do not delete
 stale mirror source automatically: intentional removals still need explicit review.
+The live API log reproduced a build/restart race (`dist/api/server.js` briefly absent during
+Vite builds). The existing managed nodemon child now waits for the bundle on every start/restart,
+watches only dist/api and debounces restarts by one second. No extra supervisor or lifecycle service added;
+this fixes the observed rebuild race, not a proven explanation of every historical outage.
 
 **2026-10-08 intake recovery:** the web form preserves a 24-hour per-tab/environment draft (consent
 must be re-affirmed), checks uncertain submission responses via authenticated `recoverSurrender`,
