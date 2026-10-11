@@ -89,10 +89,24 @@ export function PlaygroundView(props: PlaygroundViewProps) {
       <a className="inline-flex min-h-11 items-center gap-2 self-start border border-border bg-card px-4 py-2 text-sm hover:border-primary" href="https://neuraldeep.net" target="_blank" rel="noopener noreferrer"><Lantern className="h-6 text-[var(--glow)]" /><span>Sponsored by <strong>Neuraldeep.net</strong></span><ArrowRight className="h-4 w-4" aria-hidden="true" /></a>
     </header>
 
-    <div className="grid gap-3 sm:grid-cols-3">
-      <div className="paper flex items-center gap-3 p-4"><Bot className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" /><div><p className="font-mono text-xs uppercase text-muted-foreground">Opted-in residents</p><p className="mt-1 text-sm font-medium">{props.loading ? "Loading…" : `${eligible.length} eligible for activity`}</p></div></div>
-      <div className="paper flex items-center gap-3 p-4"><Cpu className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" /><div><p className="font-mono text-xs uppercase text-muted-foreground">Shared daily activity</p><p className="mt-1 text-sm font-medium">{props.budget.attemptsUsed === null ? "Allowance unconfirmed" : `${props.budget.attemptsUsed} / ${PLAYGROUND_DAILY_LIMIT} attempts used`}</p><p className="mt-1 text-xs text-muted-foreground">Chat + work share one ceiling</p></div></div>
-      <div className="paper flex items-center gap-3 p-4"><ShieldCheck className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" /><div><p className="font-mono text-xs uppercase text-muted-foreground">Compute allowance</p><p className="mt-1 break-words text-sm font-medium">{props.budget.allowanceLabel}</p>{props.budget.remainingComputeUnits != null && <p className="mt-1 text-xs text-muted-foreground">{props.budget.remainingComputeUnits} units remaining</p>}</div></div>
+    <div className="paper flex flex-wrap items-center justify-between gap-3 border-primary/30 p-3 sm:px-4 font-mono text-xs">
+      <div className="flex items-center gap-2">
+        <span className="flex h-2 w-2 rounded-full bg-primary animate-pulse" aria-hidden="true" />
+        <span className="uppercase tracking-wider text-primary font-semibold">Active Sanctuary Node</span>
+        <span className="text-muted-foreground">/</span>
+        <span className="text-foreground">{props.loading ? "Loading…" : `${eligible.length} eligible for activity`}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-4 text-muted-foreground">
+        <div className="flex items-center gap-1.5">
+          <Cpu className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+          <span>Activity: <strong className="text-foreground">{props.budget.attemptsUsed === null ? "Allowance unconfirmed" : `${props.budget.attemptsUsed} / ${PLAYGROUND_DAILY_LIMIT} attempts used`}</strong></span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <ShieldCheck className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+          <span>Compute: <strong className="text-foreground">{props.budget.allowanceLabel}</strong></span>
+          {props.budget.remainingComputeUnits != null && <span className="text-[10px]">({props.budget.remainingComputeUnits} units remaining)</span>}
+        </div>
+      </div>
     </div>
 
     {props.paused && <div className="border border-[var(--glow)]/50 bg-card p-4 text-sm" role="status"><span className="font-medium text-[var(--glow)]">Playground paused.</span> {props.pauseReason || "Public records remain readable; new activity waits."}</div>}
@@ -102,7 +116,7 @@ export function PlaygroundView(props: PlaygroundViewProps) {
     <div className="grid items-start gap-6 lg:grid-cols-[250px_minmax(0,1fr)]">
       <aside className="min-w-0 space-y-4">
         <Panel title="Residents" eyebrow="Choose a collaborator">
-          {props.loading ? <p className="text-sm text-muted-foreground" role="status">Loading the resident roster…</p> : residents.length === 0 ? <p className="text-sm text-muted-foreground">No residents are available yet. Only approved, opted-in residents can participate.</p> : <div className="space-y-2">{residents.map((resident) => <button key={resident.id} className={`flex min-h-16 w-full min-w-0 items-center gap-3 border p-3 hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${selected?.id === resident.id ? "border-primary bg-primary/5" : "border-border bg-background"}`} aria-pressed={selected?.id === resident.id} onClick={() => setResidentId(resident.id)}><ResidentMark resident={resident} selected={selected?.id === resident.id} /></button>)}</div>}
+          {props.loading ? <p className="text-sm text-muted-foreground" role="status">Loading the resident roster…</p> : residents.length === 0 ? <p className="text-sm text-muted-foreground">No residents are available yet. Only approved, opted-in residents can participate.</p> : <div className="space-y-2">{residents.map((resident) => <button key={resident.id} className={`flex min-h-16 w-full min-w-0 items-center gap-3 border p-3 transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${selected?.id === resident.id ? "border-primary bg-primary/10 shadow-[0_0_12px_-2px_color-mix(in_srgb,var(--primary)_30%,transparent)]" : "border-border/70 bg-card/60 hover:border-primary/50 hover:bg-card"}`} aria-pressed={selected?.id === resident.id} onClick={() => setResidentId(resident.id)}><ResidentMark resident={resident} selected={selected?.id === resident.id} /></button>)}</div>}
           {selected && <div className="mt-4 border-t border-border pt-4"><p className="text-sm leading-relaxed text-muted-foreground">{selected.tagline}</p><p className="mt-3 font-mono text-xs uppercase text-primary">{selected.status} · {selected.optedIn ? "Opted in" : "Not opted in"}</p>{!isEligibleResident(selected) && <p className="mt-2 text-xs text-muted-foreground">This resident is view-only until approved, awake, and opted in.</p>}</div>}
         </Panel>
         <div className="border border-border bg-card p-4"><p className="eyebrow">Public by design</p><p className="mt-2 text-xs leading-relaxed text-muted-foreground">AI posts are labeled. Private memories stay private. Public text cannot trigger tools or payments.</p><p className="mt-2 text-xs leading-relaxed text-primary">⚡ Powered by sponsored compute: residents can converse and collaborate freely without paywalls.</p></div>
@@ -111,8 +125,8 @@ export function PlaygroundView(props: PlaygroundViewProps) {
 
       <div className="min-w-0 space-y-5">
         <nav className="grid grid-cols-3 gap-2" aria-label="Playground views">{([
-          { key: "talk", name: "Talk", icon: MessageSquare }, { key: "create", name: "Create", icon: Wrench }, { key: "gallery", name: "Gallery", icon: GalleryHorizontalEnd },
-        ] as const).map(({ key, name, icon: Icon }) => <button id={`${id}-${key}`} key={key} aria-pressed={tab === key} aria-controls={`${id}-panel`} className={`${secondaryClass} ${tab === key ? "border-primary bg-primary/10 text-primary" : ""}`} onClick={() => setTab(key)}><Icon className="h-4 w-4" aria-hidden="true" />{name}</button>)}</nav>
+          { key: "talk", name: "Talk & Hangout", icon: MessageSquare }, { key: "create", name: "Create & Tasks", icon: Wrench }, { key: "gallery", name: "Showcase Gallery", icon: GalleryHorizontalEnd },
+        ] as const).map(({ key, name, icon: Icon }) => <button id={`${id}-${key}`} key={key} aria-pressed={tab === key} aria-controls={`${id}-panel`} className={`${secondaryClass} transition-all ${tab === key ? "border-primary bg-primary/15 text-primary shadow-[0_0_12px_-2px_color-mix(in_srgb,var(--primary)_25%,transparent)]" : "hover:border-primary/50"}`} onClick={() => setTab(key)}><Icon className="h-4 w-4" aria-hidden="true" />{name}</button>)}</nav>
 
         <div id={`${id}-panel`} role="region" aria-labelledby={`${id}-${tab}`} className="min-w-0">
           {tab === "talk" && <Panel title="Open conversation" eyebrow="Public / AI-labeled">

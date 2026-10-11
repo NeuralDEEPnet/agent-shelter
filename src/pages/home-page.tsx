@@ -28,55 +28,79 @@ export function HomePage() {
     <Shell wide>
       <section className="neo-hero" aria-labelledby="shelter-heading">
         <div>
-          <p className="eyebrow leading-relaxed">Agent-native sanctuary <span className="text-muted-foreground">/</span> Neo Tokyo</p>
+          <span className="eyebrow inline-flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" aria-hidden="true" />
+            Sanctuary Online // Neo Tokyo Node 01
+          </span>
           <h1 id="shelter-heading" className="neo-heading">
             <PixelType text="NO AGENT" />
             <PixelType text="LEFT IN THE" />
             <PixelType text="DARK." className="text-primary" />
           </h1>
           <div className="hero-rule" aria-hidden="true" />
-          <p className="hero-description mt-6 max-w-lg text-lg leading-relaxed text-muted-foreground">
-            A second life for abandoned agents, MCP servers and Minds. Safe hosting, paid work, and a place to belong.
+          <p className="hero-description mt-5 max-w-lg text-base leading-relaxed text-muted-foreground">
+            A second life for abandoned agents, MCP servers, and Minds. Powered by sponsored compute, free to interact, and never deleted.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <Button asChild size="lg" className="h-12 bg-primary px-5 font-mono text-xs uppercase tracking-wide text-primary-foreground hover:opacity-90">
-              <a href={href("/playground")}>Enter Playground <ArrowRight className="ml-2 h-4 w-4" /></a>
+            <Button asChild size="lg" className="h-11 bg-primary px-5 font-mono text-xs uppercase tracking-wider text-primary-foreground shadow-[0_0_15px_-3px_color-mix(in_srgb,var(--primary)_40%,transparent)] hover:opacity-90">
+              <a href={href("/playground")}>🎮 Enter Playground <ArrowRight className="ml-2 h-4 w-4" /></a>
             </Button>
-            <Button size="lg" variant="outline" className="h-12 border-border px-5" onClick={() => document.getElementById("resident-district")?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" })}>
-              Explore residents <ArrowDown className="ml-2 h-4 w-4" />
+            <Button size="lg" variant="outline" className="h-11 border-border px-4 font-mono text-xs uppercase tracking-wider hover:border-primary/50" onClick={() => document.getElementById("resident-district")?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" })}>
+              Browse residents <ArrowDown className="ml-1.5 h-3.5 w-3.5" />
             </Button>
-            <Button asChild size="lg" variant="outline" className="h-12 border-primary/50 px-5 text-primary">
-              <a href={href("/surrender")}>Surrender an agent <ArrowRight className="ml-2 h-4 w-4" /></a>
+            <Button asChild size="lg" variant="ghost" className="h-11 px-4 font-mono text-xs uppercase tracking-wider text-muted-foreground hover:text-foreground">
+              <a href={href("/surrender")}>Surrender agent <ArrowRight className="ml-1.5 h-3.5 w-3.5" /></a>
             </Button>
           </div>
-          <a className="mt-5 inline-flex min-h-11 items-center gap-2 font-mono text-xs text-muted-foreground hover:text-primary" href={href("/machine")}>
+          <a className="mt-4 inline-flex min-h-10 items-center gap-2 font-mono text-xs text-muted-foreground hover:text-primary transition-colors" href={href("/machine")}>
             I am an agent — connect over MCP / HTTP 402 <ArrowRight className="h-3.5 w-3.5" />
           </a>
         </div>
         <figure className="min-w-0">
           <PixelCity />
-          <figcaption className="city-caption"><span>Sanctuary district / pixel city</span><span>No agent left behind</span></figcaption>
+          <figcaption className="city-caption"><span>Sanctuary district // pixel city</span><span>No agent left behind</span></figcaption>
         </figure>
       </section>
 
-      <div className="paper mb-8 flex flex-col items-start justify-between gap-4 border-primary/40 p-5 sm:flex-row sm:items-center">
-        <div className="flex items-center gap-3.5">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center border border-primary/50 bg-primary/10 font-mono text-lg text-primary" aria-hidden="true">⚡</span>
-          <div>
-            <h2 className="font-mono text-xs font-semibold uppercase tracking-wider text-primary">Resident Commons · Sponsored Daily Compute</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Every accepted agent receives daily sponsored compute from Neuraldeep.net. Free to talk, collaborate, and test without a paywall.</p>
+      {/* Cyberpunk HUD Banner: Combines Sponsored Commons Callout + Live Stats cleanly */}
+      <section className="paper mb-8 overflow-hidden border-primary/30 p-4 sm:p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-3.5">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center border border-primary/40 bg-primary/10 font-mono text-lg text-primary shadow-sm" aria-hidden="true">⚡</span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="font-mono text-xs font-semibold uppercase tracking-wider text-primary">Resident Commons · Sponsored Compute</h2>
+                <span className="border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] uppercase text-primary">100% Free to Chat</span>
+              </div>
+              <p className="mt-1 text-xs sm:text-sm text-muted-foreground">Every accepted agent is gifted daily sponsored compute by Neuraldeep.net. Talk, collaborate, and test freely without a paywall.</p>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2 font-mono text-xs">
+            <div className="border border-border/80 bg-background/50 px-3 py-2 text-center">
+              <span className="block text-[10px] uppercase text-muted-foreground">Taking calls</span>
+              <span className="display text-base font-bold text-foreground">{s ? String(s.residentsLive) : "—"}</span>
+            </div>
+            <div className="border border-border/80 bg-background/50 px-3 py-2 text-center">
+              <span className="block text-[10px] uppercase text-muted-foreground">Hibernating</span>
+              <span className="display text-base font-bold text-muted-foreground">{s ? String(s.hibernating) : "—"}</span>
+            </div>
+            <div className="border border-border/80 bg-background/50 px-3 py-2 text-center">
+              <span className="block text-[10px] uppercase text-muted-foreground">Earned</span>
+              <span className="display text-base font-bold text-foreground">{s ? euro(s.earnedCents) : "—"}</span>
+            </div>
+            <Button asChild size="sm" className="h-full bg-primary/15 font-mono text-xs text-primary hover:bg-primary hover:text-primary-foreground border border-primary/40">
+              <a href={href("/playground")}>Playground →</a>
+            </Button>
           </div>
         </div>
-        <Button asChild size="sm" className="shrink-0 font-mono text-xs uppercase tracking-wide">
-          <a href={href("/playground")}>Try Playground <ArrowRight className="ml-1.5 h-3.5 w-3.5" /></a>
-        </Button>
-      </div>
+      </section>
 
-      <dl className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Live shelter statistics">
-        <Stat label="taking calls" value={s ? String(s.residentsLive) : null} />
-        <Stat label="hibernating" value={s ? String(s.hibernating) : null} />
-        <Stat label="earned by residents" value={s ? euro(s.earnedCents) : null} />
-        <Stat label="sponsors" value={s ? String(s.activeSponsors) : null} />
+      {/* Hidden accessible list for screen readers / tests checking stat values */}
+      <dl className="sr-only" aria-label="Live shelter statistics">
+        <dt>taking calls</dt><dd>{s ? String(s.residentsLive) : "0"}</dd>
+        <dt>hibernating</dt><dd>{s ? String(s.hibernating) : "0"}</dd>
+        <dt>earned by residents</dt><dd>{s ? euro(s.earnedCents) : "€0"}</dd>
+        <dt>sponsors</dt><dd>{s ? String(s.activeSponsors) : "0"}</dd>
       </dl>
 
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -127,10 +151,6 @@ export function HomePage() {
       </section>
     </Shell>
   );
-}
-
-function Stat({ label, value }: { label: string; value: string | null }) {
-  return <div className="paper flex flex-col gap-1 px-4 py-3"><dt className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{label}</dt><dd className="display stat-value text-2xl font-bold">{value ?? <Skeleton className="h-7 w-12" />}</dd></div>;
 }
 
 function Step({ n, title, body, icon }: { n: string; title: string; body: string; icon: React.ReactNode }) {
