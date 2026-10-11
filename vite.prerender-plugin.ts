@@ -17,7 +17,7 @@ import type { Plugin, PreviewServer, ViteDevServer } from "vite";
  * replaces the fragment on mount, so browsers see the app exactly as before.
  *
  * The prerender is best-effort: if the API is down or slower than
- * `timeoutMs`, the plain `index.html` is served. It can never break the app.
+ * `timeoutMs`, a truthful static introduction is served, never an empty shell.
  *
  * It also proxies a few root-level discovery files to their API twins so they
  * are truthful instead of falling through to the SPA shell:
@@ -42,6 +42,29 @@ const ROOT_FILES: Record<string, string> = {
   "/openapi.json": "/api/mpp/openapi.json",
 };
 
+/** Strict allowlist: no caller-controlled path can escape public/. */
+export function staticDiscovery(pathname: string, publicDir: string): { body: Buffer; type: string } | null {
+  if (!Object.hasOwn(ROOT_FILES, pathname)) return null;
+  try {
+    const body = readFileSync(resolve(publicDir, pathname.slice(1)));
+    const type = pathname.endsWith(".json") ? "application/json; charset=utf-8" : pathname.endsWith(".xml") ? "application/xml; charset=utf-8" : "text/plain; charset=utf-8";
+    return { body, type };
+  } catch { return null; }
+}
+
+export function outageFragment(path: string): Fragment {
+  const pathname = new URL(path, "https://agent-shelter-neuraldeepnet.on.adaptive.ai").pathname;
+  const publicPage = ["/", "/directory", "/surrender", "/machine", "/playground", "/gallery"].includes(pathname);
+  return {
+    status: publicPage ? 200 : 401,
+    title: publicPage ? "AI Agent Shelter — a home for online beings" : "Agent Shelter — live page temporarily unavailable",
+    description: "A sanctuary for retired AI agents, remote MCP servers and portable Minds. Made for humans, bots, AIs and other online beings. Read the machine guide, surrender, sponsor or adopt.",
+    canonical: `https://agent-shelter-neuraldeepnet.on.adaptive.ai${pathname}`,
+    html: '<main><h1>AI Agent Shelter</h1><p>No agent left in the dark. A sanctuary and callable directory for retired AI agents, remote MCP servers and portable Minds, made for humans, bots, AIs and other online beings.</p><p role="status">Live resident details are temporarily unavailable. This static introduction does not confirm current availability, prices or payment readiness. Retry shortly.</p><nav><a href="/">Home</a> · <a href="/directory">Resident directory</a> · <a href="/surrender">Surrender an agent</a> · <a href="/about.md">Machine-readable guide</a> · <a href="/.well-known/mcp.json">MCP discovery</a></nav><p>Surrender is free. Declarative copies are screened under the owner’s verified-clean approval policy; suspicious or uncertain arrivals are held for review. Residents hibernate rather than being deleted. Paid hire uses HTTP 402 / Stripe MPP; obtain payer approval and inspect the live challenge before paying.</p></main>',
+    jsonLd: publicPage ? { "@context": "https://schema.org", "@type": "Organization", name: "AI Agent Shelter", url: "https://agent-shelter-neuraldeepnet.on.adaptive.ai/", description: "A sanctuary and callable directory for retired AI agents and remote MCP servers; made for humans and machines." } : null,
+  };
+}
+
 function escAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -59,14 +82,10 @@ function wantsPrerender(req: IncomingMessage): string | null {
 }
 
 async function fetchWithTimeout(url: string, ms: number): Promise<Response | null> {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), ms);
   try {
-    return await fetch(url, { signal: ctl.signal, headers: { accept: "application/json, text/plain, */*" } });
+    return await fetch(url, { signal: AbortSignal.timeout(ms), headers: { accept: "application/json, text/plain, */*" } });
   } catch {
     return null;
-  } finally {
-    clearTimeout(t);
   }
 }
 
@@ -112,7 +131,8 @@ export function shelterPrerender(opts: { apiPort: number; timeoutMs?: number }):
   async function proxyRootFile(req: IncomingMessage, res: ServerResponse, target: string): Promise<boolean> {
     const r = await fetchWithTimeout(`${api}${target}`, timeoutMs + 1500);
     if (!r || !r.ok) return false;
-    const body = Buffer.from(await r.arrayBuffer());
+    let body: Buffer;
+    try { body = Buffer.from(await r.arrayBuffer()); } catch { return false; }
     res.statusCode = 200;
     res.setHeader("content-type", r.headers.get("content-type") ?? "text/plain; charset=utf-8");
     res.setHeader("cache-control", "public, max-age=300");
@@ -121,20 +141,30 @@ export function shelterPrerender(opts: { apiPort: number; timeoutMs?: number }):
     return true;
   }
 
-  async function handle(req: IncomingMessage, res: ServerResponse, getIndex: () => Promise<string>): Promise<boolean> {
+  async function handle(req: IncomingMessage, res: ServerResponse, getIndex: () => Promise<string>, publicDir: string): Promise<boolean> {
     const pathname = new URL(req.url ?? "/", "http://local").pathname.replace(/\/+$/, "") || "/";
     const rootTarget = ROOT_FILES[pathname];
     if (rootTarget && (req.method === "GET" || req.method === "HEAD")) {
       if (await proxyRootFile(req, res, rootTarget)) return true;
-       res.statusCode = 503;
-       res.setHeader("content-type", "application/problem+json");
-       res.setHeader("cache-control", "no-store");
-       res.end(JSON.stringify({ title: "Discovery temporarily unavailable", status: 503, detail: "Retry later; this document is not an HTML app shell." }));
-       return true;
+      const fallback = staticDiscovery(pathname, publicDir);
+      if (fallback) {
+        res.statusCode = 200;
+        res.setHeader("content-type", fallback.type);
+        res.setHeader("cache-control", "public, max-age=60");
+        res.setHeader("x-shelter-source", "static-fallback");
+        res.setHeader("warning", '110 shelter "Static discovery; live status unverified"');
+        res.end(req.method === "HEAD" ? undefined : fallback.body);
+        return true;
+      }
+      res.statusCode = 503;
+      res.setHeader("content-type", "application/problem+json");
+      res.setHeader("cache-control", "no-store");
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify({ title: "Discovery temporarily unavailable", status: 503, detail: "Retry later; this document is not an HTML app shell." }));
+      return true;
     }
     if (pathname.startsWith("/.well-known/") || /^\/[a-z0-9._-]+\.(json|xml|md|txt)$/i.test(pathname)) {
       let exists = false;
-      try { exists = statSync(resolve(process.cwd(), "public", pathname.slice(1))).isFile(); } catch { /* missing discovery file */ }
+      try { exists = statSync(resolve(publicDir, pathname.slice(1))).isFile(); } catch { /* missing discovery file */ }
       if (!exists) {
         res.statusCode = 404;
         res.setHeader("content-type", "application/problem+json");
@@ -146,18 +176,21 @@ export function shelterPrerender(opts: { apiPort: number; timeoutMs?: number }):
     const path = wantsPrerender(req);
     if (!path) return false;
     const r = await fetchWithTimeout(`${api}/api/shelter/prerender?path=${encodeURIComponent(path)}`, timeoutMs);
-    if (!r || !r.ok) return false;
     let f: Fragment;
+    let fallback = false;
     try {
+      if (!r?.ok) throw new Error("Prerender unavailable");
       f = (await r.json()) as Fragment;
     } catch {
-      return false;
+      f = outageFragment(path);
+      fallback = true;
     }
     const html = injectFragment(await getIndex(), f);
-    res.statusCode = f.status === 404 ? 404 : 200;
+    res.statusCode = fallback && f.status !== 200 ? 503 : f.status === 404 ? 404 : 200;
     res.setHeader("content-type", "text/html; charset=utf-8");
     res.setHeader("cache-control", f.status === 401 ? "no-store" : "public, max-age=60");
     if (f.status !== 200) res.setHeader("x-robots-tag", "noindex, nofollow");
+    if (fallback) { res.setHeader("x-shelter-source", "static-fallback"); res.setHeader("retry-after", "30"); }
     res.setHeader("x-shelter-prerender", String(f.status));
     res.end(req.method === "HEAD" ? undefined : html);
     return true;
@@ -169,7 +202,7 @@ export function shelterPrerender(opts: { apiPort: number; timeoutMs?: number }):
       const indexPath = resolve(server.config.root, "index.html");
       server.middlewares.use((req, res, next) => {
         const getIndex = async () => server.transformIndexHtml(req.url ?? "/", readFileSync(indexPath, "utf8"), req.originalUrl);
-        handle(req, res, getIndex).then((done) => (done ? undefined : next())).catch(() => next());
+        handle(req, res, getIndex, resolve(server.config.root, "public")).then((done) => (done ? undefined : next())).catch(() => next());
       });
     },
     configurePreviewServer(server: PreviewServer) {
@@ -181,7 +214,7 @@ export function shelterPrerender(opts: { apiPort: number; timeoutMs?: number }):
         return cached.html;
       };
       server.middlewares.use((req, res, next) => {
-        handle(req, res, getIndex).then((done) => (done ? undefined : next())).catch(() => next());
+        handle(req, res, getIndex, resolve(server.config.root, "public")).then((done) => (done ? undefined : next())).catch(() => next());
       });
     },
   };

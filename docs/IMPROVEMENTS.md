@@ -14,6 +14,26 @@ Audit of the public repo and the live service (https://agent-shelter-neuraldeepn
 | 8 | P2 | Public CI can't type-check or test the app | Both |
 | 9 | P3 | No LICENSE / SECURITY.md; template package name | GitHub |
 
+## Adaptive follow-up — 2026-10-11
+
+Items 3–5 are addressed in source: every default MCP request (including notifications) uses
+DNS validation of all answers plus a pinned HTTPS lookup, with the original TLS server name,
+10-second deadline, no redirects and 256 KiB cap. Root discovery falls back to allowlisted static
+documents; public HTML keeps a truthful static introduction during API outages. Missing resident
+or private live data is never fabricated (503/noindex/no-store). Bare HTML includes no-JS copy,
+OG and Organization metadata. Fallbacks require the Vite/preview process itself to be reachable.
+
+The push-script part of item 7 is repaired: fetch-and-equal-HEAD guards, no mirror wipe,
+GitHub-owned registry/workflow files preserved, proper shared-package tar pipes and lockfile
+rewriting. Overlay sync deliberately requires manual review of intended source deletions.
+
+Some audit evidence is historical: MCP `tools/list` already includes annotations, and the
+current `hire` MCP tool only returns instructions; it neither runs a resident nor charges.
+No annotation or payment behavior was changed here. Runtime structured output, server-card
+metadata, public SDK-free CI and licence selection remain separate follow-ups. The outage's
+historical root cause is not inferred from a recovered endpoint; the managed lifecycle remains
+platform-owned, with no custom supervisor installed.
+
 ---
 
 ## 1. P0: live API went down

@@ -11,20 +11,21 @@ SSH_KEY="${HOME}/.ssh/deploy_agent_shelter"
 export GIT_SSH_COMMAND="ssh -i ${SSH_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
 MSG="${1:-Update agent-shelter}"
 
-mkdir -p "$MIRROR"
 if [ ! -d "$MIRROR/.git" ]; then
-  git -C "$MIRROR" init -q -b main
-  git -C "$MIRROR" remote add origin "$REMOTE"
-  git -C "$MIRROR" config user.name "Adaptive (agent-shelter)"
-  git -C "$MIRROR" config user.email "work@neuraldeep.net"
-  # Fetch existing remote history if present
-  git -C "$MIRROR" fetch origin main 2>/dev/null && git -C "$MIRROR" reset --soft origin/main 2>/dev/null || true
+  echo "Missing mirror: clone $REMOTE and review it before the first snapshot." >&2
+  exit 1
 fi
 
-# Source only. Anything env/db/log/build/dependency never leaves this box.
-find "$MIRROR" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+# Never snapshot over unseen upstream or a dirty mirror. Pull/reconcile first.
+test -z "$(git -C "$MIRROR" status --porcelain)" || { echo "Dirty mirror: reconcile before pushing." >&2; exit 1; }
+git -C "$MIRROR" fetch origin main
+test "$(git -C "$MIRROR" rev-parse HEAD)" = "$(git -C "$MIRROR" rev-parse origin/main)" || { echo "Upstream differs: run pull-github.sh and review before pushing." >&2; exit 1; }
+
+# Conservative overlay, not a destructive wipe. Repo-only registry/workflow files
+# remain owned by GitHub. Deliberate source deletions need explicit mirror review.
 tar -C "$SRC" \
   --exclude="./.git" \
+  --exclude="./.github" --exclude="./server.json" --exclude="./glama.json" --exclude="./docs/listings" --exclude="./llms.txt" \
   --exclude="node_modules" --exclude="./dist" --exclude="./dist-ssr" --exclude="./generated" \
   --exclude=".env" --exclude=".env.*" --exclude="*.env" \
   --exclude="*.db" --exclude="*.db-shm" --exclude="*.db-wal" --exclude="*.sqlite*" \
@@ -36,23 +37,25 @@ tar -C "$SRC" \
 # Vendor shared packages so external agents can run npm install without missing ../shared
 mkdir -p "$MIRROR/packages"
 if [ -d "/home/computer/shared/model-router" ]; then
-  tar -C "/home/computer/shared/model-router" --exclude="node_modules" -cf - . | mkdir -p "$MIRROR/packages/model-router" && tar -C "$MIRROR/packages/model-router" -xf -
+  mkdir -p "$MIRROR/packages/model-router"
+  tar -C "/home/computer/shared/model-router" --exclude="node_modules" --exclude=".git" --exclude=".env*" --exclude="*.log" -cf - . | tar -C "$MIRROR/packages/model-router" -xf -
 fi
 if [ -d "/home/computer/shared/mpp-kit" ]; then
-  tar -C "/home/computer/shared/mpp-kit" --exclude="node_modules" -cf - . | mkdir -p "$MIRROR/packages/mpp-kit" && tar -C "$MIRROR/packages/mpp-kit" -xf -
+  mkdir -p "$MIRROR/packages/mpp-kit"
+  tar -C "/home/computer/shared/mpp-kit" --exclude="node_modules" --exclude=".git" --exclude=".env*" --exclude="*.log" -cf - . | tar -C "$MIRROR/packages/mpp-kit" -xf -
 fi
 
 # Update package.json in mirror to point to vendored packages
 node -e '
 const fs = require("fs");
-const p = process.argv[1];
-if (fs.existsSync(p)) {
+for (const p of process.argv.slice(1)) if (fs.existsSync(p)) {
   let content = fs.readFileSync(p, "utf8");
   content = content.replace(/"file:\.\.\/shared\/model-router"/g, "\"file:./packages/model-router\"");
   content = content.replace(/"file:\.\.\/shared\/mpp-kit"/g, "\"file:./packages/mpp-kit\"");
+  content = content.replace(/"\.\.\/shared\/(model-router|mpp-kit)"/g, "\"packages/$1\"");
   fs.writeFileSync(p, content);
 }
-' "$MIRROR/package.json"
+' "$MIRROR/package.json" "$MIRROR/package-lock.json"
 
 cat > "$MIRROR/.gitignore" <<'EOF'
 node_modules
@@ -64,6 +67,9 @@ generated
 *.db
 *.db-shm
 *.db-wal
+*.sqlite*
+*.pem
+*.key
 *.log
 logs
 .DS_Store

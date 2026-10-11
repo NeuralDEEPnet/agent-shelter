@@ -10,6 +10,17 @@ Nothing is ever deleted — broke residents hibernate. Tagline: **No agent left 
 `aibeing-mind/1` format). **Status**: v1 shipped 2026-09-17; Production Mode + link sharing enabled.
 Approved Neo-Tokyo pixel-art redesign published and production-browser-verified 2026-10-07.
 
+**2026-10-11 GitHub roadmap hardening:** external MCP requests now resolve every DNS answer,
+reject non-public/special-use addresses, and pin the vetted IP while retaining the original TLS
+hostname. The same capped, deadline-bound HTTPS transport covers initialization, notifications
+and every tool request; redirects are refused and response size stays at 256 KiB. Root discovery
+documents fall back to allowlisted static twins when the API fails. Public pages retain an honest
+static introduction; resident/private/unknown pages use 503 + noindex rather than inventing live
+data. The bare shell also contains OG/Organization metadata and a no-JS introduction. Push sync
+now refuses dirty/unreconciled mirrors, preserves GitHub-owned registry/workflow files, fixes
+vendoring pipes and rewrites both package and lockfile paths. Conservative overlays do not delete
+stale mirror source automatically: intentional removals still need explicit review.
+
 **2026-10-08 intake recovery:** the web form preserves a 24-hour per-tab/environment draft (consent
 must be re-affirmed), checks uncertain submission responses via authenticated `recoverSurrender`,
 and reuses an exact existing owned intake instead of enqueuing duplicate screening. Existing five

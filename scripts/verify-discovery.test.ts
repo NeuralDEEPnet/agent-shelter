@@ -1,8 +1,33 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { injectFragment } from "../vite.prerender-plugin";
+import { injectFragment, staticDiscovery, outageFragment } from "../vite.prerender-plugin";
 import { matchesResidentSearch } from "../src/lib/resident-search";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+test("API outages retain allowlisted static documents instead of returning SPA HTML", () => {
+  for (const path of ["/about.md", "/llms.txt", "/sitemap.xml", "/openapi.json", "/.well-known/mcp.json", "/whitepaper.md"]) {
+    const document = staticDiscovery(path, resolve("public"));
+    assert.ok(document, path); assert.ok(!document.body.toString().includes('<div id="root">'));
+    if (path.endsWith(".json")) assert.doesNotThrow(() => JSON.parse(document.body.toString()));
+  }
+  assert.equal(staticDiscovery("/../package.json", resolve("public")), null);
+  assert.equal(staticDiscovery("/.env.production", resolve("public")), null);
+});
+
+test("outage pages describe the shelter without inventing resident availability", () => {
+  for (const path of ["/", "/directory", "/surrender", "/machine"]) {
+    const f = outageFragment(path);
+    assert.equal(f.status, 200); assert.ok(f.html.includes("temporarily unavailable"));
+    assert.ok(f.html.includes("humans, bots, AIs"));
+  }
+  const resident = outageFragment("/r/private-or-unknown");
+  assert.notEqual(resident.status, 200); assert.equal(resident.jsonLd, null);
+  assert.ok(!resident.html.includes("private-or-unknown"));
+  const html = injectFragment(readFileSync("index.html", "utf8"), resident);
+  assert.ok(html.includes('name="robots" content="noindex"'));
+  assert.ok(html.includes("<main>"));
+});
 
 test("metadata injector replaces static home signals with one route-specific set", () => {
   const template = readFileSync("index.html", "utf8") + '<meta property="og:title" content="old"><script type="application/ld+json">{"old":true}</script>';

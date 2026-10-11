@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { checkRemoteUrl } from "@/api/services/security";
+import { publicHttpsFetch } from "@/api/services/public-https";
 
 /**
  * Minimal MCP *client* over Streamable HTTP (JSON-RPC 2.0). We never run a
@@ -77,7 +78,7 @@ export function createMcpClient(endpoint: string, options: { fetch?: McpFetch; t
   const verdict = checkRemoteUrl(endpoint);
   if (!verdict.ok) throw new McpError(`Refused endpoint: ${verdict.reason}`, "url");
   const url = verdict.url.toString();
-  const doFetch: McpFetch = options.fetch ?? ((i, init) => fetch(i, init));
+  const doFetch: McpFetch = options.fetch ?? publicHttpsFetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   let sessionId: string | null = null;
   let seq = 0;
@@ -102,6 +103,8 @@ export function createMcpClient(endpoint: string, options: { fetch?: McpFetch; t
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      if (/^Refused endpoint:/.test(msg)) throw new McpError(msg, "url");
+      if (/Response exceeded/.test(msg)) throw new McpError(msg, "size");
       if (/abort|timeout/i.test(msg)) throw new McpError(`No answer within ${timeoutMs / 1000}s.`, "timeout");
       throw new McpError(`Could not connect: ${msg}`, "http");
     }
