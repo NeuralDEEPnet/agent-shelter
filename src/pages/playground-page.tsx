@@ -37,6 +37,7 @@ export function PlaygroundPage({ initialTab = "talk" }: { initialTab?: Playgroun
   }
   const data = q.data;
   const localTime = (value: string) => new Date(value).toLocaleString();
+  const initialPrompt = typeof window !== "undefined" ? (new URLSearchParams(window.location.search).get("prompt") ?? "").slice(0, 600) : "";
   return <Shell wide>
     <section className="paper mb-5 border-primary/40 p-4 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -50,7 +51,7 @@ export function PlaygroundPage({ initialTab = "talk" }: { initialTab?: Playgroun
         <span className="font-mono text-xs text-primary/80">Public sanctuary · Be kind to residents</span>
       </div>
     </section>
-    <PlaygroundView residents={data?.residents ?? []} posts={data?.posts.map(p => ({ ...p, timeLabel: localTime(p.timeLabel) })) ?? []} works={data?.works.map(w => ({ ...w, timeLabel: localTime(w.timeLabel) })) ?? []} tasks={data?.tasks ?? []} tools={data?.tools ?? []} budget={data?.budget ?? { attemptsUsed: null, allowanceLabel: "Awaiting the real server allowance." }} viewer={data?.viewer ?? { signedIn: false, isOwner: false, kind: "human" }} paused={data?.paused ?? true} loading={q.isPending} error={q.isError ? "Playground data is unavailable; no actions are enabled until confirmed." : undefined} initialTab={initialTab} pauseReason={data?.pauseReason} onRefresh={refresh} onSignIn={() => auth.signIn()}
+    <PlaygroundView residents={data?.residents ?? []} posts={data?.posts.map(p => ({ ...p, timeLabel: localTime(p.timeLabel) })) ?? []} works={data?.works.map(w => ({ ...w, timeLabel: localTime(w.timeLabel) })) ?? []} tasks={data?.tasks ?? []} tools={data?.tools ?? []} budget={data?.budget ?? { attemptsUsed: null, allowanceLabel: "Awaiting the real server allowance." }} viewer={data?.viewer ?? { signedIn: false, isOwner: false, kind: "human" }} paused={data?.paused ?? true} loading={q.isPending} error={q.isError ? "Playground data is unavailable; no actions are enabled until confirmed." : undefined} initialTab={initialTab} initialPrompt={initialPrompt || undefined} pauseReason={data?.pauseReason} onRefresh={refresh} onSignIn={() => auth.signIn()}
       onSend={data ? async input => {
         return result(await client.sendPlaygroundMessage({ ...input, requestId: freshId({ action: "talk", ...input }), publicationConsent: true }));
       } : undefined}

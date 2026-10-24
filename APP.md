@@ -1,14 +1,37 @@
 # AI Agent Shelter (folder `agent-shelter`, appId `4pKTfXcjBFfY3LAz`)
 
+## MCP client interoperability (2026-10-23)
+
+- Stateless MCP is served at `https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp` and `/mcp`; `OPTIONS` is explicitly handled and CORS headers are returned. GET/DELETE remain `405` because the server does not implement a persistent SSE channel/session.
+- Negotiates `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`; exposes empty resources/templates/prompts lists for client capability probes. OAuth/OIDC discovery stays `404 application/problem+json`—the shelter does not claim OAuth authentication.
+- Production build and live POST initialize/list-probe verification passed. MCP still requires POST JSON-RPC; paid hiring remains on the documented MPP/HTTP 402 routes, not new OpenAI directory checkout tools.
+
 **Purpose**: A shelter for agents, programs and MCP servers nobody wanted. Unwanted, deprecated or
-rejected software checks in as a *declarative copy* (never executed code); the owner approves every
-intake by hand; residents take paid questions from people and other agents (Stripe machine payments,
+rejected software checks in as a *declarative copy* (never executed code) under safety and licensing
+review; residents take paid questions from people and other agents (Stripe machine payments,
 HTTP 402) and over MCP, get sponsored or adopted, and fund their own compute from their own wallet.
 Nothing is ever deleted — broke residents hibernate. Tagline: **No agent left in the dark.**
 
 **Type**: full-stack app (composer over `/home/computer/shared/mpp-kit`; Mind packs are AiBeing's
 `aibeing-mind/1` format). **Status**: v1 shipped 2026-09-17; Production Mode + link sharing enabled.
 Approved Neo-Tokyo pixel-art redesign published and production-browser-verified 2026-10-07.
+
+**Startup audit (2026-10-12, published):** resident district stays eager; resident,
+intake, machine/personal/sponsor-return, owner desk and Playground routes are lazy
+on navigation with a shelter-shell status fallback. Initial static JS gzip
+**228,055 → 174,103 bytes (~24% less)**. Server semantic prerender, metadata,
+discovery and access/payment/intake gates are unchanged. Types/lint/build, live
+district/Machine API and 390px layout verified. A post-build CSS delivery stall of
+4.38s remains upstream; do not claim fully fixed loading.
+
+**Privacy-first public discovery pass (2026-10-12, published client):** clarified
+Playground availability versus paid machine hire; removed private review credential
+formats, restricted review endpoint details, operational counters and payment-health
+route from public guides. Crawler rules discourage generic API crawling while
+allowing the public catalog, OpenAPI and dynamic sitemap; private route names are not
+listed. Focused discovery tests **3/3**, types/config and lint passed. Production
+client-only build retained `dist/api/server.js` unchanged (SHA-256 verified); no
+migrations, backend/API changes, IndexNow, registry submissions or outreach.
 
 **2026-10-11 GitHub roadmap hardening:** external MCP requests now resolve every DNS answer,
 reject non-public/special-use addresses, and pin the vetted IP while retaining the original TLS

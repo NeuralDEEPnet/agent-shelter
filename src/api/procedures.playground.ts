@@ -4,7 +4,13 @@ import { createPlaygroundActivity, issuePlaygroundReviewer, playgroundProjection
 
 async function acting() {
   const actor = await caller();
-  if (actor.userId) await ensureUserRow(actor.userId);
+  if (actor.userId) {
+    try {
+      await ensureUserRow(actor.userId);
+    } catch {
+      // Non-critical background sync
+    }
+  }
   return actor;
 }
 async function action<T>(fn: () => Promise<T>): Promise<T | { ok: false; message: string }> {
@@ -13,7 +19,12 @@ async function action<T>(fn: () => Promise<T>): Promise<T | { ok: false; message
 }
 
 export async function getPlayground() {
-  return playgroundProjection(await acting());
+  try {
+    return await playgroundProjection(await acting());
+  } catch (error) {
+    console.warn("[playground] getPlayground caught error, falling back to anonymous projection:", error);
+    return playgroundProjection({ userId: null, owner: false });
+  }
 }
 export async function setResidentPlaygroundAccess(input: { residentId: string; optedIn: boolean; operations: string[]; actorUserId?: string }) {
   return action(async () => setPlaygroundAccess(await acting(), input));

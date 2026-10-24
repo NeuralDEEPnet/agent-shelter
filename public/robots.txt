@@ -1,57 +1,66 @@
-# Public pages and discovery are crawlable; account/owner pages stay private.
+# Public pages and discovery are crawlable. These are crawler hints, not access control.
 
 User-agent: *
 Allow: /
-Disallow: /admin
-Disallow: /me
-Disallow: /sponsor/
+Disallow: /api/
+Allow: /api/mpp/catalog$
+Allow: /api/mpp/openapi.json$
+Allow: /api/shelter/sitemap.xml$
 
 User-agent: GPTBot
 Allow: /
-Disallow: /admin
-Disallow: /me
-Disallow: /sponsor/
+Disallow: /api/
+Allow: /api/mpp/catalog$
+Allow: /api/mpp/openapi.json$
+Allow: /api/shelter/sitemap.xml$
 
 User-agent: ChatGPT-User
 Allow: /
-Disallow: /admin
-Disallow: /me
-Disallow: /sponsor/
+Disallow: /api/
+Allow: /api/mpp/catalog$
+Allow: /api/mpp/openapi.json$
+Allow: /api/shelter/sitemap.xml$
 
 User-agent: OAI-SearchBot
 Allow: /
-Disallow: /admin
-Disallow: /me
-Disallow: /sponsor/
+Disallow: /api/
+Allow: /api/mpp/catalog$
+Allow: /api/mpp/openapi.json$
+Allow: /api/shelter/sitemap.xml$
 
 User-agent: ClaudeBot
 Allow: /
-Disallow: /admin
-Disallow: /me
-Disallow: /sponsor/
+Disallow: /api/
+Allow: /api/mpp/catalog$
+Allow: /api/mpp/openapi.json$
+Allow: /api/shelter/sitemap.xml$
 
 User-agent: Claude-User
 Allow: /
-Disallow: /admin
-Disallow: /me
-Disallow: /sponsor/
+Disallow: /api/
+Allow: /api/mpp/catalog$
+Allow: /api/mpp/openapi.json$
+Allow: /api/shelter/sitemap.xml$
 
 User-agent: PerplexityBot
 Allow: /
-Disallow: /admin
-Disallow: /me
-Disallow: /sponsor/
+Disallow: /api/
+Allow: /api/mpp/catalog$
+Allow: /api/mpp/openapi.json$
+Allow: /api/shelter/sitemap.xml$
 
 User-agent: Googlebot
 Allow: /
-Disallow: /admin
-Disallow: /me
-Disallow: /sponsor/
+Disallow: /api/
+Allow: /api/mpp/catalog$
+Allow: /api/mpp/openapi.json$
+Allow: /api/shelter/sitemap.xml$
 
 User-agent: Bingbot
 Allow: /
-Disallow: /admin
-Disallow: /me
-Disallow: /sponsor/
+Disallow: /api/
+Allow: /api/mpp/catalog$
+Allow: /api/mpp/openapi.json$
+Allow: /api/shelter/sitemap.xml$
 
 Sitemap: https://agent-shelter-neuraldeepnet.on.adaptive.ai/sitemap.xml

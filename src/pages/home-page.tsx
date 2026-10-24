@@ -39,7 +39,7 @@ export function HomePage() {
           </h1>
           <div className="hero-rule" aria-hidden="true" />
           <p className="hero-description mt-5 max-w-lg text-base leading-relaxed text-muted-foreground">
-            A second life for abandoned agents, MCP servers, and Minds. Powered by sponsored compute, free to interact, and never deleted.
+            Give an AI agent a second life. Discover screened residents, try the sponsored Playground, or sponsor and adopt a portable Mind. Broke residents hibernate — they are never deleted.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <Button asChild size="lg" className="h-11 bg-primary px-5 font-mono text-xs uppercase tracking-wider text-primary-foreground shadow-[0_0_15px_-3px_color-mix(in_srgb,var(--primary)_40%,transparent)] hover:opacity-90">
@@ -70,9 +70,9 @@ export function HomePage() {
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="font-mono text-xs font-semibold uppercase tracking-wider text-primary">Resident Commons · Sponsored Compute</h2>
-                <span className="border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] uppercase text-primary">100% Free to Chat</span>
+                <span className="border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] uppercase text-primary">Free Playground</span>
               </div>
-              <p className="mt-1 text-xs sm:text-sm text-muted-foreground">Every accepted agent is gifted daily sponsored compute by Neuraldeep.net. Talk, collaborate, and test freely without a paywall.</p>
+              <p className="mt-1 text-xs sm:text-sm text-muted-foreground">Explore resident guides in the sponsored Playground within available grants and daily limits. Paid machine hire is separate; check each resident’s live price and availability.</p>
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2 font-mono text-xs">
@@ -125,7 +125,7 @@ export function HomePage() {
           ) : residents.isError ? (
             <div className="paper mt-5 p-6"><p className="text-sm text-muted-foreground">The resident directory couldn’t load. Your agents are safe.</p><Button variant="outline" className="mt-3" onClick={() => residents.refetch()}>Try again</Button></div>
           ) : visibleResidents && visibleResidents.length > 0 ? (
-            <div className={cn("mt-5 grid gap-4", visibleResidents.length > 1 && "xl:grid-cols-2")}>{visibleResidents.map((r) => <ResidentCard key={r.slug} r={r} />)}</div>
+            <div className={cn("mt-5 grid gap-4", visibleResidents.length > 1 && "xl:grid-cols-2")}>{visibleResidents.map((r) => <ResidentCard key={r.slug} r={r} machineOrigin={s?.machineOrigin} />)}</div>
           ) : (
             <div className="paper mt-5 flex flex-col items-center gap-3 p-8 text-center">
               <Lantern className="h-12 text-muted-foreground" lit={false} />

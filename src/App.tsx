@@ -1,16 +1,30 @@
+import { lazy, Suspense } from "react";
 import { Shell } from "@/components/shelter/shell";
 import { Button } from "@/components/ui/button";
 import { href, useRoute } from "@/lib/router";
-import { AdminPage } from "@/pages/admin-page";
 import { HomePage } from "@/pages/home-page";
-import { MachinePage, MePage, SponsorReturnPage } from "@/pages/me-page";
-import { ResidentPage } from "@/pages/resident-page";
-import { SurrenderPage } from "@/pages/surrender-page";
 import { usePageSeo } from "@/hooks/use-page-seo";
-import { PlaygroundPage } from "@/pages/playground-page";
+
+// The district stays eager and crawlable; secondary doors download only when
+// entered. Server prerender/discovery and all access checks are unchanged.
+const AdminPage = lazy(() => import("@/pages/admin-page").then(m => ({ default: m.AdminPage })));
+const ResidentPage = lazy(() => import("@/pages/resident-page").then(m => ({ default: m.ResidentPage })));
+const SurrenderPage = lazy(() => import("@/pages/surrender-page").then(m => ({ default: m.SurrenderPage })));
+const PlaygroundPage = lazy(() => import("@/pages/playground-page").then(m => ({ default: m.PlaygroundPage })));
+const MachinePage = lazy(() => import("@/pages/me-page").then(m => ({ default: m.MachinePage })));
+const MePage = lazy(() => import("@/pages/me-page").then(m => ({ default: m.MePage })));
+const SponsorReturnPage = lazy(() => import("@/pages/me-page").then(m => ({ default: m.SponsorReturnPage })));
+
+function PageLoading() {
+  return <Shell><p role="status" className="mono py-10 text-sm text-muted-foreground">Opening shelter door…</p></Shell>;
+}
 
 function App() {
   usePageSeo();
+  return <Suspense fallback={<PageLoading />}><RoutePage /></Suspense>;
+}
+
+function RoutePage() {
   const route = useRoute();
   switch (route.name) {
     case "home":

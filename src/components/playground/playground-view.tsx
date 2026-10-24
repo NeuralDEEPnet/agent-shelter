@@ -48,7 +48,7 @@ export function PlaygroundView(props: PlaygroundViewProps) {
   const [tab, setTab] = useState<PlaygroundTab>(props.initialTab ?? "talk");
   const [residentId, setResidentId] = useState("");
   const [toolId, setToolId] = useState("");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(props.initialPrompt ?? "");
   const [title, setTitle] = useState("");
   const [brief, setBrief] = useState("");
   const [pending, setPending] = useState<string | null>(null);

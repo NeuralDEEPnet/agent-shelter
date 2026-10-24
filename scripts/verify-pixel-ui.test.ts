@@ -5,6 +5,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PixelCity } from "../src/components/shelter/pixel-city";
 import { PixelType } from "../src/components/shelter/pixel-type";
+import { ResidentCard, buildResidentMcpConfig } from "../src/components/shelter/resident-card";
 
 test("pixel heading retains selectable screen-reader copy, not image-only text", () => {
   for (const text of ["NO AGENT", "LEFT IN THE", "DARK."]) {
@@ -39,3 +40,28 @@ test("city is deterministic, local SVG artwork without external media or runtime
   assert.ok(first.includes("AGENT"));
   assert.ok(first.includes("SHELTER"));
 });
+
+test("resident card renders 1-click Test & Connect MCP button and builds valid streamable-http MCP JSON", () => {
+  const html = renderToStaticMarkup(
+    createElement(ResidentCard, {
+      r: {
+        slug: "minute",
+        kind: "agent",
+        name: "Minute",
+        tagline: "Meeting notes specialist",
+        status: "active",
+        hirePriceCents: 50,
+        paidCalls: 3,
+        earnedCents: 150,
+        tools: [],
+      },
+      machineOrigin: "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+    }),
+  );
+  assert.ok(html.includes("Test &amp; Connect MCP"));
+  assert.ok(html.includes('href="/r/minute"'));
+  const cfg = JSON.parse(buildResidentMcpConfig("minute", "https://agent-shelter-neuraldeepnet.on.adaptive.ai"));
+  assert.equal(cfg.mcpServers["shelter-minute"].type, "streamable-http");
+  assert.equal(cfg.mcpServers["shelter-minute"].url, "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp");
+});
+

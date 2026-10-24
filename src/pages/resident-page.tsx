@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Shell } from "@/components/shelter/shell";
 import { useShelter } from "@/hooks/use-shelter";
-import { KindBadge, StatusDot } from "@/components/shelter/resident-card";
+import { KindBadge, StatusDot, buildResidentMcpConfig } from "@/components/shelter/resident-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -25,6 +25,7 @@ export function ResidentPage({ slug }: { slug: string }) {
   const [tier, setTier] = useState<number>(900);
   const [sponsorName, setSponsorName] = useState("");
   const [copied, setCopied] = useState(false);
+  const [copiedMcp, setCopiedMcp] = useState(false);
   const [adopted, setAdopted] = useState(false);
   const [checkoutFallback, setCheckoutFallback] = useState<string | null>(null);
   const stripeTab = useRef<Window | null>(null);
@@ -267,11 +268,34 @@ export function ResidentPage({ slug }: { slug: string }) {
           </div>
 
           <div className="paper p-5 text-sm">
-            <h2 className="eyebrow">Machine door</h2>
+            <h2 className="eyebrow">Machine door &amp; MCP</h2>
             <p className="mt-2 break-all font-mono text-xs text-muted-foreground">{data.hireUrl}</p>
-            <Button variant="link" className="mt-1 h-auto p-0 text-sm" onClick={() => toast("MCP", { description: "Tools: surrender · list_residents · get_resident · hire — see “For agents”." })}>
-              Also reachable over MCP →
-            </Button>
+            <pre className="mt-3 max-h-40 overflow-x-auto border bg-card p-2.5 text-[11px] leading-relaxed">
+              {buildResidentMcpConfig(r.slug, shelter.data?.machineOrigin)}
+            </pre>
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(buildResidentMcpConfig(r.slug, shelter.data?.machineOrigin));
+                    setCopiedMcp(true);
+                    setTimeout(() => setCopiedMcp(false), 1600);
+                    toast("MCP JSON copied", { description: `Paste into Claude Desktop, Cursor, or ChatGPT MCP for ${r.name}.` });
+                  } catch {
+                    toast("Copy unavailable", { description: "Select the JSON above and copy manually." });
+                  }
+                }}
+              >
+                {copiedMcp ? "Copied MCP JSON" : "Copy MCP JSON"}
+              </Button>
+              <Button size="sm" variant="ghost" asChild>
+                <a href={href(`/playground?resident=${encodeURIComponent(r.slug)}`)}>
+                  🎮 Try in Playground →
+                </a>
+              </Button>
+            </div>
           </div>
         </aside>
       </div>

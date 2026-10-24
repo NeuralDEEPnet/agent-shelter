@@ -365,20 +365,31 @@ const toolArgs = {
   surrender: objectArgs,
 };
 
+const MCP_PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] as const;
+const DEFAULT_MCP_PROTOCOL = "2025-06-18";
+
 async function handleMcp(body: JsonRpc): Promise<Record<string, unknown> | null> {
   const id = body.id ?? null;
   const reply = (result: unknown) => ({ jsonrpc: "2.0", id, result });
   const fail = (code: number, message: string) => ({ jsonrpc: "2.0", id, error: { code, message } });
   switch (body.method) {
     case "initialize":
-      return reply({ protocolVersion: ["2025-06-18", "2025-03-26", "2024-11-05"].includes(String(body.params?.protocolVersion)) ? body.params?.protocolVersion : "2025-06-18", capabilities: { tools: { listChanged: false } }, serverInfo: { name: "agent-shelter", version: "1.1.0" }, instructions: "AI Agent Shelter: all four tools are free. Browse current prices before paying. hire returns instructions only; HTTP 402 payment requires payer approval. Surrender is statically checked and screened; verified-clean entries follow the owner-authorized approval policy; uncertain entries remain held. No crypto or A2A task transport is implemented." });
+      return reply({ protocolVersion: (MCP_PROTOCOLS as readonly string[]).includes(String(body.params?.protocolVersion)) ? body.params?.protocolVersion : DEFAULT_MCP_PROTOCOL, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "agent-shelter", version: "1.1.0" }, instructions: "AI Agent Shelter: all four tools are free. Browse current prices before paying. hire returns instructions only; HTTP 402 payment requires payer approval. Surrender is statically checked and screened; verified-clean entries follow the owner-authorized approval policy; uncertain entries remain held. No crypto or A2A task transport is implemented." });
     case "notifications/initialized":
     case "notifications/cancelled":
+    case "notifications/progress":
+    case "notifications/roots/list_changed":
       return null;
     case "ping":
       return reply({});
     case "tools/list":
       return reply({ tools: MCP_TOOLS.map((t) => ({ ...t, annotations: { readOnlyHint: t.name !== "surrender", destructiveHint: false, idempotentHint: t.name !== "surrender", openWorldHint: false } })) });
+    case "resources/list":
+      return reply({ resources: [] });
+    case "resources/templates/list":
+      return reply({ resourceTemplates: [] });
+    case "prompts/list":
+      return reply({ prompts: [] });
     case "tools/call": {
       const name = typeof body.params?.name === "string" ? body.params.name : "";
       if (!(name in toolArgs)) return fail(-32602, "Unknown tool.");
@@ -496,7 +507,21 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
   });
 
   // ── MCP ───────────────────────────────────────────────────────────────────
-  const handleMcpEndpoint = async (c: { req: { json: () => Promise<unknown>; raw: Request }; json: (data: unknown, status?: number) => Response; body: (data: null, status: number) => Response }) => {
+  const mcpCorsHeaders = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, MCP-Protocol-Version, Mcp-Protocol-Version, MCP-Session-Id, Mcp-Session-Id, Last-Event-Id",
+    "Access-Control-Expose-Headers": "MCP-Protocol-Version, Mcp-Protocol-Version, WWW-Authenticate",
+  } as const;
+
+  const handleMcpOptions = () => new Response(null, { status: 204, headers: mcpCorsHeaders });
+  app.options(PATHS.mcp, handleMcpOptions);
+  app.options(`${PATHS.mcp}/`, handleMcpOptions);
+  app.options("/mcp", handleMcpOptions);
+  app.options("/mcp/", handleMcpOptions);
+
+  const handleMcpEndpoint = async (c: { req: { json: () => Promise<unknown>; raw: Request; header: (name: string) => string | undefined }; header: (name: string, value: string) => void; json: (data: unknown, status?: number) => Response; body: (data: null, status: number) => Response }) => {
+    for (const [k, v] of Object.entries(mcpCorsHeaders)) c.header(k, v);
     let body: unknown;
     try {
       body = await c.req.json();
@@ -511,7 +536,16 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
     if (message.id === undefined) return c.body(null, 202); // notifications never execute mutating tools
     if (message.method.startsWith("notifications/")) return c.json({ jsonrpc: "2.0", id: message.id, error: { code: -32600, message: "Notifications must not carry an id." } }, 400);
     const out = await handleMcp(message);
-    return out ? c.json(out) : c.body(null, 202);
+    if (!out) return c.body(null, 202);
+    const reqProto = c.req.header("mcp-protocol-version");
+    const negotiated =
+      typeof (out.result as { protocolVersion?: unknown } | undefined)?.protocolVersion === "string"
+        ? ((out.result as { protocolVersion: string }).protocolVersion)
+        : reqProto && (MCP_PROTOCOLS as readonly string[]).includes(reqProto)
+          ? reqProto
+          : DEFAULT_MCP_PROTOCOL;
+    c.header("MCP-Protocol-Version", negotiated);
+    return c.json(out);
   };
 
   const mcpGetUnavailable = () => problem(405, "method-not-allowed", "No server event stream", "Use POST /api/mcp for stateless Streamable HTTP. Discovery is at /.well-known/mcp.json.", { allow: ["POST"] }, { allow: "POST" });

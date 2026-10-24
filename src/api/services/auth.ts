@@ -2,19 +2,53 @@ import { getAuth, mcp } from "@adaptive-ai/sdk/server";
 import { db } from "@/api/db";
 import { env } from "@/lib/env";
 
+export function isTransientIdentityError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /fetch failed|network error|ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|UND_ERR_CONNECT|CONNECT_TIMEOUT|timeout exceeded when trying to connect|timed? ?out.*connect/i.test(
+    message,
+  );
+}
+
+/**
+ * Retry a read-only identity lookup once if transient, without reusing another request's identity.
+ */
+export async function optionalIdentity<T>(lookup: () => Promise<T>): Promise<T | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await lookup();
+    } catch (error) {
+      if (!isTransientIdentityError(error)) {
+        return null;
+      }
+      if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+  }
+  return null;
+}
+
 /**
  * `getAuth()` returns a union and needs narrowing before `userId` is usable.
  * Callers get a userId or `null` — never a throw — so an anonymous session
  * degrades into a rendered "sign in" notice.
  */
 export async function currentUserId(): Promise<string | null> {
-  const auth = await getAuth();
-  if (auth.status !== "authenticated" || !auth.userId) return null;
-  return auth.userId as string;
+  try {
+    const auth = await optionalIdentity(() => getAuth());
+    if (!auth || auth.status !== "authenticated" || !auth.userId) return null;
+    return auth.userId as string;
+  } catch (error) {
+    console.warn("[auth] currentUserId failed closed:", error);
+    return null;
+  }
 }
 
 export async function ensureUserRow(userId: string) {
-  return db.user.upsert({ where: { id: userId }, create: { id: userId }, update: {} });
+  try {
+    return await db.user.upsert({ where: { id: userId }, create: { id: userId }, update: {} });
+  } catch (error) {
+    console.warn("[auth] ensureUserRow caught error:", error);
+    return null;
+  }
 }
 
 const ownerCache = new Map<string, { isOwner: boolean; at: number }>();
@@ -43,13 +77,13 @@ export async function isOwner(userId: string | null): Promise<boolean> {
   const owners = list(env.SHELTER_OWNER_HANDLES);
   let handle: string | null = null;
   try {
-    const me = (await mcp.getCurrentUser({})) as { handle?: string | null } | null;
+    const me = (await optionalIdentity(() => mcp.getCurrentUser({}))) as { handle?: string | null } | null;
     handle = me?.handle ?? null;
   } catch {
     handle = null;
   }
   if (!handle) {
-    const row = await db.user.findUnique({ where: { id: userId }, select: { handle: true } });
+    const row = await db.user.findUnique({ where: { id: userId }, select: { handle: true } }).catch(() => null);
     handle = row?.handle ?? null;
   } else {
     // Keep the app-side row in step so the fallback works offline next time.
@@ -64,6 +98,11 @@ export async function isOwner(userId: string | null): Promise<boolean> {
 
 /** Resolve caller → { userId, owner } in one call. */
 export async function caller(): Promise<{ userId: string | null; owner: boolean }> {
-  const userId = await currentUserId();
-  return { userId, owner: await isOwner(userId) };
+  try {
+    const userId = await currentUserId();
+    return { userId, owner: await isOwner(userId) };
+  } catch (error) {
+    console.warn("[auth] caller lookup failed, degrading to anonymous:", error);
+    return { userId: null, owner: false };
+  }
 }

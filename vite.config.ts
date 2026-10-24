@@ -90,6 +90,12 @@ export default ({ mode }: { mode: "development" | "production" }) => {
           secure: false,
           configure: proxyConfig,
         },
+        "^/mcp(/|\\?|$)": {
+          target: "http://localhost:" + (Number(env.PORT) + 1),
+          changeOrigin: true,
+          secure: false,
+          configure: proxyConfig,
+        },
       },
     },
     preview: {
@@ -104,6 +110,12 @@ export default ({ mode }: { mode: "development" | "production" }) => {
           configure: proxyConfig,
         },
         "/api/": {
+          target: "http://localhost:" + (Number(env.PORT) + 1),
+          changeOrigin: true,
+          secure: false,
+          configure: proxyConfig,
+        },
+        "^/mcp(/|\\?|$)": {
           target: "http://localhost:" + (Number(env.PORT) + 1),
           changeOrigin: true,
           secure: false,

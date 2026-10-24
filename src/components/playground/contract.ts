@@ -79,6 +79,7 @@ export interface PlaygroundViewProps {
   /** An explicit unavailable state prevents a connected-looking UI from promising unimplemented writes. */
   actionsUnavailableReason?: string;
   initialTab?: PlaygroundTab;
+  initialPrompt?: string;
   onSend?: (input: { residentId: string; text: string }) => Promise<PlaygroundActionResult>;
   onCreate?: (input: { residentId: string; toolId: string; title: string; brief: string }) => Promise<PlaygroundActionResult>;
   /** Never pass a claimed rater identity here. The backend derives it from the verified session. */
