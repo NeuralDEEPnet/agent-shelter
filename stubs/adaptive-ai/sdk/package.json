@@ -1,0 +1,9 @@
+{
+  "name": "@adaptive-ai/sdk",
+  "version": "0.0.0-local-stub",
+  "type": "module",
+  "exports": {
+    "./server": { "types": "./server.d.ts", "default": "./server.js" },
+    "./client": { "types": "./client.d.ts", "default": "./client.js" }
+  }
+}

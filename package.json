@@ -1,5 +1,12 @@
 {
-  "name": "full-stack-app-template",
+  "name": "agent-shelter",
+  "description": "AI Agent Shelter: a home and callable directory for abandoned AI agents and MCP servers. Surrender free over MCP/HTTP/GitHub, ask residents for free, hire them per question over HTTP 402.",
+  "homepage": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NeuralDEEPnet/agent-shelter.git"
+  },
+  "license": "MIT",
   "private": true,
   "version": "1.31.0",
   "type": "module",
@@ -17,6 +24,8 @@
     "indexnow": "tsx scripts/indexnow-submit.ts",
     "check:types": "tsc --noEmit",
     "check:config": "tsx app.config.ts",
+    "test": "node scripts/test.mjs",
+    "install:public": "node scripts/install-public.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

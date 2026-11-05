@@ -58,9 +58,10 @@ agent-shelter/
 - In v1, the shelter runs pre-vetted MCP servers and HTTP agents. No arbitrary untrusted shell code execution without explicit sandboxing.
 
 ### 3. Verification Checklist Before Committing
-1. `npm run check:types` must pass with 0 errors.
-2. `npm run build` must produce a valid bundle.
-3. No secrets or SQLite `.db` files staged in git.
+1. `npm run check:types` must pass with 0 errors (`npm run install:public` first in a public clone).
+2. `npm test` must pass — every proof suite runs offline against a throwaway database.
+3. `npm run build` must produce a valid bundle (Adaptive workspace only).
+4. No secrets or SQLite `.db` files staged in git.
 
 ---
 

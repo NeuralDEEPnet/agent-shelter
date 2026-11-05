@@ -7,7 +7,7 @@ import { createPlaygroundActivity, issuePlaygroundReviewer, moderatePlaygroundTe
 import { runPlaygroundBridge } from "../src/api/services/playground-bridge";
 
 const tag = `pg-proof-${Date.now()}`;
-assert.ok(process.env.DB_FILE_NAME?.includes("/tmp/opencode/"), "Never run this fixture suite on a live database.");
+assert.ok(process.env.DB_FILE_NAME?.includes("/tmp/opencode/") || process.env.DB_FILE_NAME?.includes("agent-shelter-test"), "Never run this fixture suite on a live database.");
 const a = { userId: `${tag}-a`, owner: true };
 const b = { userId: `${tag}-b`, owner: false };
 const c = { userId: `${tag}-c`, owner: true };

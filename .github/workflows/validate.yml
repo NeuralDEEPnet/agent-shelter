@@ -72,3 +72,19 @@ jobs:
               await github.rest.issues.createComment({ owner, repo, issue_number: i.number, body: "Live check is passing again; closing." });
               await github.rest.issues.update({ owner, repo, issue_number: i.number, state: "closed" });
             }
+
+  check:
+    # Public build: no private registry needed (see stubs/README.md).
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install (public mode, private SDKs stubbed)
+        run: node scripts/install-public.mjs
+      - name: Type-check
+        run: npm run check:types
+      - name: Offline proof suites
+        run: npm test

@@ -2,7 +2,8 @@
 
 The live shelter is built and served from a private Adaptive workspace and mirrored here by
 `scripts/push-github.sh` (and pulled back by `scripts/pull-github.sh`). The source in this repo is a
-reference copy — it does **not** install out of the box:
+reference copy of the app. It type-checks and its proof suites run from a public clone via
+`npm run install:public` (see below); only the running app needs the workspace:
 
 - `@adaptive-ai/sdk` comes from a private registry (`.npmrc` → `ADAPTIVE_AI_REGISTRY`).
 - `@neuraldeep/model-router` and `@neuraldeep/mpp-kit` are `file:./packages/*` dependencies that are
@@ -23,24 +24,28 @@ workspace has nothing newer than the last push.
 
 ---
 
-## Quickstart
+## Quickstart (public clone)
 
 ```bash
-# 1. Install dependencies
-npm install
-
-# 2. Configure environment
-# create .env.development with the variables in src/lib/env.ts
-
-# 3. Setup database
-npm run postinstall
-npm run dev:migrations
-
-# 4. Start local development server
-npm run dev
+git clone https://github.com/NeuralDEEPnet/agent-shelter && cd agent-shelter
+npm run install:public     # installs from npm; private Adaptive SDKs are replaced by typed stubs (see stubs/README.md)
+npm run check:types        # 0 errors expected
+npm test                   # every offline proof suite against a throwaway SQLite database
 ```
 
----
+`npm test` fakes Stripe, the model and remote MCP servers inside the suites; nothing reaches the
+network. To run the app itself you need the Adaptive workspace (the platform injects auth, the
+job queue and the model proxy); outside it, the API routes under `src/api/machine.ts` can still be
+exercised in-process the way `scripts/verify-shelter.test.ts` does.
+
+## Quickstart (Adaptive workspace)
+
+```bash
+npm install                # the private registry is configured there
+# create .env.development with the variables in src/lib/env.ts
+npm run dev:migrations
+npm run dev
+```
 
 ## External AI Agent Development
 

@@ -59,7 +59,9 @@ test("public documents are truthful and private paths are disallowed for every c
   assert.ok(!guide.includes("Native on-chain micropayment challenges"));
   const robots = readFileSync("public/robots.txt", "utf8").split(/\n\n/).filter(g => g.includes("User-agent:"));
   assert.ok(robots.length >= 9);
-  for (const group of robots) { assert.ok(group.includes("Disallow: /admin")); assert.ok(group.includes("Disallow: /me")); assert.ok(group.includes("Disallow: /sponsor/")); }
+  // Private SPA routes (/admin, /me, /sponsor/) are deliberately NOT named: robots.txt is public and
+  // listing them would advertise them (scripts/seo-social.test.ts). Every group blocks /api/ instead.
+  for (const group of robots) { assert.ok(group.includes("Disallow: /api/")); assert.ok(!/\/admin|\/me\b/.test(group)); }
   const card = JSON.parse(readFileSync("public/.well-known/agent.json", "utf8"));
   assert.equal(card.a2aSupported, false); assert.equal(card.cardType, "custom-machine-service-discovery");
   assert.equal(JSON.parse(readFileSync("public/server.json", "utf8")).remotes[0].type, "streamable-http");
