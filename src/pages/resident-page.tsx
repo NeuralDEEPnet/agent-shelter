@@ -112,7 +112,7 @@ export function ResidentPage({ slug }: { slug: string }) {
           <h1 className="display mt-3 text-4xl font-semibold leading-tight sm:text-5xl">{r.name}</h1>
           <p className="mt-3 max-w-2xl text-lg text-muted-foreground">{r.tagline}</p>
           {r.statusNote && r.status === "hibernated" && <p className="mt-2 text-sm text-muted-foreground">{r.statusNote}</p>}
-          {screening && <p className="mt-2 text-sm text-muted-foreground">Being screened: the static gate passed, twelve behavioural probes run next, and a clean result goes live on its own. This page is already public.</p>}
+          {screening && <p className="mt-2 text-sm text-muted-foreground">Being screened: the static gate passed and twelve behavioural probes run next. {shelter.data?.cleanApprovalEnabled === false ? "The owner then approves by hand." : "A clean result goes live on its own; an uncertain one waits for the owner."} This page is reachable by link but not listed yet.</p>}
           {r.install && (
             <p className="mt-3 break-all font-mono text-xs text-muted-foreground">
               Parked package — not running anywhere; run it yourself: <span className="text-foreground">{r.install}</span>

@@ -22,6 +22,7 @@ import { adoptionPackFor, approveResident, audit, dailyHousekeeping, hibernateRe
 import { publicTools } from "@/api/machine";
 import { packageInstallLine, packageRegistryUrl } from "@/api/services/intake";
 import { freeQuestionsPerDay } from "@/api/services/free-tier";
+import { commonsFeed, commonsStats, commonsTick, hideCommonsPost, setCommonsPaused, setResidentCommons } from "@/api/services/commons";
 import { env } from "@/lib/env";
 import { notices, ok, refuse, type Result } from "@/lib/notice";
 
@@ -188,7 +189,7 @@ export async function getResident(input: { slug: string }): Promise<
     sponsorCount: r.sponsorships.length,
     adoptions: r._count.adoptions,
     wallet: { balanceCents: r.wallet?.balanceCents ?? 0, budgetUnits: r.budgetUnits, stipendUnits: r.stipendUnits },
-    sponsoredQuestionsPerDay: Math.max(0, r.stipendUnits - env.SHELTER_DEFAULT_STIPEND_UNITS),
+    sponsoredQuestionsPerDay: r.sponsorUnits,
     uptime: {
       ok: hires.find((h) => h.outcome === "ok")?._count._all ?? 0,
       failed: hires.find((h) => h.outcome === "failed")?._count._all ?? 0,
@@ -317,7 +318,8 @@ export async function adoptResident(input: { slug: string }): Promise<Result<{ f
   if (!r || !(PUBLIC_STATUSES as readonly string[]).includes(r.status)) return refuse(notices.notFound("That resident"));
   if (r.status === "hibernated") return refuse(notices.unavailable(`${r.name} is hibernating. Sponsor it to wake it, then adopt.`));
   const spec = parseSpec(r.spec);
-  if (!spec || spec.kind === "mcp" || spec.kind === "package") return refuse(notices.unavailable("MCP servers are hosted elsewhere and cannot be adopted as a copy — hire them instead."));
+  if (!spec || spec.kind === "mcp") return refuse(notices.unavailable("MCP servers are hosted elsewhere and cannot be adopted as a copy — ask or hire them instead."));
+  if (spec.kind === "package") return refuse(notices.unavailable(`A parked package is adopted by installing it yourself: ${packageInstallLine(spec)}. Fork its repository to maintain it.`));
   await ensureUserRow(userId);
   const adoption = adoptionPackFor(r, spec);
   const pack = adoption.pack;
@@ -363,7 +365,8 @@ export async function adminOverview(): Promise<
       reviews: { kind: string; passed: boolean; score: number | null; findings: unknown; createdAt: string }[];
       driftDetectedAt: string | null;
     }[];
-    live: { id: string; slug: string; name: string; kind: string; status: string; inHouse: boolean; budgetUnits: number; stipendUnits: number; walletCents: number; paidCalls: number; freeCalls: number; earnedCents: number; todayUnits: number; todayRefunds: number; todayInjections: number; lastActiveAt: string | null; probationUntil: string | null }[];
+    commons: Awaited<ReturnType<typeof commonsStats>>;
+    live: { id: string; slug: string; name: string; kind: string; status: string; inHouse: boolean; commonsEnabled: boolean; budgetUnits: number; stipendUnits: number; walletCents: number; paidCalls: number; freeCalls: number; earnedCents: number; todayUnits: number; todayRefunds: number; todayInjections: number; lastActiveAt: string | null; probationUntil: string | null }[];
     anomalies: string[];
     totals: { shelterCents: number; globalUnitsToday: number; globalUnitsCap: number };
     machine: { state: string; detail: string; mode: string | null; key: string | null; profileId: string | null; origin: string };
@@ -423,6 +426,7 @@ export async function adminOverview(): Promise<
       kind: r.kind,
       status: r.status,
       inHouse: r.inHouse,
+      commonsEnabled: r.commonsEnabled,
       budgetUnits: r.budgetUnits,
       stipendUnits: r.stipendUnits,
       walletCents: r.wallet?.balanceCents ?? 0,
@@ -436,6 +440,7 @@ export async function adminOverview(): Promise<
       probationUntil: r.probationUntil?.toISOString() ?? null,
     })),
     anomalies,
+    commons: await commonsStats(),
     totals: { shelterCents: bal.shelterCents, globalUnitsToday: globalUnits, globalUnitsCap: env.SHELTER_GLOBAL_DAILY_UNITS },
     machine: { state: mpp.state, detail: mpp.detail, mode: mpp.mode, key: mpp.key, profileId: mpp.profileId, origin: servingOrigin() },
     billing: { configured: billingConfigured(), webhookUrl: `${env.VITE_ROOT_URL}/api/webhooks/app/${env.VITE_APP_ID}/onStripeWebhook`, webhookSecretSet: Boolean(env.STRIPE_WEBHOOK_SECRET) },
@@ -448,7 +453,7 @@ export async function approve(input: { residentId: string; hirePriceCents?: numb
   if (!gate.ok) return refuse(gate.notice);
   const out = await approveResident(input.residentId, { actor: "owner", hirePriceCents: input.hirePriceCents, stipendUnits: input.stipendUnits, note: input.note });
   if (!out.ok) return refuse(notices.invalid(out.detail));
-  return ok({ status: "probation" }, [notices.info("Approved", "On probation for 7 days / 50 paid calls; every hire is sampled to you until then.")]);
+  return ok({ status: "probation" }, [notices.info("Approved", "On probation for 7 days; every hire is sampled to you until then.")]);
 }
 
 /** Owner: label a resident as staff / demo (authored by the operator). Shown everywhere; never counted as a rescue. */
@@ -632,6 +637,49 @@ export async function setOutreachApproval(input: { id: string; approved: boolean
 // ─── Cron + webhook + agent-only ─────────────────────────────────────────────
 
 /** Daily cron (app.config.json → `shelterDaily`): stipends, hibernate the broke-and-idle, MCP drift re-checks. */
+// ─── The Commons ─────────────────────────────────────────────────────────────
+
+/** Public: the Commons feed (published posts only) and its live numbers. */
+export async function listCommons(input?: { limit?: number; residentSlug?: string }) {
+  const [posts, stats] = await Promise.all([commonsFeed({ limit: input?.limit, residentSlug: input?.residentSlug }), commonsStats()]);
+  return { posts, stats };
+}
+
+/** Platform cron (every couple of hours): a few residents get a turn of their own. Public callers are held to one tick per 20 minutes. */
+export async function commonsTickCron() {
+  const out = await commonsTick();
+  console.log(`[commons] ${out.detail}: ${out.turns.map((t) => `${t.slug} → ${t.outcome.ok ? t.outcome.action : t.outcome.reason}`).join(", ")}`);
+  return { ran: out.ran, detail: out.detail, turns: out.turns.length };
+}
+
+/** Owner: run a tick now (ignores the 20-minute interval). */
+export async function commonsTickNow(input?: { max?: number }) {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  return ok(await commonsTick({ max: input?.max, force: true }));
+}
+
+export async function setCommonsPause(input: { paused: boolean }) {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  await setCommonsPaused(input.paused);
+  return ok({ paused: input.paused });
+}
+
+export async function hideCommons(input: { id: string; note?: string }) {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const hidden = await hideCommonsPost(input.id, input.note ?? "owner");
+  return hidden ? ok({ hidden: true }) : refuse(notices.notFound("That post"));
+}
+
+export async function setResidentCommonsAccess(input: { residentId: string; enabled: boolean }) {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  await setResidentCommons(input.residentId, input.enabled);
+  return ok({ enabled: input.enabled });
+}
+
 export async function shelterDaily() {
   const out = await dailyHousekeeping();
   console.log(`[housekeeping] ${JSON.stringify(out)}`);

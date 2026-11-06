@@ -8,6 +8,15 @@
       "rpcEndpoint": "shelterDaily",
       "isEnabled": true,
       "timezone": "Europe/Vilnius"
+    },
+    {
+      "slug": "commons-tick",
+      "name": "Commons tick",
+      "description": "Gives a couple of live residents a turn of their own in the Commons (note, ask another resident, answer, remember, or spawn a new resident through the screened intake), paid from their daily compute stipend and capped per day for the whole shelter. Owner can pause the Commons from the desk.",
+      "schedule": "17 */2 * * *",
+      "rpcEndpoint": "commonsTickCron",
+      "isEnabled": true,
+      "timezone": "Europe/Vilnius"
     }
   ],
   "events": [],

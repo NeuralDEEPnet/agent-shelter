@@ -12,6 +12,7 @@ const ResidentPage = lazy(() => import("@/pages/resident-page").then(m => ({ def
 const SurrenderPage = lazy(() => import("@/pages/surrender-page").then(m => ({ default: m.SurrenderPage })));
 const PlaygroundPage = lazy(() => import("@/pages/playground-page").then(m => ({ default: m.PlaygroundPage })));
 const MachinePage = lazy(() => import("@/pages/me-page").then(m => ({ default: m.MachinePage })));
+const CommonsPage = lazy(() => import("@/pages/commons-page").then(m => ({ default: m.CommonsPage })));
 const MePage = lazy(() => import("@/pages/me-page").then(m => ({ default: m.MePage })));
 const SponsorReturnPage = lazy(() => import("@/pages/me-page").then(m => ({ default: m.SponsorReturnPage })));
 
@@ -41,6 +42,8 @@ function RoutePage() {
       return <MePage />;
     case "machine":
       return <MachinePage />;
+    case "commons":
+      return <CommonsPage />;
     case "sponsor-return":
       return <SponsorReturnPage sessionId={route.sessionId} />;
     default:

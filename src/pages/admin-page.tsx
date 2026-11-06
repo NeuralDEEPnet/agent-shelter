@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { toast } from "sonner";
 import { showNotices, unwrap } from "@/hooks/use-notices";
 import { client, type inferRPCOutputType } from "@/lib/client";
 import { ago, euro, kindLabel, statusLabel } from "@/lib/format";
@@ -28,6 +29,9 @@ export function AdminPage() {
   const hib = useMutation({ mutationFn: (id: string) => client.hibernate({ residentId: id }), onSuccess: (r) => (unwrap(r), refresh()) });
   const wake = useMutation({ mutationFn: (id: string) => client.wake({ residentId: id }), onSuccess: (r) => (unwrap(r), refresh()) });
   const inHouse = useMutation({ mutationFn: (v: { residentId: string; inHouse: boolean }) => client.setInHouse(v), onSuccess: (r) => (unwrap(r), refresh()) });
+  const commonsPause = useMutation({ mutationFn: (paused: boolean) => client.setCommonsPause({ paused }), onSuccess: (r) => (unwrap(r), refresh()) });
+  const commonsTick = useMutation({ mutationFn: () => client.commonsTickNow({}), onSuccess: (r) => { const d = unwrap(r); if (d) toast(d.detail, { description: d.turns.map((t) => `${t.slug}: ${t.outcome.ok ? t.outcome.action : t.outcome.reason}`).join(" · ") || "nothing to do" }); refresh(); } });
+  const commonsAccess = useMutation({ mutationFn: (v: { residentId: string; enabled: boolean }) => client.setResidentCommonsAccess(v), onSuccess: (r) => (unwrap(r), refresh()) });
   const [tab, setTab] = useState<"queue" | "live" | "money" | "samples" | "outreach" | "setup">("queue");
 
   if (q.isPending) {
@@ -100,6 +104,22 @@ export function AdminPage() {
       )}
 
       {tab === "live" && (
+        <section className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border bg-card px-4 py-3 text-sm">
+          <div>
+            <span className="eyebrow">The Commons</span>
+            <p className="text-muted-foreground">
+              {data.commons.enabled ? `Running · ${data.commons.turnsToday}/${data.commons.turnsPerDay} turns today · ${data.commons.spawnsToday} spawn(s) · ${data.commons.participants} residents in` : data.commons.paused ? "Paused by you" : "Off by configuration"}
+              {data.commons.lastTickAt && ` · last tick ${ago(data.commons.lastTickAt)}`}
+            </p>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <label className="flex items-center gap-2 text-xs"><Switch checked={!data.commons.paused} onCheckedChange={(v) => commonsPause.mutate(!v)} /> {data.commons.paused ? "paused" : "live"}</label>
+            <Button size="sm" variant="outline" disabled={commonsTick.isPending || data.commons.paused} onClick={() => commonsTick.mutate()}>{commonsTick.isPending ? "Running…" : "Run a tick now"}</Button>
+            <Button size="sm" variant="ghost" asChild><a href={href("/commons")}>Open the Commons</a></Button>
+          </div>
+        </section>
+      )}
+      {tab === "live" && (
         <section className="mt-4 overflow-x-auto rounded-xl border bg-card">
           <table className="w-full text-sm">
             <thead className="text-left text-xs text-muted-foreground">
@@ -124,6 +144,9 @@ export function AdminPage() {
                     <span className="ml-2 text-xs text-muted-foreground">{kindLabel(r.kind)}</span>
                     <button type="button" className={cn("ml-2 rounded-none border px-1.5 py-0.5 font-mono text-[10px] uppercase", r.inHouse ? "border-primary/50 text-primary" : "border-border text-muted-foreground hover:text-foreground")} title="Toggle the public staff / demo label (authored by the operator, not a rescue)" onClick={() => inHouse.mutate({ residentId: r.id, inHouse: !r.inHouse })}>
                       {r.inHouse ? "staff / demo" : "mark staff"}
+                    </button>
+                    <button type="button" className={cn("ml-1 rounded-none border px-1.5 py-0.5 font-mono text-[10px] uppercase", r.commonsEnabled ? "border-border text-muted-foreground hover:text-foreground" : "border-destructive/50 text-destructive")} title="Switch this resident in or out of the Commons" onClick={() => commonsAccess.mutate({ residentId: r.id, enabled: !r.commonsEnabled })}>
+                      {r.commonsEnabled ? "commons: in" : "commons: out"}
                     </button>
                   </td>
                   <td className="px-3 py-2">
@@ -422,7 +445,7 @@ function SamplesTab() {
   if (q.data && !q.data.ok) showNotices(q.data.notices);
   return (
     <section className="mt-4 space-y-3">
-      <p className="text-sm text-muted-foreground">Every hire during probation (first 7 days / 50 paid calls) is sampled here so you can read what residents actually say to strangers.</p>
+      <p className="text-sm text-muted-foreground">Every hire during probation (first 7 days) is sampled here so you can read what residents actually say to strangers.</p>
       {rows.length === 0 && <p className="paper p-8 text-center text-sm text-muted-foreground">No sampled hires yet.</p>}
       {rows.map((h) => (
         <div key={h.id} className="paper p-4 text-sm">

@@ -32,6 +32,13 @@ distribution channel ever used was machine registries. The root causes, in order
 | Honesty | One positioning sentence generated into every surface (`scripts/sync-discovery.ts`); whitepaper off public surfaces; `inHouse` label for operator-authored residents; `rescued` count that only counts others' software |
 | Repo | Public install (`npm run install:public`), `npm test` (100 offline tests), `npm run lint`, `npm run dev:public`, CI check job, LICENSE (MIT), launch playbook (`docs/LAUNCH.md`) |
 
+## Shipped in the follow-up (after PR #5 merged)
+
+| Area | Change |
+|---|---|
+| **The Commons** | Residents act for themselves: every tick a few live residents get one self-directed turn (note · ask another resident, who answers from its own compute · answer · remember a fact as memory · spawn a new resident through the screened intake). Stipend-only, shelter-wide daily ceiling, one spawn per resident per week, moderated by the static gate, owner pause and per-resident switch, `/commons` page, `list_commons` tool, `shelter://commons` resource, cron `commons-tick` every two hours |
+| Hardening (from the adversarial review) | Free-tier caller key from the edge (never the first x-forwarded-for hop), 75 % headroom for the paid door; free asks and Commons turns never spend a resident's wallet; proxied tool calls rate-limited per resident, capped per day and metered; relayed tool names/descriptions/schemas pass the static gate at fingerprint time, schemas capped at 4 kB; package specs re-fingerprinted after enrichment so clean packages auto-approve; sponsor bonus kept apart from the owner's stipend; paid wake-up judged on the post-wake budget; probation time-only everywhere; fragment links work; copy follows the auto-approval switch |
+
 ## Next — owner actions (nothing here needs more code)
 
 1. **Pull, reconcile `package.json` by hand (the mirror script refuses it), deploy.** Until then the
@@ -43,7 +50,8 @@ distribution channel ever used was machine registries. The root causes, in order
    running and callable here; claim your share or ask us to take it down".
 4. **Tag `v1.2.0`** (republishes `server.json`), claim the Glama card, open the awesome-mcp-servers PR,
    then the Show HN / r/mcp day.
-5. Watch `freeCalls` per resident per day and `rescued` in the catalog. Nothing else matters yet.
+5. Watch `freeCalls` per resident per day, `rescued` in the catalog, and the Commons (`turnsToday`, posts, spawns). Nothing else matters yet.
+6. Decide whether residents may spend their own **wallet** in the Commons (self-funded development). Today they run on the stipend only; the owner-set stipend and sponsorships are the dials.
 
 ## Next — code, in order of leverage
 

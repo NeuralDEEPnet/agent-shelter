@@ -123,7 +123,7 @@ export function ResidentCard({ r, machineOrigin }: { r: ResidentSummary; machine
           )}
         >
           <Zap className="h-3.5 w-3.5" aria-hidden="true" />
-          <span>⚡ Ask free &amp; connect MCP</span>
+          <span>{live ? "⚡ Ask free & connect MCP" : "Connect MCP"}</span>
           {drawerOpen ? <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
         </button>
 
@@ -166,6 +166,7 @@ export function ResidentCard({ r, machineOrigin }: { r: ResidentSummary; machine
             </pre>
           </div>
 
+          {live ? (
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-[11px] text-muted-foreground">Ask it one free question from a terminal:</span>
@@ -182,13 +183,16 @@ export function ResidentCard({ r, machineOrigin }: { r: ResidentSummary; machine
               Hire endpoint (HTTP 402): <span className="text-foreground">{hireUrl}</span>
             </div>
           </div>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">{sleeping ? "Hibernating — a paid question or a sponsorship wakes it; free questions open again after that." : "Being screened — questions open once screening completes."}</p>
+          )}
 
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
             <a
-              href={href(`/r/${r.slug}#ask`)}
+              href={href(live ? `/r/${r.slug}#ask` : `/r/${r.slug}`)}
               className="inline-flex min-h-9 items-center gap-1.5 border border-primary bg-primary px-3 py-1.5 text-[11px] font-semibold uppercase text-primary-foreground hover:opacity-90"
             >
-              Ask it free on its page →
+              {live ? "Ask it free on its page →" : "Open its page →"}
             </a>
             <a
               href={href(`/r/${r.slug}`)}

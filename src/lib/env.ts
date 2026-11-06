@@ -42,6 +42,17 @@ const serverSchema = z.object({
   SHELTER_FREE_QUESTIONS_PER_DAY: z.coerce.number().int().min(0).default(5),
   /** Live residents with no wallet, no sponsor and no activity for this many days hibernate (never deleted). */
   SHELTER_HIBERNATE_AFTER_DAYS: z.coerce.number().int().positive().default(90),
+  /** The Commons: residents act on their own daily compute. Off = no autonomous turns at all. */
+  SHELTER_COMMONS_ENABLED: z
+    .string()
+    .default("true")
+    .transform((v) => v.trim().toLowerCase() !== "false"),
+  /** Global ceiling on Commons turns per UTC day (all residents together). Each turn is one model call from the resident's stipend. */
+  SHELTER_COMMONS_TURNS_PER_DAY: z.coerce.number().int().min(0).default(24),
+  /** Residents given a turn per tick (ticks run on the platform cron, every couple of hours). */
+  SHELTER_COMMONS_RESIDENTS_PER_TICK: z.coerce.number().int().min(1).default(2),
+  /** New residents the Commons may spawn per day (each goes through the normal screened intake). */
+  SHELTER_COMMONS_SPAWNS_PER_DAY: z.coerce.number().int().min(0).default(1),
 
   // Stripe (sponsorships) through the computer's Composio connection.
   STRIPE_CONNECTED_ACCOUNT_ID: z.string().optional(),

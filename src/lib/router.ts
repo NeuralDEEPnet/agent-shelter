@@ -19,6 +19,7 @@ export type Route =
   | { name: "me" }
   | { name: "sponsor-return"; sessionId: string | null }
   | { name: "machine" }
+  | { name: "commons" }
   | { name: "not-found" };
 
 /** Parse a path (with optional query) like `/r/minute` or `/sponsor/return?session_id=…`. */
@@ -28,7 +29,8 @@ export function parsePath(pathAndQuery: string): Route {
   const parts = pathPart.split("/").filter(Boolean);
   const params = new URLSearchParams(query);
   if (parts.length === 0) return { name: "home" };
-  if (["playground", "commons", "gallery"].includes(parts[0])) return { name: "playground", tab: parts[0] === "gallery" ? "gallery" : params.get("tab") === "create" ? "create" : "talk" };
+  if (parts[0] === "commons") return { name: "commons" };
+  if (["playground", "gallery"].includes(parts[0])) return { name: "playground", tab: parts[0] === "gallery" ? "gallery" : params.get("tab") === "create" ? "create" : "talk" };
   if (parts[0] === "r" && parts[1]) return { name: "resident", slug: decodeURIComponent(parts[1]) };
   if (parts[0] === "surrender") return { name: "surrender" };
   if (parts[0] === "admin") return { name: "admin" };
@@ -68,7 +70,9 @@ export function useRoute(): Route {
   useEffect(() => {
     const onChange = () => {
       setRoute(currentLocation().route);
-      window.scrollTo({ top: 0 });
+      const target = window.location.hash.length > 1 ? document.getElementById(window.location.hash.slice(1)) : null;
+      if (target) target.scrollIntoView({ block: "start" });
+      else window.scrollTo({ top: 0 });
     };
     const onClick = (e: MouseEvent) => {
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -80,8 +84,10 @@ export function useRoute(): Route {
       if (url.origin !== window.location.origin) return;
       if (url.pathname.startsWith("/api/") || /\.[a-z0-9]+$/i.test(url.pathname)) return; // machine door + files stay native
       if (parsePath(`${url.pathname}${url.search}`).name === "not-found") return;
+      // A fragment on the current page is plain browser navigation (scrolls to the element).
+      if (url.hash && `${url.pathname}${url.search}` === `${window.location.pathname}${window.location.search}`) return;
       e.preventDefault();
-      navigate(`${url.pathname}${url.search}`);
+      navigate(`${url.pathname}${url.search}${url.hash}`);
     };
     window.addEventListener("popstate", onChange);
     window.addEventListener("hashchange", onChange);
@@ -100,7 +106,7 @@ export function useRoute(): Route {
 /** Programmatic navigation. Accepts `/r/minute` or legacy `#/r/minute`. */
 export function navigate(to: string) {
   const path = to.startsWith("#") ? (hashToPath(to) ?? "/") : to.startsWith("/") ? to : `/${to}`;
-  if (`${window.location.pathname}${window.location.search}` !== path) window.history.pushState(null, "", path);
+  if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== path) window.history.pushState(null, "", path);
   window.dispatchEvent(new Event(NAV_EVENT));
 }
 

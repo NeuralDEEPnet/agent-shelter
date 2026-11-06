@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { env } from "@/lib/env";
 
 /**
@@ -14,6 +15,22 @@ import { env } from "@/lib/env";
 
 const counts = new Map<string, number>();
 let currentDay = "";
+const MAX_KEYS = 50_000;
+
+/**
+ * Who is asking, from headers the EDGE sets — never the first x-forwarded-for
+ * hop, which the client writes itself. Order: cf-connecting-ip, x-real-ip, the
+ * LAST x-forwarded-for entry (appended by the trusted proxy), else "unknown"
+ * (every direct caller then shares one bucket, which is the safe direction).
+ * The key is hashed so header strings never sit in memory verbatim.
+ */
+export function callerKey(request: Request): string {
+  const h = request.headers;
+  const xff = h.get("x-forwarded-for");
+  const last = xff ? xff.split(",").map((s) => s.trim()).filter(Boolean).pop() : undefined;
+  const raw = h.get("cf-connecting-ip") ?? h.get("x-real-ip") ?? last ?? "unknown";
+  return createHash("sha256").update(raw.slice(0, 200)).digest("hex").slice(0, 32);
+}
 
 function day(now = new Date()): string {
   return now.toISOString().slice(0, 10);
@@ -51,6 +68,7 @@ export function freeQuotaPeek(caller: string, now = new Date()): FreeQuota {
 export function freeQuotaTake(caller: string, now = new Date()): FreeQuota {
   const peek = freeQuotaPeek(caller, now);
   if (!peek.ok) return peek;
+  if (!counts.has(caller) && counts.size >= MAX_KEYS) counts.delete(counts.keys().next().value as string);
   counts.set(caller, peek.used + 1);
   return { ok: true, used: peek.used + 1, remaining: peek.remaining - 1 };
 }
