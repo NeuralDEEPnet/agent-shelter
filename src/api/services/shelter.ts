@@ -15,6 +15,7 @@ import {
 import { createMcpClient, fingerprintTools, McpError, type McpFetch } from "@/api/services/mcpClient";
 import { fetchPackageMeta, type RegistryFetch } from "@/api/services/registry";
 import { parseAllowlist, parseSpec } from "@/api/services/runtime";
+import { runStaticChecks } from "@/api/services/security";
 import { env } from "@/lib/env";
 
 /**
@@ -180,6 +181,16 @@ export async function screenResident(residentId: string, deps: Partial<ScreenDep
     // Parked package: read the public registry (never the package itself).
     const meta = await fetchPackageMeta(spec, { fetch: deps.registryFetch });
     if (meta.ok) {
+      // The README was fetched AFTER the door, so it gets the same static gate as surrendered text:
+      // a README carrying credential-shaped strings or injection phrases is not fed to the archive desk.
+      if (meta.meta.readme) {
+        const gate = runStaticChecks({ texts: [meta.meta.readme], urls: [], toolNames: [] });
+        if (!gate.passed) {
+          meta.meta.readmeWithheld = gate.checks.filter((c) => !c.ok).map((c) => c.id).join(",");
+          meta.meta.readme = undefined;
+          meta.tools = [];
+        }
+      }
       const tools = spec.tools.length ? spec.tools : meta.tools;
       allowlist = tools.map((t) => t.name);
       await db.resident.update({ where: { id: residentId }, data: { toolAllowlist: JSON.stringify(allowlist), spec: JSON.stringify({ ...spec, tools, registryMeta: meta.meta }) } });

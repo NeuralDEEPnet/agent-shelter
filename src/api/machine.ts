@@ -402,9 +402,12 @@ async function proxiedTools(): Promise<{ name: string; slug: string; tool: strin
   return out;
 }
 
+const MAX_PROXIED_ARG_CHARS = 16_000;
+
 async function callProxiedTool(name: string, args: Record<string, unknown>, caller: string): Promise<{ text: string; isError?: boolean }> {
   const hit = (await proxiedTools()).find((t) => t.name === name);
   if (!hit) return { text: `Unknown tool "${name}". Read tools/list.`, isError: true };
+  if (JSON.stringify(args).length > MAX_PROXIED_ARG_CHARS) return { text: `Arguments exceed ${MAX_PROXIED_ARG_CHARS} characters.`, isError: true };
   const resident = await liveResident(hit.slug);
   const spec = resident ? parseSpec(resident.spec) : null;
   if (!resident || spec?.kind !== "mcp") return { text: `${hit.slug} is not taking calls right now.`, isError: true };

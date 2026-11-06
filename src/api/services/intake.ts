@@ -120,6 +120,8 @@ export const packageSpecSchema = z.object({
       repository: z.string().max(2_000).optional(),
       deprecated: z.string().max(500).optional(),
       readme: z.string().max(20_000).optional(),
+      /** Set when the README failed the static text gate (secrets / injection phrases) and was therefore not kept. */
+      readmeWithheld: z.string().max(200).optional(),
       fetchedAt: z.string().optional(),
     })
     .optional(),

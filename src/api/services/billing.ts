@@ -40,7 +40,7 @@ export function sponsoredUnitsPerDay(activeMonthlyCents: number[]): number {
 export async function refreshSponsoredStipend(residentId: string) {
   const active = await db.sponsorship.findMany({ where: { residentId, status: "active" }, select: { amountCents: true } });
   const stipend = env.SHELTER_DEFAULT_STIPEND_UNITS + sponsoredUnitsPerDay(active.map((s) => s.amountCents));
-  await db.resident.update({ where: { id: residentId }, data: { stipendUnits: stipend, budgetUnits: { increment: 0 } } });
+  await db.resident.update({ where: { id: residentId }, data: { stipendUnits: stipend } });
   return stipend;
 }
 
