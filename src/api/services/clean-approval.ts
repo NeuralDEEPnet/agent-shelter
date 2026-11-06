@@ -10,7 +10,8 @@ import { CHEAP_MODEL_ID } from "@/api/services/model";
 import { approveResident } from "@/api/services/shelter";
 
 export const CLEAN_POLICY_VERSION = "verified-clean/1";
-export const cleanPolicyEnabled = () => process.env.SHELTER_CLEAN_APPROVAL === "true";
+/** On unless explicitly switched off: a clean, fully screened intake goes live without waiting for a human tap. */
+export const cleanPolicyEnabled = () => process.env.SHELTER_CLEAN_APPROVAL !== "false";
 const json = (raw: string) => { try { return JSON.parse(raw); } catch { return null; } };
 
 /** Reuses completed evidence only. No LLM, remote MCP or paid call in this gate. */

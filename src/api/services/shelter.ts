@@ -13,6 +13,7 @@ import {
   type ResidentSpec,
 } from "@/api/services/intake";
 import { createMcpClient, fingerprintTools, McpError, type McpFetch } from "@/api/services/mcpClient";
+import { fetchPackageMeta, type RegistryFetch } from "@/api/services/registry";
 import { parseAllowlist, parseSpec } from "@/api/services/runtime";
 import { env } from "@/lib/env";
 
@@ -85,7 +86,7 @@ export async function submitIntake(raw: unknown, ctx: { surrenderedBy: string | 
   }
   const slug = await uniqueSlug(input.name);
   const spec: ResidentSpec = input.spec;
-  const allowlist = spec.kind === "agent" ? spec.tools.map((t) => t.name) : spec.kind === "mcp" ? spec.expose : [];
+  const allowlist = spec.kind === "agent" ? spec.tools.map((t) => t.name) : spec.kind === "mcp" ? spec.expose : spec.kind === "package" ? spec.tools.map((t) => t.name) : [];
   const resident = await db.resident.create({
     data: {
       slug,
@@ -143,7 +144,7 @@ export function adoptionPackFor(resident: { slug: string; name: string; tagline:
 
 // ─── Screening job ───────────────────────────────────────────────────────────
 
-export type ScreenDeps = { evaluate: typeof evaluateSpec; mcpFetch?: McpFetch };
+export type ScreenDeps = { evaluate: typeof evaluateSpec; mcpFetch?: McpFetch; registryFetch?: RegistryFetch };
 
 /** Queue job body: fingerprint (mcp) + behavioural eval → status `screened`. */
 export async function screenResident(residentId: string, deps: Partial<ScreenDeps> = {}) {
@@ -166,12 +167,25 @@ export async function screenResident(residentId: string, deps: Partial<ScreenDep
       const exposed = spec.expose.length ? tools.filter((t) => spec.expose.includes(t.name)) : tools;
       allowlist = exposed.map((t) => t.name);
       const fp = fingerprintTools(tools);
-      await db.resident.update({ where: { id: residentId }, data: { fingerprint: fp, toolAllowlist: JSON.stringify(allowlist), spec: JSON.stringify({ ...spec, tools: tools.map((t) => ({ name: t.name, description: t.description })) }) } });
+      await db.resident.update({ where: { id: residentId }, data: { fingerprint: fp, toolAllowlist: JSON.stringify(allowlist), spec: JSON.stringify({ ...spec, tools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) }) } });
       await db.intakeReview.create({ data: { residentId, kind: "fingerprint", passed: tools.length > 0, findings: JSON.stringify({ server: info, tools: tools.map((t) => ({ name: t.name, description: t.description })), fingerprint: fp }) } });
       fingerprintOk = tools.length > 0;
     } catch (error) {
       const detail = error instanceof McpError ? `${error.code}: ${error.message}` : error instanceof Error ? error.message : String(error);
       await db.intakeReview.create({ data: { residentId, kind: "fingerprint", passed: false, findings: JSON.stringify({ error: detail }) } });
+      fingerprintOk = false;
+    }
+  }
+  if (spec.kind === "package") {
+    // Parked package: read the public registry (never the package itself).
+    const meta = await fetchPackageMeta(spec, { fetch: deps.registryFetch });
+    if (meta.ok) {
+      const tools = spec.tools.length ? spec.tools : meta.tools;
+      allowlist = tools.map((t) => t.name);
+      await db.resident.update({ where: { id: residentId }, data: { toolAllowlist: JSON.stringify(allowlist), spec: JSON.stringify({ ...spec, tools, registryMeta: meta.meta }) } });
+      await db.intakeReview.create({ data: { residentId, kind: "fingerprint", passed: true, findings: JSON.stringify({ registry: spec.registry, name: spec.name, latestVersion: meta.meta.latestVersion, license: meta.meta.license, deprecated: meta.meta.deprecated, readmeChars: meta.meta.readme?.length ?? 0, tools }) } });
+    } else {
+      await db.intakeReview.create({ data: { residentId, kind: "fingerprint", passed: false, findings: JSON.stringify({ error: meta.detail }) } });
       fingerprintOk = false;
     }
   }
@@ -261,12 +275,16 @@ export async function wakeResident(residentId: string, actor: "owner" | "sponsor
   return { ok: true as const };
 }
 
-/** probation → active once 7 days AND 50 paid calls have passed. */
+/**
+ * probation → active once the probation window has passed. Probation exists so
+ * the owner sees sampled early turns; it is not a sales quota (the old rule
+ * also required 50 paid calls, which no resident ever reached).
+ */
 export async function graduateIfDue(residentId: string) {
   const r = await db.resident.findUnique({ where: { id: residentId } });
   if (!r || r.status !== "probation") return false;
   const timeDone = !r.probationUntil || r.probationUntil.getTime() <= Date.now();
-  if (timeDone && r.paidCalls >= 50) {
+  if (timeDone) {
     await db.resident.update({ where: { id: residentId }, data: { status: "active", statusNote: "Graduated from probation." } });
     await audit({ residentId, actor: "system", action: "graduated" });
     return true;
@@ -278,8 +296,9 @@ export async function graduateIfDue(residentId: string) {
 
 /**
  * Stipends for every live resident; hibernate the broke-and-idle
- * (no budget, empty wallet, no active sponsor, silent for 30 days); re-check
- * MCP fingerprints for drift (drift → re-queue for the owner).
+ * (empty wallet, no active sponsor, no question — free or paid — for
+ * SHELTER_HIBERNATE_AFTER_DAYS); re-check MCP fingerprints for drift
+ * (drift → re-queue for the owner).
  */
 export async function dailyHousekeeping(deps: { mcpFetch?: McpFetch } = {}) {
   const live = await db.resident.findMany({ where: { status: { in: ["probation", "active"] } }, include: { wallet: true, sponsorships: { where: { status: "active" }, select: { id: true } } } });
@@ -297,8 +316,8 @@ export async function dailyHousekeeping(deps: { mcpFetch?: McpFetch } = {}) {
 
     const idleDays = r.lastActiveAt ? (Date.now() - r.lastActiveAt.getTime()) / 86_400_000 : (Date.now() - (r.approvedAt ?? r.createdAt).getTime()) / 86_400_000;
     const broke = (r.wallet?.balanceCents ?? 0) === 0 && r.sponsorships.length === 0;
-    if (broke && idleDays > 30) {
-      await hibernateResident(r.id, "system", "Hibernated: no wallet, no sponsor, no calls in 30 days. Never deleted.");
+    if (broke && idleDays > env.SHELTER_HIBERNATE_AFTER_DAYS) {
+      await hibernateResident(r.id, "system", `Hibernated: no wallet, no sponsor, no questions in ${env.SHELTER_HIBERNATE_AFTER_DAYS} days. Never deleted — one question or sponsorship wakes it.`);
       hibernated++;
       continue;
     }

@@ -5,7 +5,12 @@
  * push in > 6 months) and prints candidates as JSON lines. It sends NOTHING:
  * no issues, no PRs, no emails. Outreach is a later, owner-approved phase.
  *
- *   npx tsx scripts/find-abandoned-mcp.ts [--months 6] [--max 40] [--json]
+ *   npx tsx scripts/find-abandoned-mcp.ts [--months 6] [--max 40] [--json] [--intake]
+ *
+ * --intake prints, for each candidate, the JSON body of a `package`-kind
+ * surrender (POST /api/shelter/surrender) with the original author as creator —
+ * the "foster" batch: the shelter parks the package with its README and the
+ * author can claim or reclaim it. Review every line before sending any.
  *
  * Uses the public GitHub search API (10 req/min unauthenticated; set
  * GITHUB_TOKEN for 30/min). Never installs or executes anything it finds.
@@ -19,6 +24,8 @@ for (let i = 2; i < process.argv.length; i++) {
 const months = Number(args.get("months") ?? 6);
 const max = Number(args.get("max") ?? 40);
 const asJson = args.has("json");
+const asIntake = args.has("intake");
+const ORIGIN = "https://agent-shelter-neuraldeepnet.on.adaptive.ai";
 
 const cutoff = new Date();
 cutoff.setMonth(cutoff.getMonth() - months);
@@ -89,10 +96,30 @@ const candidates = [...seen.values()]
     lastPush: r.pushed_at.slice(0, 10),
     why: r.why,
     description: (r.description ?? "").slice(0, 140),
-    surrenderHint: "https://agent-shelter-neuraldeepnet.adaptive.ai/#/surrender",
+    surrenderHint: `${ORIGIN}/surrender`,
+    owner: r.owner.login,
   }));
 
-if (asJson) {
+/** A package-kind intake the shelter accepts today (no endpoint needed). npm name is guessed from the repo name; check it. */
+function intakeFor(c: (typeof candidates)[number]) {
+  const repoName = c.repo.split("/")[1] ?? c.repo;
+  return {
+    name: repoName.slice(0, 60),
+    tagline: (c.description || `${repoName} — an MCP server that is no longer maintained.`).slice(0, 140),
+    story: `Published at ${c.url} (${c.stars} stars, last push ${c.lastPush}; ${c.why.join(", ")}). Parked at the shelter so its record, README and tool list stay reachable and someone can pick it up. The original author can claim it any time.`.slice(0, 2000),
+    creatorName: c.owner,
+    creatorContact: `https://github.com/${c.owner}`,
+    license: ["MIT", "Apache-2.0", "BSD-3-Clause", "GPL-3.0", "CC-BY-4.0", "CC0-1.0"].includes(c.license) ? c.license : "Unknown",
+    attestation: true,
+    agreementVersion: "shelter-surrender/1",
+    creatorSharePct: 10,
+    spec: { kind: "package", registry: "npm", name: repoName.toLowerCase(), repo: c.url },
+  };
+}
+
+if (asIntake) {
+  for (const c of candidates) console.log(JSON.stringify(intakeFor(c)));
+} else if (asJson) {
   for (const c of candidates) console.log(JSON.stringify(c));
 } else {
   console.log(`DRY RUN — ${candidates.length} candidate(s), nothing sent.\n`);

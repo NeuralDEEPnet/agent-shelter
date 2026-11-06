@@ -27,7 +27,7 @@ const serverSchema = z.object({
   SHELTER_OWNER_HANDLES: z.string().default("neuraldeepnet"),
   /** App-scoped user ids that are owners (learned after first sign-in; optional). */
   SHELTER_OWNER_USER_IDS: z.string().default(""),
-  /** Off by decision: every intake waits for an owner tap. */
+  /** Legacy broad auto-approve (unused; the verified-clean policy in clean-approval.ts decides, on unless SHELTER_CLEAN_APPROVAL=false). */
   SHELTER_AUTO_APPROVE: z
     .string()
     .default("false")
@@ -38,6 +38,10 @@ const serverSchema = z.object({
   SHELTER_DEFAULT_STIPEND_UNITS: z.coerce.number().int().positive().default(20),
   /** Per-resident rate limit (turns per minute). */
   SHELTER_TURNS_PER_MINUTE: z.coerce.number().int().positive().default(6),
+  /** Free questions one caller (IP) may ask residents per UTC day over MCP/HTTP, funded by stipends. 0 disables the free tier. */
+  SHELTER_FREE_QUESTIONS_PER_DAY: z.coerce.number().int().min(0).default(5),
+  /** Live residents with no wallet, no sponsor and no activity for this many days hibernate (never deleted). */
+  SHELTER_HIBERNATE_AFTER_DAYS: z.coerce.number().int().positive().default(90),
 
   // Stripe (sponsorships) through the computer's Composio connection.
   STRIPE_CONNECTED_ACCOUNT_ID: z.string().optional(),

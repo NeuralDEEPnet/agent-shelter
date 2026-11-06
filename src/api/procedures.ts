@@ -19,6 +19,9 @@ import { applyCleanIntakePolicy, cleanIntakeDecision, cleanPolicyEnabled, intake
 import { balances, recordPayout as recordPayoutEntry, splitCents, UNIT_PRICE_CENTS } from "@/api/services/ledger";
 import { globalUnitsToday, parseAllowlist, parseSpec, runTurn, utcDay } from "@/api/services/runtime";
 import { adoptionPackFor, approveResident, audit, dailyHousekeeping, hibernateResident, rejectResident, settings, submitIntake, wakeResident } from "@/api/services/shelter";
+import { publicTools } from "@/api/machine";
+import { packageInstallLine, packageRegistryUrl } from "@/api/services/intake";
+import { freeQuestionsPerDay } from "@/api/services/free-tier";
 import { env } from "@/lib/env";
 import { notices, ok, refuse, type Result } from "@/lib/notice";
 
@@ -39,7 +42,9 @@ export async function health() {
 
 // ─── Public ──────────────────────────────────────────────────────────────────
 
-const PUBLIC_STATUSES = ["probation", "active", "hibernated"] as const;
+/** Everything but rejected: residents are visible from the moment the static gate passes. */
+const PUBLIC_STATUSES = ["submitted", "screened", "approved", "probation", "active", "hibernated"] as const;
+const LIVE_STATUSES = ["probation", "active"] as const;
 
 function publicResident(r: {
   slug: string;
@@ -49,24 +54,32 @@ function publicResident(r: {
   status: string;
   hirePriceCents: number;
   paidCalls: number;
+  freeCalls: number;
   earnedCents: number;
   createdAt: Date;
   approvedAt: Date | null;
   toolAllowlist: string;
+  spec: string;
   license: string;
   creatorName: string;
 }) {
+  const spec = parseSpec(r.spec);
   return {
     slug: r.slug,
     kind: r.kind,
     name: r.name,
     tagline: r.tagline,
     status: r.status,
+    takingCalls: (LIVE_STATUSES as readonly string[]).includes(r.status),
     hirePriceCents: r.hirePriceCents,
     paidCalls: r.paidCalls,
+    freeCalls: r.freeCalls,
     earnedCents: r.earnedCents,
     since: (r.approvedAt ?? r.createdAt).toISOString(),
     tools: parseAllowlist(r.toolAllowlist),
+    toolsDescribed: publicTools(r.spec, r.toolAllowlist),
+    install: spec?.kind === "package" ? packageInstallLine(spec) : null,
+    registry: spec?.kind === "package" ? packageRegistryUrl(spec) : null,
     license: r.license,
     creatorName: r.creatorName,
   };
@@ -105,7 +118,7 @@ export async function getShelter() {
 export async function listResidents(input?: { kind?: string; includeHibernated?: boolean }) {
   const rows = await db.resident.findMany({
     where: {
-      status: { in: input?.includeHibernated === false ? ["probation", "active"] : [...PUBLIC_STATUSES] },
+      status: { in: input?.includeHibernated === false ? [...LIVE_STATUSES] : [...PUBLIC_STATUSES] },
       ...(input?.kind && (RESIDENT_KINDS as readonly string[]).includes(input.kind) ? { kind: input.kind } : {}),
     },
     orderBy: [{ status: "asc" }, { paidCalls: "desc" }, { createdAt: "desc" }],
@@ -126,6 +139,8 @@ export async function getResident(input: { slug: string }): Promise<
     uptime: { ok: number; failed: number };
     recentAudit: { action: string; detail: string | null; at: string }[];
     hireUrl: string;
+    askUrl: string;
+    freeQuestionsPerDay: number;
     cardUrl: string;
     canAdopt: boolean;
     /** The caller already holds this resident's pack — show the "Bring into AiBeing" door. */
@@ -170,8 +185,10 @@ export async function getResident(input: { slug: string }): Promise<
     },
     recentAudit: r.audits.map((a) => ({ action: a.action, detail: a.detail, at: a.createdAt.toISOString() })),
     hireUrl: `${servingOrigin()}/api/mpp/hire/${r.slug}`,
+    askUrl: `${servingOrigin()}/api/mpp/ask/${r.slug}`,
+    freeQuestionsPerDay: freeQuestionsPerDay(),
     cardUrl: `${servingOrigin()}/api/shelter/cards/${r.slug}.svg`,
-    canAdopt: r.kind !== "mcp" && r.status !== "hibernated",
+    canAdopt: r.kind !== "mcp" && r.kind !== "package" && (LIVE_STATUSES as readonly string[]).includes(r.status),
     adoptedByMe: Boolean(myAdoption),
     mySponsorship: mine ? { id: mine.id, status: mine.status, amountCents: mine.amountCents } : null,
   });
@@ -290,7 +307,7 @@ export async function adoptResident(input: { slug: string }): Promise<Result<{ f
   if (!r || !(PUBLIC_STATUSES as readonly string[]).includes(r.status)) return refuse(notices.notFound("That resident"));
   if (r.status === "hibernated") return refuse(notices.unavailable(`${r.name} is hibernating. Sponsor it to wake it, then adopt.`));
   const spec = parseSpec(r.spec);
-  if (!spec || spec.kind === "mcp") return refuse(notices.unavailable("MCP servers are hosted elsewhere and cannot be adopted as a copy — hire them instead."));
+  if (!spec || spec.kind === "mcp" || spec.kind === "package") return refuse(notices.unavailable("MCP servers are hosted elsewhere and cannot be adopted as a copy — hire them instead."));
   await ensureUserRow(userId);
   const adoption = adoptionPackFor(r, spec);
   const pack = adoption.pack;

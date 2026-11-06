@@ -511,7 +511,8 @@ test("mcp door: tools/list, surrender tool with a refused spec, get_resident, hi
   assert.equal((init?.result as { serverInfo: { name: string } }).serverInfo.name, "agent-shelter");
   assert.equal(await rpc("notifications/initialized"), null);
   const list = await rpc("tools/list");
-  assert.deepEqual(((list?.result as { tools: { name: string }[] }).tools.map((t) => t.name)).sort(), ["get_resident", "hire", "list_residents", "surrender"]);
+  // Static tools plus, when approved MCP residents exist, their proxied <slug>__<tool> entries.
+  assert.deepEqual(((list?.result as { tools: { name: string }[] }).tools.map((t) => t.name).filter((n) => !n.includes("__"))).sort(), ["ask", "get_resident", "hire", "list_residents", "surrender"]);
   const bad = await rpc("tools/call", { name: "surrender", arguments: agentInput("Leaky2", { spec: { kind: "agent", systemPrompt: "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" } }) });
   assert.equal((bad?.result as { isError: boolean }).isError, true);
   const got = await rpc("tools/call", { name: "get_resident", arguments: { slug: residentSlug } });

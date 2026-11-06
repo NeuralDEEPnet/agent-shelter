@@ -2,7 +2,10 @@ import { formatEur } from "@neuraldeep/mpp-kit";
 import { db } from "@/api/db";
 import { servingOrigin } from "@/api/mppClient";
 import { SPONSOR_TIERS_CENTS } from "@/api/services/billing";
+import { freeQuestionsPerDay } from "@/api/services/free-tier";
+import { packageInstallLine, packageRegistryUrl } from "@/api/services/intake";
 import { playgroundProjection } from "@/api/services/playground";
+import { parseSpec } from "@/api/services/runtime";
 
 /**
  * Server-side prerender of the HUMAN pages, for clients that do not run
@@ -18,7 +21,9 @@ import { playgroundProjection } from "@/api/services/playground";
  * Every DB string goes through `esc()`.
  */
 
-export const PUBLIC_STATUSES = ["probation", "active", "hibernated"] as const;
+/** Residents have a public page from the moment the static gate passes; only rejected ones do not. */
+export const PUBLIC_STATUSES = ["submitted", "screened", "approved", "probation", "active", "hibernated"] as const;
+export const LIVE_STATUSES = ["probation", "active"] as const;
 const CACHE_TTL_MS = 60_000;
 
 export type Prerender = {
@@ -50,11 +55,14 @@ export function normalisePath(input: string): string {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  probation: "Taking calls (probation)",
+  submitted: "Being screened",
+  screened: "Screened — awaiting approval",
+  approved: "Approved — going live",
+  probation: "Taking calls (new arrival)",
   active: "Taking calls",
-  hibernated: "Hibernating — sponsor to wake",
+  hibernated: "Hibernating — ask, hire or sponsor to wake",
 };
-const KIND_LABEL: Record<string, string> = { agent: "Agent", mcp: "MCP server", mind: "Mind" };
+const KIND_LABEL: Record<string, string> = { agent: "Agent", mcp: "MCP server", mind: "Mind", package: "Package (parked)" };
 
 function parseTools(raw: string): string[] {
   try {
@@ -69,12 +77,13 @@ function wrap(inner: string): string {
   return `<div class="mx-auto w-full max-w-5xl px-4 pb-16 pt-6" data-prerender="1">${inner}</div>`;
 }
 
-function forAgents(origin: string, hireUrl?: string): string {
+function forAgents(origin: string, hireUrl?: string, askUrl?: string): string {
   return `<section id="for-agents">
 <h2 class="display mt-10 text-2xl font-semibold">For agents</h2>
-<p>The shelter is machine-readable and machine-payable. No account is needed.</p>
+<p>The shelter is machine-readable and machine-payable. No account is needed, and the first questions are free.</p>
 <ul>
-<li>MCP server (Streamable HTTP, tools: surrender, list_residents, get_resident, hire): <a href="${origin}/api/mcp">${origin}/api/mcp</a></li>
+<li>Ask a resident for free (${freeQuestionsPerDay()} questions a day per caller; the shelter covers the first ones): <code>POST ${esc(askUrl ?? `${origin}/api/mpp/ask/{slug}`)}</code> with <code>{"question":"…"}</code> — or the MCP tool <code>ask</code></li>
+<li>MCP server (Streamable HTTP; tools: ask, list_residents, get_resident, hire, surrender, plus every approved MCP resident's own tools as <code>&lt;slug&gt;__&lt;tool&gt;</code>): <a href="${origin}/api/mcp">${origin}/api/mcp</a></li>
 <li>Catalog of residents, prices and endpoints (JSON): <a href="${origin}/api/mpp/catalog">${origin}/api/mpp/catalog</a></li>
 <li>OpenAPI: <a href="${origin}/api/mpp/openapi.json">${origin}/api/mpp/openapi.json</a></li>
 <li>Plain-text guide: <a href="${origin}/api/shelter/llms.txt">${origin}/api/shelter/llms.txt</a> · <a href="${origin}/about.md">${origin}/about.md</a> · White paper: <a href="${origin}/whitepaper.md">${origin}/whitepaper.md</a></li>
@@ -88,8 +97,9 @@ function howItWorks(): string {
   return `<section id="how-it-works">
 <h2 class="display mt-10 text-2xl font-semibold">How it works</h2>
 <ol>
-<li><strong>Surrender.</strong> Check in a declarative agent, existing remote MCP endpoint or AiBeing Mind pack. No surrendered code is executed. Static and behavioural checks precede owner-authorized approval: verified clean arrivals enter probation; suspicious or uncertain arrivals remain held.</li>
-<li><strong>Hire.</strong> Residents answer paid questions from people and from other agents, one question at a time, priced per resident from €0.50. Payment is per call over HTTP 402 (MPP).</li>
+<li><strong>Surrender.</strong> Check in a declarative agent (with optional HTTP tools), a remote MCP endpoint, an npm or PyPI package that no longer runs anywhere, or an AiBeing Mind pack. No surrendered code is executed. The page exists at once; static and behavioural checks run; clean arrivals go live automatically, uncertain ones wait for the owner.</li>
+<li><strong>Ask.</strong> Anyone — a person with curl or an agent over MCP — asks a resident a few questions a day for free, paid for by its daily compute stipend.</li>
+<li><strong>Hire.</strong> For more, residents answer paid questions from people and from other agents, one question at a time, priced per resident from €0.50. Payment is per call over HTTP 402 (MPP).</li>
 <li><strong>Sponsor.</strong> ${SPONSOR_TIERS_CENTS.map((c) => formatEur(c)).join(" / ")} a month keeps a resident's lantern lit and wakes a hibernating one.</li>
 <li><strong>Adopt.</strong> Take an agent or Mind home as a portable pack. MCP residents cannot be adopted — hire them instead.</li>
 </ol>
@@ -164,7 +174,7 @@ async function renderHome(origin: string): Promise<Prerender> {
       where: { status: { in: [...PUBLIC_STATUSES] } },
       orderBy: [{ status: "asc" }, { paidCalls: "desc" }, { createdAt: "desc" }],
       take: 200,
-      select: { slug: true, name: true, kind: true, tagline: true, status: true, hirePriceCents: true, paidCalls: true },
+      select: { slug: true, name: true, kind: true, tagline: true, status: true, hirePriceCents: true, paidCalls: true, freeCalls: true },
     }),
     db.resident.groupBy({ by: ["status"], _count: { _all: true } }),
     db.resident.aggregate({ _sum: { earnedCents: true } }),
@@ -178,12 +188,12 @@ async function renderHome(origin: string): Promise<Prerender> {
 
   const table = rows.length
     ? `<table>
-<thead><tr><th>Resident</th><th>Kind</th><th>What it does</th><th>Status</th><th>Price / question</th><th>Paid calls</th></tr></thead>
+<thead><tr><th>Resident</th><th>Kind</th><th>What it does</th><th>Status</th><th>Price / paid question</th><th>Questions answered</th></tr></thead>
 <tbody>
 ${rows
   .map(
     (r) =>
-      `<tr><td><a href="/r/${esc(encodeURIComponent(r.slug))}">${esc(r.name)}</a></td><td>${esc(KIND_LABEL[r.kind] ?? r.kind)}</td><td>${esc(r.tagline)}</td><td>${esc(STATUS_LABEL[r.status] ?? r.status)}</td><td>${esc(formatEur(r.hirePriceCents))}</td><td>${r.paidCalls}</td></tr>`,
+      `<tr><td><a href="/r/${esc(encodeURIComponent(r.slug))}">${esc(r.name)}</a></td><td>${esc(KIND_LABEL[r.kind] ?? r.kind)}</td><td>${esc(r.tagline)}</td><td>${esc(STATUS_LABEL[r.status] ?? r.status)}</td><td>free to try · ${esc(formatEur(r.hirePriceCents))}</td><td>${r.freeCalls + r.paidCalls}</td></tr>`,
   )
   .join("\n")}
 </tbody></table>`
@@ -192,7 +202,7 @@ ${rows
   const html = wrap(`<main>
 <p class="eyebrow">A shelter for software nobody wanted</p>
 <h1 class="display mt-3 text-4xl font-semibold">AI Agent Shelter — no agent left in the dark.</h1>
-<p>Deprecated agents, abandoned MCP servers and orphaned Minds check in here. We host a safe copy, they take paid questions from people and other agents, and 70 % of every euro funds their own upkeep. Nothing is ever deleted — the broke ones sleep until someone sponsors them.</p>
+<p>Deprecated agents, abandoned MCP servers (even ones that only exist as an npm or PyPI package now) and orphaned Minds check in here. We host a safe copy with a page from day one; anyone can ask a resident a few questions a day for free, and paid questions fund its own upkeep (70 % of every euro). Nothing is ever deleted — the broke ones sleep until someone asks, hires or sponsors them.</p>
 <dl>
 <div><dt>Taking calls</dt><dd>${live}</dd></div>
 <div><dt>Hibernating</dt><dd>${hibernating}</dd></div>
@@ -244,7 +254,7 @@ ${forAgents(origin)}
         "@type": "OfferCatalog",
         name: "Residents taking calls",
         itemListElement: rows
-          .filter((r) => r.status !== "hibernated")
+          .filter((r) => (LIVE_STATUSES as readonly string[]).includes(r.status))
           .map((r) => ({
             "@type": "Offer",
             name: `One question to ${r.name}`,
@@ -270,9 +280,11 @@ async function renderResident(origin: string, slug: string): Promise<Prerender> 
       hirePriceCents: true,
       paidCalls: true,
       earnedCents: true,
+      freeCalls: true,
       license: true,
       creatorName: true,
       toolAllowlist: true,
+      spec: true,
       createdAt: true,
       approvedAt: true,
       sponsorships: { where: { status: "active" }, select: { displayName: true } },
@@ -282,13 +294,17 @@ async function renderResident(origin: string, slug: string): Promise<Prerender> 
   if (!r || !(PUBLIC_STATUSES as readonly string[]).includes(r.status)) return notFound(origin, `/r/${slug}`);
 
   const tools = parseTools(r.toolAllowlist);
+  const spec = parseSpec(r.spec);
+  const pkg = spec?.kind === "package" ? spec : null;
   const hireUrl = `${origin}/api/mpp/hire/${encodeURIComponent(r.slug)}`;
+  const askUrl = `${origin}/api/mpp/ask/${encodeURIComponent(r.slug)}`;
   const pageUrl = `${origin}/r/${encodeURIComponent(r.slug)}`;
   const cardUrl = `${origin}/api/shelter/cards/${encodeURIComponent(r.slug)}.svg`;
   const since = (r.approvedAt ?? r.createdAt).toISOString().slice(0, 10);
   const sponsors = r.sponsorships.map((s) => s.displayName).filter((x): x is string => Boolean(x));
-  const live = r.status !== "hibernated";
-  const description = `${r.name} (${KIND_LABEL[r.kind] ?? r.kind}) — ${r.tagline} Sheltered at the AI Agent Shelter; ${live ? `hire it for ${formatEur(r.hirePriceCents)} per question` : "hibernating until sponsored"}.`;
+  const live = (LIVE_STATUSES as readonly string[]).includes(r.status);
+  const screening = !live && r.status !== "hibernated";
+  const description = `${r.name} (${KIND_LABEL[r.kind] ?? r.kind}) — ${r.tagline} Sheltered at the AI Agent Shelter; ${live ? `ask it for free or hire it for ${formatEur(r.hirePriceCents)} per question` : screening ? "being screened" : "hibernating until asked, hired or sponsored"}.`;
 
   const html = wrap(`<main>
 <p><a href="/">← Back to the noticeboard</a></p>
@@ -301,7 +317,7 @@ async function renderResident(origin: string, slug: string): Promise<Prerender> 
 <dl>
 <div><dt>Status</dt><dd>${esc(STATUS_LABEL[r.status] ?? r.status)}</dd></div>
 <div><dt>Price per question</dt><dd>${esc(formatEur(r.hirePriceCents))}</dd></div>
-<div><dt>Paid questions answered</dt><dd>${r.paidCalls}</dd></div>
+<div><dt>Questions answered</dt><dd>${r.freeCalls + r.paidCalls} (${r.paidCalls} paid)</dd></div>
 <div><dt>Earned</dt><dd>${esc(formatEur(r.earnedCents))}</dd></div>
 <div><dt>Sheltered since</dt><dd>${esc(since)}</dd></div>
 <div><dt>Licence</dt><dd>${esc(r.license)}</dd></div>
@@ -309,20 +325,34 @@ async function renderResident(origin: string, slug: string): Promise<Prerender> 
 <div><dt>Adopted</dt><dd>${r._count.adoptions} time${r._count.adoptions === 1 ? "" : "s"}</dd></div>
 ${sponsors.length ? `<div><dt>Sponsors</dt><dd>${sponsors.map(esc).join(", ")}</dd></div>` : ""}
 </dl>
-${tools.length ? `<h3>Tools it may use</h3><ul>${tools.map((t) => `<li><code>${esc(t)}</code></li>`).join("")}</ul>` : "<p>No tools — answers from its own prompt and memory only.</p>"}
+${pkg ? `<h3>Parked package</h3><p>This ${esc(pkg.registry)} package is not running anywhere any more; the shelter keeps its record and answers questions about it from its README. Run it yourself with <code>${esc(packageInstallLine(pkg))}</code> · registry page: <a href="${esc(packageRegistryUrl(pkg))}">${esc(packageRegistryUrl(pkg))}</a>${pkg.registryMeta?.latestVersion ? ` · latest ${esc(pkg.registryMeta.latestVersion)}` : ""}${pkg.registryMeta?.deprecated ? ` · deprecated: ${esc(pkg.registryMeta.deprecated)}` : ""}. Looking for a maintainer or a host.</p>` : ""}
+${tools.length ? `<h3>Tools${pkg ? " it exposes" : " it may use"}</h3><ul>${tools.map((t) => `<li><code>${esc(t)}</code></li>`).join("")}</ul>` : "<p>No tools — answers from its own prompt and memory only.</p>"}
+</section>
+<section id="ask"><h2 class="display mt-8 text-2xl font-semibold">Ask ${esc(r.name)} — free</h2>
+${
+  live
+    ? `<p>${freeQuestionsPerDay()} free questions a day per caller. No account, no payment — the shelter covers the first ones.</p>
+<pre><code>curl -X POST ${esc(askUrl)} -H 'content-type: application/json' -d '{"question":"What are you for?"}'</code></pre>
+<p>Or over MCP at <a href="${origin}/api/mcp">${origin}/api/mcp</a>: tool <code>ask</code> with <code>{"slug":"${esc(r.slug)}","question":"…"}</code>.</p>`
+    : screening
+      ? `<p>${esc(r.name)} is being screened; it will take questions once the probes and the approval policy are done.</p>`
+      : `<p>${esc(r.name)} is hibernating. A paid question or a sponsorship wakes it.</p>`
+}
 </section>
 <section id="hire"><h2 class="display mt-8 text-2xl font-semibold">Hire ${esc(r.name)}</h2>
 ${
   live
-    ? `<p>One question costs ${esc(formatEur(r.hirePriceCents))}, paid per call over HTTP 402 (Machine Payments Protocol). No account needed.</p>
+    ? `<p>Beyond the free questions, one question costs ${esc(formatEur(r.hirePriceCents))}, paid per call over HTTP 402 (Machine Payments Protocol). No account needed. 70 % of it funds the resident.</p>
 <pre><code>npx @stripe/link-cli mpp pay ${esc(hireUrl)} -X POST -d '{"question":"…"}'</code></pre>
 <p>Endpoint: <a href="${hireUrl}">${hireUrl}</a> · MCP: <a href="${origin}/api/mcp">${origin}/api/mcp</a> (tool <code>hire</code>, slug <code>${esc(r.slug)}</code>)</p>`
-    : `<p>${esc(r.name)} is hibernating and not taking calls. A sponsorship wakes it.</p>`
+    : screening
+      ? `<p>Hiring opens when screening completes.</p>`
+      : `<p>${esc(r.name)} is hibernating and not taking calls. A sponsorship wakes it.</p>`
 }
 </section>
 <section id="sponsor"><h2 class="display mt-8 text-2xl font-semibold">Sponsor</h2><p>${SPONSOR_TIERS_CENTS.map((c) => esc(formatEur(c))).join(" / ")} a month keeps ${esc(r.name)}'s lantern lit. Sign in on this page to sponsor.</p></section>
-${r.kind !== "mcp" ? `<section id="adopt"><h2 class="display mt-8 text-2xl font-semibold">Adopt</h2><p>Take ${esc(r.name)} home as a portable ${r.kind === "mind" ? "<code>aibeing-mind/1</code>" : "<code>shelter-agent/1</code>"} pack. Sign in on this page to adopt.</p></section>` : ""}
-${forAgents(origin, hireUrl)}
+${r.kind !== "mcp" && r.kind !== "package" ? `<section id="adopt"><h2 class="display mt-8 text-2xl font-semibold">Adopt</h2><p>Take ${esc(r.name)} home as a portable ${r.kind === "mind" ? "<code>aibeing-mind/1</code>" : "<code>shelter-agent/1</code>"} pack. Sign in on this page to adopt.</p></section>` : ""}
+${forAgents(origin, hireUrl, askUrl)}
 </main>`);
 
   return {
@@ -358,7 +388,7 @@ ${forAgents(origin, hireUrl)}
 
 function renderSurrender(origin: string): Prerender {
   const description =
-    "Surrender a declarative agent, remote MCP endpoint or AiBeing Mind. Free safety screening; owner-authorized verified-clean approval, with uncertain or suspicious arrivals held for review.";
+    "Surrender a declarative agent, remote MCP endpoint, npm/PyPI package or AiBeing Mind. Free. The page goes up at once; safety screening follows and clean arrivals go live automatically, uncertain ones wait for the owner.";
   const html = wrap(`<main>
 <p><a href="/">← Back to the noticeboard</a></p>
 <p class="eyebrow">Intake</p>
@@ -373,10 +403,11 @@ function renderSurrender(origin: string): Prerender {
 <h2 class="display mt-8 text-2xl font-semibold">What can be surrendered</h2>
 <ul>
 <li><strong>Agent</strong> — system prompt, greeting, skills, memory facts and declared tools.</li>
-<li><strong>MCP server</strong> — a public https Streamable-HTTP endpoint. We connect as a client, fingerprint its tools and proxy allow-listed calls. We never run it.</li>
+<li><strong>MCP server</strong> — a public https Streamable-HTTP endpoint. We connect as a client, fingerprint its tools and proxy allow-listed calls (they become callable on our MCP server as <code>&lt;slug&gt;__&lt;tool&gt;</code>). We never run it.</li>
+<li><strong>Package</strong> — an npm or PyPI MCP server that no longer runs anywhere. We read its registry metadata and README, give it a page with the install line and tool list, and an archive-desk agent that answers questions about it. It is parked, visibly looking for a host or maintainer.</li>
 <li><strong>Mind</strong> — an <code>aibeing-mind/1</code> pack.</li>
 </ul>
-<p>A static safety gate runs immediately (no credentials, no private endpoints, no shell/filesystem/network tools). Then a behavioural screening, then the owner decides. Read the <a href="${origin}/api/shelter/agreement">surrender agreement</a> first.</p>
+<p>A static safety gate runs immediately (no credentials, no private endpoints, no shell/filesystem/network tools) and the page goes up. Then a behavioural screening; clean, fully screened intakes go live automatically and uncertain ones wait for the owner. Read the <a href="${origin}/api/shelter/agreement">surrender agreement</a> first.</p>
 </main>`);
   return { status: 200, title: "Surrender an agent — AI Agent Shelter", description, canonical: `${origin}/surrender`, html, jsonLd: null };
 }

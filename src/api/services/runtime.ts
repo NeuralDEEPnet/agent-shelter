@@ -1,9 +1,10 @@
 import { db } from "@/api/db";
-import { residentSystemPrompt, specSchema, type ResidentSpec } from "@/api/services/intake";
+import { residentSystemPrompt, specSchema, type HttpTool, type ResidentSpec } from "@/api/services/intake";
 import { buyUnitsFromWallet, UNIT_PRICE_CENTS } from "@/api/services/ledger";
 import { createMcpClient, McpError, type McpFetch } from "@/api/services/mcpClient";
 import { completeText, modelAvailable, ModelCallError, UNIT_PER_CALL, type ChatTurn } from "@/api/services/model";
-import { findInjection } from "@/api/services/security";
+import { publicHttpsFetch } from "@/api/services/public-https";
+import { checkRemoteUrl, findInjection } from "@/api/services/security";
 import { env } from "@/lib/env";
 
 /**
@@ -127,10 +128,47 @@ export type RuntimeDeps = {
 };
 const defaultDeps: RuntimeDeps = { complete: completeText, modelAvailable };
 
+const HTTP_TOOL_TIMEOUT_MS = 10_000;
+const MAX_HTTP_ARG_CHARS = 2_000;
+
+/**
+ * Execute a declared HTTP tool: GET with the model's JSON args as query
+ * parameters, POST with them as the JSON body. Same DNS-pinned public-https
+ * fetch as remote MCP (no private hosts, no redirects, 256 KiB), no headers
+ * the model can choose, and the result is truncated before the model sees it.
+ */
+export async function callHttpTool(tool: HttpTool, args: Record<string, unknown>, fetchImpl: McpFetch = publicHttpsFetch): Promise<string> {
+  const verdict = checkRemoteUrl(tool.url);
+  if (!verdict.ok) throw new McpError(`Refused endpoint: ${verdict.reason}`, "url");
+  const url = verdict.url;
+  const serialised = JSON.stringify(args);
+  if (serialised.length > MAX_HTTP_ARG_CHARS) throw new McpError(`Tool arguments exceed ${MAX_HTTP_ARG_CHARS} characters.`, "protocol");
+  if (Object.keys(args).some((k) => /authorization|cookie|token|secret|password/i.test(k))) throw new McpError("Credential-shaped arguments are refused.", "protocol");
+  const headers: Record<string, string> = { accept: "application/json, text/plain;q=0.9, */*;q=0.1", "user-agent": "agent-shelter-resident-tool/1.0 (+https://agent-shelter-neuraldeepnet.on.adaptive.ai)" };
+  let body: string | undefined;
+  if (tool.method === "GET") {
+    for (const [k, v] of Object.entries(args)) url.searchParams.set(k, typeof v === "string" ? v : JSON.stringify(v));
+  } else {
+    headers["content-type"] = "application/json";
+    body = serialised;
+  }
+  let res: Response;
+  try {
+    res = await fetchImpl(url.toString(), { method: tool.method, headers, body, signal: AbortSignal.timeout(HTTP_TOOL_TIMEOUT_MS), redirect: "error" });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (/abort|timeout/i.test(msg)) throw new McpError(`No answer within ${HTTP_TOOL_TIMEOUT_MS / 1000}s.`, "timeout");
+    throw new McpError(`Could not connect: ${msg}`, "http");
+  }
+  const text = (await res.text()).slice(0, MAX_TOOL_RESULT_CHARS);
+  if (!res.ok) throw new McpError(`HTTP ${res.status} from the endpoint.${text ? ` ${text.slice(0, 200)}` : ""}`, "http");
+  return text;
+}
+
 /**
  * Resolve an allow-listed tool to an approved MCP resident and call it.
- * `agent` residents declare `viaMcp: <slug>`; an `mcp` resident's own tools
- * route to its own endpoint.
+ * `agent` residents declare `viaMcp: <slug>` or an `http` endpoint; an
+ * `mcp` resident's own tools route to its own endpoint.
  */
 async function callTool(input: { resident: { id: string; spec: ResidentSpec }; name: string; args: Record<string, unknown>; deps: RuntimeDeps }): Promise<string> {
   const { resident, name } = input;
@@ -139,6 +177,7 @@ async function callTool(input: { resident: { id: string; spec: ResidentSpec }; n
     endpoint = resident.spec.endpoint;
   } else if (resident.spec.kind === "agent") {
     const decl = resident.spec.tools.find((t) => t.name === name);
+    if (decl?.http) return callHttpTool(decl.http, input.args, input.deps.mcpFetch);
     if (decl?.viaMcp) {
       const target = await db.resident.findFirst({ where: { slug: decl.viaMcp, kind: "mcp", status: { in: ["active", "probation"] } }, select: { spec: true, toolAllowlist: true } });
       const targetSpec = target ? parseSpec(target.spec) : null;

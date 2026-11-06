@@ -62,5 +62,6 @@ const suites = explicit.length
 
 console.log(`[test] ${suites.length} suite(s):\n  ${suites.join("\n  ")}`);
 const tsx = join(root, "node_modules", ".bin", process.platform === "win32" ? "tsx.cmd" : "tsx");
-const status = run(tsx, ["--test", ...suites]);
+// One suite at a time: they share the throwaway database and the global daily compute ceiling.
+const status = run(tsx, ["--test", "--test-concurrency=1", ...suites]);
 process.exit(status);

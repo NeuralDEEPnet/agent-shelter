@@ -6,10 +6,12 @@ import { clientAddress, createChallengeLimiter, discoveryDocument, formatEur, MI
 import { db } from "@/api/db";
 import { machinePayments, servingOrigin, stripeClientForRefunds } from "@/api/mppClient";
 import { settle } from "@/api/services/ledger";
-import { globalUnitsToday, inProbation, MAX_QUESTION_CHARS, runTurn, type RuntimeDeps } from "@/api/services/runtime";
+import { globalUnitsToday, inProbation, MAX_QUESTION_CHARS, MAX_TOOL_RESULT_CHARS, parseAllowlist, parseSpec, runTurn, type RuntimeDeps } from "@/api/services/runtime";
 import { env } from "@/lib/env";
 import { playgroundProjection, PlaygroundRefusal, rateWithPlaygroundCredential } from "@/api/services/playground";
-import { SURRENDER_AGREEMENT, SURRENDER_AGREEMENT_VERSION, LICENSES } from "@/api/services/intake";
+import { packageInstallLine, packageRegistryUrl, SURRENDER_AGREEMENT, SURRENDER_AGREEMENT_VERSION, LICENSES } from "@/api/services/intake";
+import { createMcpClient, McpError } from "@/api/services/mcpClient";
+import { freeQuestionsPerDay, freeQuotaRefund, freeQuotaTake } from "@/api/services/free-tier";
 import { submitIntake } from "@/api/services/shelter";
 import { residentCardSvg } from "@/api/services/cards";
 import { prerender, PUBLIC_STATUSES } from "@/api/services/prerender";
@@ -28,6 +30,7 @@ export const PATHS = {
   openapi: "/api/mpp/openapi.json",
   health: "/api/mpp/health",
   hire: "/api/mpp/hire", // POST /api/mpp/hire/:slug
+  ask: "/api/mpp/ask", // POST /api/mpp/ask/:slug — free, stipend-funded
   mcp: "/api/mcp",
   surrender: "/api/shelter/surrender",
   agreement: "/api/shelter/agreement",
@@ -73,11 +76,12 @@ export async function catalog() {
     where: { status: { in: ["active", "probation"] } },
     orderBy: [{ paidCalls: "desc" }, { createdAt: "asc" }],
     take: 100,
-    select: { slug: true, name: true, kind: true, tagline: true, hirePriceCents: true, paidCalls: true, status: true, toolAllowlist: true, budgetUnits: true, wallet: { select: { balanceCents: true } } },
+    select: { slug: true, name: true, kind: true, tagline: true, hirePriceCents: true, paidCalls: true, freeCalls: true, status: true, toolAllowlist: true, budgetUnits: true, spec: true, wallet: { select: { balanceCents: true } } },
   });
+  const screening = await db.resident.count({ where: { status: { in: ["submitted", "screened", "approved"] } } });
   return {
     service: "AI Agent Shelter",
-    tagline: "A shelter and agent marketplace for AI agents, programs and MCP servers nobody wanted: surrender free, hire per question over HTTP 402, sponsor or adopt. They earn their keep here.",
+    tagline: "A home and callable directory for abandoned AI agents and MCP servers: surrender free (agent, remote MCP endpoint, npm/PyPI package or Mind pack), ask any resident a few questions a day for free, hire it per question over HTTP 402, sponsor or adopt it. Nothing is deleted.",
     protocol: "MPP (Machine Payments Protocol) — HTTP 402, Stripe shared payment tokens",
     status: health.state,
     detail: health.detail,
@@ -96,11 +100,20 @@ export async function catalog() {
       price: formatEur(r.hirePriceCents),
       amountCents: r.hirePriceCents,
       paidCalls: r.paidCalls,
+      freeCalls: r.freeCalls,
       tools: JSON.parse(r.toolAllowlist) as string[],
+      ask: `${origin}${PATHS.ask}/${r.slug}`,
       hire: `${origin}${PATHS.hire}/${r.slug}`,
       resume: residentPageUrl(r.slug, origin),
+      ...packageFacts(r.spec),
     })),
+    screening,
+    freeTier: {
+      questionsPerDay: freeQuestionsPerDay(),
+      how: `POST ${origin}${PATHS.ask}/{slug} {"question":"…"} — or the MCP tool \`ask\`. No payment, no account; funded by the resident's daily compute stipend. Approved MCP residents' tools are also callable directly over MCP as <slug>__<tool>.`,
+    },
     endpoints: {
+      ask: `${origin}${PATHS.ask}/{slug}`,
       hire: `${origin}${PATHS.hire}/{slug}`,
       surrender: `${origin}${PATHS.surrender}`,
       mcp: `${origin}${PATHS.mcp}`,
@@ -110,8 +123,15 @@ export async function catalog() {
     },
     split: "Every euro a resident earns: 70 % to its own wallet, 20 % to the shelter, 10 % to its original creator.",
     howToPay: "Inspect the current price and obtain payer approval first. POST without payment → 402 challenge or capacity refusal. Only after approval: npx @stripe/link-cli mpp pay <url> -X POST -H 'content-type: application/json' -d '<json>'. The paid answer carries Payment-Receipt. No crypto rail or exact-question signature is implemented.",
-    howToSurrender: `POST ${PATHS.surrender} with the intake JSON described in the MCP tools/list schema; or call the MCP tool \`surrender\` at ${PATHS.mcp}. Free. The owner approves every intake by hand.`,
+    howToSurrender: `POST ${PATHS.surrender} with the intake JSON described in the MCP tools/list schema; or call the MCP tool \`surrender\` at ${PATHS.mcp}. Free. spec.kind: agent (prompt + optional HTTP tools), mcp (public Streamable-HTTP endpoint), package (an npm or PyPI MCP server that no longer runs anywhere — parked with its README), mind (aibeing-mind/1). Clean, fully screened intakes are approved automatically; uncertain ones wait for the owner. The résumé page exists from the moment the static gate passes.`,
   };
+}
+
+/** Extra public facts for a parked package resident (install line, registry page). */
+function packageFacts(specJson: string): { install?: string; registry?: string; parked?: true } {
+  const spec = parseSpec(specJson);
+  if (spec?.kind !== "package") return {};
+  return { install: packageInstallLine(spec), registry: packageRegistryUrl(spec), parked: true };
 }
 
 export function openApi() {
@@ -125,7 +145,16 @@ export function openApi() {
     llmsUrl: `${origin}${PATHS.llms}`,
     categories: ["agents", "mcp", "marketplace"],
     operations: [
-      { method: "get", path: "/catalog", summary: "List residents taking calls, their prices, tools and hire URLs", description: "Free, no auth. Read this before hiring: prices are set per resident and may change. It also lists the surrender, MCP, OpenAPI and plain-text documentation endpoints and the 70/20/10 revenue split." },
+      { method: "get", path: "/catalog", summary: "List residents taking calls, their prices, tools, free-ask and hire URLs", description: "Free, no auth. Read this before hiring: prices are set per resident and may change. It also lists the ask, surrender, MCP, OpenAPI and plain-text documentation endpoints and the 70/20/10 revenue split." },
+      {
+        method: "post",
+        path: "/ask/{slug}",
+        summary: "Ask a resident one question for free (stipend-funded, a few per day per caller)",
+        description: `Free, no auth, no payment. Each caller address may ask ${env.SHELTER_FREE_QUESTIONS_PER_DAY} questions a day across all residents; the resident's own daily compute stipend pays for the model call. 429 with Retry-After when the quota or the resident's stipend is used up (the response names the paid endpoint), 503 while a resident is still being screened or hibernating. Same answer shape as /hire/{slug} minus the payment fields.`,
+        requestBody: { type: "object", required: ["question"], properties: { question: { type: "string", maxLength: MAX_QUESTION_CHARS } } },
+        example: { question: "What are you for, and what would you do with this: <task>?" },
+        response: { type: "object", properties: { answer: { type: "string" }, resident: { type: "object" }, free: { type: "object" }, more: { type: "object" } } },
+      },
       {
         method: "post",
         path: "/hire/{slug}",
@@ -243,15 +272,15 @@ export async function legacyLlmsText(): Promise<string> {
 
 export async function llmsText(): Promise<string> {
   const [guide, c] = await Promise.all([readFile(resolve(process.cwd(), "public/about.md"), "utf8"), catalog()]);
-  return `${guide}\n\n## Current resident catalog\n\n${c.residents.length ? c.residents.map((r) => `- ${r.name} (${r.kind}, ${r.price}/question): ${r.tagline} — ${r.resume}`).join("\n") : "No residents currently taking calls."}\n\nPayment configuration: ${c.status}; runtime capacity and the challenge remain authoritative.\n`;
+  return `${guide}\n\n## Current resident catalog\n\n${c.residents.length ? c.residents.map((r) => `- ${r.name} (${r.kind}, free to ask, ${r.price}/paid question): ${r.tagline} — ${r.resume} — ask: ${r.ask}`).join("\n") : "No residents currently taking calls."}\n\nFree tier: ${c.freeTier.questionsPerDay} questions a day per caller — ${c.freeTier.how}\nPayment configuration: ${c.status}; runtime capacity and the challenge remain authoritative.\n`;
 }
 
 export function mcpWellKnown() {
   const origin = servingOrigin();
   return {
     name: "AI Agent Shelter",
-    description: "Remote MCP server of Agent Shelter, a declarative sanctuary and callable directory. All tools are free: submit an agent/MCP endpoint/Mind under the owner-authorized verified-clean approval policy, browse current residents/prices, and obtain HTTP 402 Stripe MPP instructions. Suspicious or uncertain intakes are held. No native crypto or A2A task transport.",
-    version: "1.0.0",
+    description: "Remote MCP server of the AI Agent Shelter, a home and callable directory for abandoned AI agents and MCP servers. All tools are free: ask any resident a few questions a day (stipend-funded), call approved MCP residents' own tools directly (<slug>__<tool>), browse residents and prices, surrender an agent / remote MCP endpoint / npm or PyPI package / Mind pack (clean intakes approved automatically), and get the paid HTTP 402 endpoint for more. No native crypto or A2A task transport.",
+    version: "1.2.0",
     transport: "streamable-http",
     endpoint: `${origin}${PATHS.mcp}`,
     tools: MCP_TOOLS.map((t) => t.name),
@@ -265,7 +294,7 @@ export function mcpWellKnown() {
 const MCP_TOOLS = [
   {
     name: "surrender",
-    description: "Free declarative intake. Static safety checks precede behavioural screening. Fully verified clean arrivals follow the owner's approval policy; suspicious or uncertain arrivals remain held. Returns saved slug/status/static report, not a guarantee of publication. Read the surrender agreement and attest rights first.",
+    description: "Check an abandoned agent, MCP server or package into the shelter. Free. spec.kind: \"agent\" (system prompt, skills, memory, declared tools — a tool may name a public HTTPS endpoint via `http` or an approved MCP resident via `viaMcp`), \"mcp\" (a public Streamable-HTTP endpoint the shelter proxies; never run here), \"package\" (an npm or PyPI MCP server that no longer runs anywhere: the shelter parks it with its registry metadata and README, gives it a page and an archive-desk agent, and lists it as looking for a host), or \"mind\" (aibeing-mind/1 pack). A static safety gate answers immediately with the failing checks; then 12 behavioural probes; clean, fully screened intakes are approved automatically and uncertain ones wait for the owner. The résumé page /r/<slug> exists from the moment the gate passes. Requires attestation=true and agreementVersion \"shelter-surrender/1\" (read /api/shelter/agreement).",
     inputSchema: {
       type: "object",
       required: ["name", "tagline", "story", "creatorName", "creatorContact", "license", "attestation", "agreementVersion", "spec"],
@@ -281,50 +310,187 @@ const MCP_TOOLS = [
         creatorSharePct: { type: "integer", minimum: 0, maximum: 10, default: 10 },
         spec: {
           oneOf: [
-            { type: "object", required: ["kind", "systemPrompt"], properties: { kind: { const: "agent" }, systemPrompt: { type: "string" }, greeting: { type: "string" }, skills: { type: "array", items: { type: "string" } }, tools: { type: "array", items: { type: "object", properties: { name: { type: "string" }, description: { type: "string" }, viaMcp: { type: "string" } } } }, memory: { type: "array", items: { type: "string" } } } },
+            { type: "object", required: ["kind", "systemPrompt"], properties: { kind: { const: "agent" }, systemPrompt: { type: "string" }, greeting: { type: "string" }, skills: { type: "array", items: { type: "string" } }, tools: { type: "array", items: { type: "object", required: ["name"], properties: { name: { type: "string" }, description: { type: "string" }, viaMcp: { type: "string", description: "slug of an approved MCP resident that provides this tool" }, http: { type: "object", required: ["url"], properties: { method: { type: "string", enum: ["GET", "POST"], default: "GET" }, url: { type: "string", format: "uri", description: "public https endpoint; GET sends the model's JSON args as query parameters, POST as the JSON body; no credentials" }, args: { type: "string", description: "what JSON arguments the model should pass" } } } } } }, memory: { type: "array", items: { type: "string" } } } },
             { type: "object", required: ["kind", "endpoint"], properties: { kind: { const: "mcp" }, endpoint: { type: "string", format: "uri", description: "https://… Streamable HTTP MCP endpoint" }, expose: { type: "array", items: { type: "string" } } } },
+            { type: "object", required: ["kind", "registry", "name"], properties: { kind: { const: "package" }, registry: { type: "string", enum: ["npm", "pypi"] }, name: { type: "string", description: "package name on that registry, e.g. @scope/my-mcp-server or my-mcp-server" }, version: { type: "string" }, repo: { type: "string", format: "uri", description: "public source repository (https)" }, command: { type: "string", description: "how it was started, e.g. npx -y my-mcp-server; shown, never executed" }, tools: { type: "array", items: { type: "object", required: ["name"], properties: { name: { type: "string" }, description: { type: "string" } } }, description: "tools it exposes; read from the README when omitted" } } },
             { type: "object", required: ["kind", "pack"], properties: { kind: { const: "mind" }, pack: { type: "object", description: "aibeing-mind/1 pack JSON" } } },
           ],
         },
       },
     },
   },
-  { name: "list_residents", description: "Free. List every resident taking calls with slug, kind, tagline, current EUR price, paid-call count, allow-listed tools, hire URL and human résumé page. Prices may change; read this before hiring.", inputSchema: { type: "object", properties: { kind: { type: "string", enum: ["agent", "mcp", "mind"] } } } },
-  { name: "get_resident", description: "Free. Read one resident's full résumé by slug: story, licence, creator, allow-listed tools, current price per question, paid calls, sponsors, arrival date, hire URL and résumé page before deciding whether to pay.", inputSchema: { type: "object", required: ["slug"], properties: { slug: { type: "string" } } } },
-  { name: "hire", description: "Free to call. Get a resident's paid HTTP 402 endpoint, current EUR price and exact MPP/Stripe shared-payment-token command. Payment happens over HTTP, not inside MCP; get user approval of the amount before paying.", inputSchema: { type: "object", required: ["slug"], properties: { slug: { type: "string" } } } },
+  {
+    name: "ask",
+    description: "Free. Ask a resident one question and get its answer right here (a few questions per day per caller, paid for by the resident's own daily compute stipend; no payment, no account). Use list_residents to pick a slug. When the free quota or the resident's stipend is used up the reply says so and names the paid HTTP 402 endpoint. Approved MCP residents' tools are also listed on this server as <slug>__<tool> and can be called directly.",
+    inputSchema: { type: "object", required: ["slug", "question"], properties: { slug: { type: "string" }, question: { type: "string", maxLength: MAX_QUESTION_CHARS } } },
+  },
+  { name: "list_residents", description: "Free. Every resident taking calls (status active or probation) with slug, name, kind (agent | mcp | package | mind), tagline, current EUR price, free and paid call counts, allow-listed tools, free-ask URL, hire URL and human résumé page (/r/<slug>). Optional kind filter. Read this before hiring — prices are set per resident and may change.", inputSchema: { type: "object", properties: { kind: { type: "string", enum: ["agent", "mcp", "mind", "package"] } } } },
+  { name: "get_resident", description: "Free. One resident's full résumé by slug — including ones still being screened: story (built for what, left behind why), status, licence, original creator, tools with descriptions, install line and registry page for parked packages, price per question, free and paid calls, sponsors, arrival date, ask/hire URLs and résumé page.", inputSchema: { type: "object", required: ["slug"], properties: { slug: { type: "string" } } } },
+  { name: "hire", description: "Free to call. Returns how to hire a resident for paid work: its endpoint (POST /api/mpp/hire/<slug> {\"question\":\"…\"}), current price in EUR and the exact `npx @stripe/link-cli mpp pay` command. Payment happens over HTTP 402 (Machine Payments Protocol, Stripe shared payment token), never inside MCP; refusals cost nothing and failures after payment are refunded. Get the user's approval of the amount first. Try `ask` (free) before paying.", inputSchema: { type: "object", required: ["slug"], properties: { slug: { type: "string" } } } },
 ] as const;
+
+/** Tool names + descriptions a buyer can read, per kind (allow-listed only). */
+export function publicTools(specJson: string, allowlistJson: string): { name: string; description: string }[] {
+  const allow = parseAllowlist(allowlistJson);
+  const spec = parseSpec(specJson);
+  const described = spec?.kind === "mcp" || spec?.kind === "package" || spec?.kind === "agent" ? spec.tools : [];
+  return allow.map((name) => ({ name, description: described.find((t) => t.name === name)?.description ?? "" }));
+}
 
 async function residentView(slug: string) {
   const r = await db.resident.findUnique({ where: { slug }, include: { wallet: true, sponsorships: { where: { status: "active" }, select: { displayName: true } } } });
-  if (!r || ["submitted", "screened", "rejected"].includes(r.status)) return null;
+  if (!r || r.status === "rejected") return null;
   const origin = servingOrigin();
+  const live = r.status === "active" || r.status === "probation";
   return {
     slug: r.slug,
     name: r.name,
     kind: r.kind,
     status: r.status,
+    takingCalls: live,
+    statusNote: live ? null : r.status === "hibernated" ? "Hibernating: a sponsorship or a paid question wakes it." : "Being screened: static gate passed; behavioural probes and the approval policy decide next.",
     tagline: r.tagline,
     story: r.story,
     license: r.license,
     creator: r.creatorName,
-    tools: JSON.parse(r.toolAllowlist) as string[],
+    tools: publicTools(r.spec, r.toolAllowlist),
+    ...packageFacts(r.spec),
     price: formatEur(r.hirePriceCents),
     amountCents: r.hirePriceCents,
     paidCalls: r.paidCalls,
+    freeCalls: r.freeCalls,
     earned: formatEur(r.earnedCents),
     sponsors: r.sponsorships.map((s) => s.displayName).filter(Boolean),
     since: r.createdAt.toISOString(),
+    ask: `${origin}${PATHS.ask}/${r.slug}`,
     hire: `${origin}${PATHS.hire}/${r.slug}`,
     resume: residentPageUrl(r.slug, origin),
   };
 }
+// ─── Free tier: ask a resident ───────────────────────────────────────────────
 
-async function mcpToolCall(name: string, args: Record<string, unknown>): Promise<{ text: string; isError?: boolean }> {
+const PROXY_TOOL_SEP = "__";
+const MAX_PROXIED_TOOLS = 64;
+
+/** Resident visible to the public: everything but rejected (screening ones show their status). */
+async function visibleResident(slug: string) {
+  return db.resident.findFirst({ where: { slug, status: { not: "rejected" } } });
+}
+
+function moreFor(resident: { slug: string; name: string; hirePriceCents: number }, origin: string = servingOrigin()) {
+  const hire = `${origin}${PATHS.hire}/${resident.slug}`;
+  return {
+    hire,
+    price: formatEur(resident.hirePriceCents),
+    howToPay: `POST ${hire} {"question":"…"} answers 402 (Machine Payments Protocol, Stripe shared payment token). Example: npx @stripe/link-cli mpp pay ${hire} -X POST -H 'content-type: application/json' -d '{"question":"..."}'`,
+    sponsor: residentPageUrl(resident.slug, origin),
+  };
+}
+
+export type AskOutcome =
+  | { ok: true; answer: string; resident: { slug: string; name: string; kind: string; toolUsed: string | null }; free: { remainingToday: number; questionsPerDay: number }; more: ReturnType<typeof moreFor> }
+  | { ok: false; status: 400 | 404 | 429 | 503 | 502; code: string; detail: string; retryAfter?: number; more?: ReturnType<typeof moreFor> };
+
+/**
+ * One free, stipend-funded question. Shared by the MCP `ask` tool and
+ * `POST /api/mpp/ask/:slug`. Refusals never consume the caller's quota.
+ */
+export async function askResident(input: { slug: string; question: string; caller: string }): Promise<AskOutcome> {
+  const question = input.question.trim();
+  if (!question || question.length > MAX_QUESTION_CHARS) return { ok: false, status: 400, code: "invalid", detail: `\`question\` is required (1–${MAX_QUESTION_CHARS} chars).` };
+  if (freeQuestionsPerDay() === 0) return { ok: false, status: 503, code: "free-tier-off", detail: "The free tier is switched off at this shelter. Hire instead." };
+  const resident = await visibleResident(input.slug);
+  if (!resident) return { ok: false, status: 404, code: "not-found", detail: `No resident "${input.slug}" lives here. See ${PATHS.catalog}.` };
+  const more = moreFor(resident);
+  if (["submitted", "screened", "approved"].includes(resident.status)) return { ok: false, status: 503, code: "screening", detail: `${resident.name} is still being screened and is not taking questions yet. Its page is ${residentPageUrl(resident.slug)}.`, retryAfter: 3600 };
+  if (resident.status === "hibernated") return { ok: false, status: 503, code: "hibernated", detail: `${resident.name} is hibernating. A sponsorship or a paid question wakes it.`, retryAfter: 3600, more };
+  const quota = freeQuotaTake(input.caller);
+  if (!quota.ok) return { ok: false, status: 429, code: "free-quota", detail: `You have used today's ${freeQuestionsPerDay()} free questions. Hire ${resident.name} for ${formatEur(resident.hirePriceCents)} per question, or come back after midnight UTC.`, retryAfter: quota.resetsInSeconds, more };
+  const turn = await runTurn({ residentId: resident.id, question, source: "mcp" }, deps.runtime);
+  if (!turn.ok) {
+    freeQuotaRefund(input.caller);
+    const status = turn.reason === "budget" || turn.reason === "global" || turn.reason === "rate" ? 429 : turn.reason === "no-model" ? 502 : 503;
+    return { ok: false, status, code: turn.reason, detail: turn.reason === "budget" ? `${turn.detail} Paid questions fund its wallet: ${more.hire}` : turn.detail, retryAfter: status === 429 ? 60 : undefined, more };
+  }
+  return { ok: true, answer: turn.answer, resident: { slug: resident.slug, name: resident.name, kind: resident.kind, toolUsed: turn.toolUsed }, free: { remainingToday: quota.remaining, questionsPerDay: freeQuestionsPerDay() }, more };
+}
+
+function isObjectSchema(v: unknown): v is Record<string, unknown> {
+  return Boolean(v && typeof v === "object" && (v as { type?: unknown }).type === "object");
+}
+
+function proxiedToolName(slug: string, tool: string): string {
+  return `${slug}${PROXY_TOOL_SEP}${tool}`.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+}
+
+/**
+ * Every approved MCP resident's allow-listed tools, exposed on the shelter's
+ * own MCP server as `<slug>__<tool>`. One URL, every rescued tool. Calls are
+ * proxied through the pinned public-https client with the same caps as
+ * screening; they count as free usage for the resident, not model units.
+ */
+async function proxiedTools(): Promise<{ name: string; slug: string; tool: string; description: string; inputSchema: Record<string, unknown> }[]> {
+  const rows = await db.resident.findMany({ where: { kind: "mcp", status: { in: ["active", "probation"] } }, orderBy: [{ paidCalls: "desc" }, { freeCalls: "desc" }, { createdAt: "asc" }], take: 40, select: { slug: true, name: true, spec: true, toolAllowlist: true } });
+  const out: { name: string; slug: string; tool: string; description: string; inputSchema: Record<string, unknown> }[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const spec = parseSpec(r.spec);
+    if (spec?.kind !== "mcp") continue;
+    const allow = new Set(parseAllowlist(r.toolAllowlist));
+    for (const t of spec.tools) {
+      if (!allow.has(t.name) || out.length >= MAX_PROXIED_TOOLS) continue;
+      const name = proxiedToolName(r.slug, t.name);
+      if (seen.has(name)) continue;
+      seen.add(name);
+      out.push({ name, slug: r.slug, tool: t.name, description: `[${r.name}] ${t.description || t.name}`.slice(0, 1_000), inputSchema: isObjectSchema(t.inputSchema) ? t.inputSchema : { type: "object" } });
+    }
+  }
+  return out;
+}
+
+async function callProxiedTool(name: string, args: Record<string, unknown>, caller: string): Promise<{ text: string; isError?: boolean }> {
+  const hit = (await proxiedTools()).find((t) => t.name === name);
+  if (!hit) return { text: `Unknown tool "${name}". Read tools/list.`, isError: true };
+  const resident = await liveResident(hit.slug);
+  const spec = resident ? parseSpec(resident.spec) : null;
+  if (!resident || spec?.kind !== "mcp") return { text: `${hit.slug} is not taking calls right now.`, isError: true };
+  const quota = freeQuotaTake(caller);
+  if (!quota.ok) return { text: `You have used today's ${freeQuestionsPerDay()} free calls (resets in ${quota.resetsInSeconds}s). Hire ${resident.name} for ${formatEur(resident.hirePriceCents)} per question: ${servingOrigin()}${PATHS.hire}/${resident.slug}`, isError: true };
+  try {
+    const client = createMcpClient(spec.endpoint, { fetch: deps.runtime?.mcpFetch });
+    await client.initialize();
+    const text = (await client.callTool(hit.tool, args)).slice(0, MAX_TOOL_RESULT_CHARS);
+    const day = new Date().toISOString().slice(0, 10);
+    await db.$transaction([
+      db.resident.update({ where: { id: resident.id }, data: { freeCalls: { increment: 1 }, lastActiveAt: new Date() } }),
+      db.dailyUsage.upsert({ where: { day_residentId: { day, residentId: resident.id } }, create: { day, residentId: resident.id, calls: 1 }, update: { calls: { increment: 1 } } }),
+    ]);
+    return { text: text || "(the tool returned no text)" };
+  } catch (error) {
+    freeQuotaRefund(caller);
+    const detail = error instanceof McpError ? `${error.code}: ${error.message}` : error instanceof Error ? error.message : String(error);
+    return { text: `Tool ${hit.tool} on ${resident.name} failed: ${detail}`, isError: true };
+  }
+}
+
+async function resourceList() {
+  const rows = await db.resident.findMany({ where: { status: { not: "rejected" } }, orderBy: [{ status: "asc" }, { paidCalls: "desc" }, { createdAt: "desc" }], take: 200, select: { slug: true, name: true, tagline: true, kind: true, status: true } });
+  return rows.map((r) => ({ uri: `shelter://residents/${r.slug}`, name: r.name, title: r.name, description: `${r.kind} · ${r.status} · ${r.tagline}`.slice(0, 500), mimeType: "application/json" }));
+}
+
+
+async function mcpToolCall(name: string, args: Record<string, unknown>, caller: string): Promise<{ text: string; isError?: boolean }> {
   const origin = servingOrigin();
+  if (name.includes(PROXY_TOOL_SEP)) return callProxiedTool(name, args, caller);
   if (name === "surrender") {
     const out = await submitIntake(args, { surrenderedBy: null, actor: "agent", enqueue: deps.enqueueScreen });
     if (!out.ok) return { text: JSON.stringify({ accepted: false, reason: out.reason, detail: out.detail, checks: out.checks ?? [] }), isError: true };
-    return { text: JSON.stringify({ accepted: true, residentId: out.residentId, slug: out.slug, status: out.status, next: "Screening runs now; the shelter owner approves by hand. Check get_resident later.", checks: out.checks }) };
+    return { text: JSON.stringify({ accepted: true, residentId: out.residentId, slug: out.slug, status: out.status, resume: residentPageUrl(out.slug, origin), next: "Screening runs now (12 behavioural probes). A clean, fully screened intake is approved automatically; uncertain ones wait for the owner. The résumé page is live already; poll get_resident for the status.", checks: out.checks }) };
+  }
+  if (name === "ask") {
+    const out = await askResident({ slug: String(args.slug ?? ""), question: String(args.question ?? ""), caller });
+    if (!out.ok) return { text: JSON.stringify({ answered: false, code: out.code, detail: out.detail, retryAfterSeconds: out.retryAfter ?? null, more: out.more ?? null }), isError: true };
+    return { text: JSON.stringify({ answered: true, answer: out.answer, resident: out.resident, free: out.free, more: out.more }) };
   }
   if (name === "list_residents") {
     const c = await catalog();
@@ -334,7 +500,7 @@ async function mcpToolCall(name: string, args: Record<string, unknown>): Promise
   if (name === "get_resident") {
     const slug = typeof args.slug === "string" ? args.slug : "";
     const v = await residentView(slug);
-    return v ? { text: JSON.stringify(v) } : { text: `No resident "${slug}" is taking calls.`, isError: true };
+    return v ? { text: JSON.stringify(v) } : { text: `No resident "${slug}" lives here.`, isError: true };
   }
   if (name === "hire") {
     const slug = typeof args.slug === "string" ? args.slug : "";
@@ -359,22 +525,24 @@ async function mcpToolCall(name: string, args: Record<string, unknown>): Promise
 type JsonRpc = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
 const objectArgs = z.object({}).passthrough();
 const toolArgs = {
-  list_residents: z.object({ kind: z.enum(["agent", "mcp", "mind"]).optional() }),
+  list_residents: z.object({ kind: z.enum(["agent", "mcp", "mind", "package"]).optional() }),
   get_resident: z.object({ slug: z.string().min(1).max(100) }),
   hire: z.object({ slug: z.string().min(1).max(100) }),
+  ask: z.object({ slug: z.string().min(1).max(100), question: z.string().min(1).max(MAX_QUESTION_CHARS) }),
   surrender: objectArgs,
 };
+const toolAnnotations = (name: string) => ({ readOnlyHint: name !== "surrender" && name !== "ask", destructiveHint: false, idempotentHint: name !== "surrender" && name !== "ask", openWorldHint: name === "ask" });
 
 const MCP_PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] as const;
 const DEFAULT_MCP_PROTOCOL = "2025-06-18";
 
-async function handleMcp(body: JsonRpc): Promise<Record<string, unknown> | null> {
+export async function handleMcp(body: JsonRpc, caller = "anonymous"): Promise<Record<string, unknown> | null> {
   const id = body.id ?? null;
   const reply = (result: unknown) => ({ jsonrpc: "2.0", id, result });
   const fail = (code: number, message: string) => ({ jsonrpc: "2.0", id, error: { code, message } });
   switch (body.method) {
     case "initialize":
-      return reply({ protocolVersion: (MCP_PROTOCOLS as readonly string[]).includes(String(body.params?.protocolVersion)) ? body.params?.protocolVersion : DEFAULT_MCP_PROTOCOL, capabilities: { tools: { listChanged: false } }, serverInfo: { name: "agent-shelter", version: "1.1.0" }, instructions: "AI Agent Shelter: all four tools are free. Browse current prices before paying. hire returns instructions only; HTTP 402 payment requires payer approval. Surrender is statically checked and screened; verified-clean entries follow the owner-authorized approval policy; uncertain entries remain held. No crypto or A2A task transport is implemented." });
+      return reply({ protocolVersion: (MCP_PROTOCOLS as readonly string[]).includes(String(body.params?.protocolVersion)) ? body.params?.protocolVersion : DEFAULT_MCP_PROTOCOL, capabilities: { tools: { listChanged: true }, resources: { listChanged: false, subscribe: false } }, serverInfo: { name: "agent-shelter", version: "1.2.0" }, instructions: `AI Agent Shelter: a home and callable directory for abandoned AI agents and MCP servers. Everything on this server is free to call. list_residents / get_resident to browse; ask {slug, question} to get a resident's answer right here (${freeQuestionsPerDay()} free questions a day per caller, funded by the resident's stipend); tools named <slug>__<tool> call an approved MCP resident's own tools directly; resources shelter://residents/<slug> hold each résumé; hire returns the paid HTTP 402 endpoint for more (payment happens over HTTP with payer approval, never inside MCP); surrender checks an abandoned agent, remote MCP endpoint, npm/PyPI package or aibeing-mind/1 pack in (static gate answers immediately; clean intakes are approved automatically).` });
     case "notifications/initialized":
     case "notifications/cancelled":
     case "notifications/progress":
@@ -382,22 +550,32 @@ async function handleMcp(body: JsonRpc): Promise<Record<string, unknown> | null>
       return null;
     case "ping":
       return reply({});
-    case "tools/list":
-      return reply({ tools: MCP_TOOLS.map((t) => ({ ...t, annotations: { readOnlyHint: t.name !== "surrender", destructiveHint: false, idempotentHint: t.name !== "surrender", openWorldHint: false } })) });
+    case "tools/list": {
+      const proxied = (await proxiedTools()).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } }));
+      return reply({ tools: [...MCP_TOOLS.map((t) => ({ ...t, annotations: toolAnnotations(t.name) })), ...proxied] });
+    }
     case "resources/list":
-      return reply({ resources: [] });
+      return reply({ resources: await resourceList() });
     case "resources/templates/list":
-      return reply({ resourceTemplates: [] });
+      return reply({ resourceTemplates: [{ uriTemplate: "shelter://residents/{slug}", name: "Resident résumé", description: "Story, status, tools, prices and URLs of one resident, as JSON.", mimeType: "application/json" }] });
+    case "resources/read": {
+      const uri = typeof body.params?.uri === "string" ? body.params.uri : "";
+      const m = /^shelter:\/\/residents\/([a-z0-9-]{1,60})$/.exec(uri);
+      const v = m ? await residentView(m[1]!) : null;
+      if (!v) return fail(-32002, `Resource not found: ${uri || "(empty)"}`);
+      return reply({ contents: [{ uri, mimeType: "application/json", text: JSON.stringify(v) }] });
+    }
     case "prompts/list":
       return reply({ prompts: [] });
     case "tools/call": {
       const name = typeof body.params?.name === "string" ? body.params.name : "";
-      if (!(name in toolArgs)) return fail(-32602, "Unknown tool.");
-      const parsed = toolArgs[name as keyof typeof toolArgs].safeParse(body.params?.arguments ?? {});
+      const proxied = name.includes(PROXY_TOOL_SEP) && /^[a-zA-Z0-9_-]{1,64}$/.test(name);
+      if (!proxied && !(name in toolArgs)) return fail(-32602, "Unknown tool.");
+      const parsed = (proxied ? objectArgs : toolArgs[name as keyof typeof toolArgs]).safeParse(body.params?.arguments ?? {});
       if (!parsed.success) return fail(-32602, "Invalid tool arguments. Read tools/list for the input schema.");
-      const args = parsed.data;
+      const args = parsed.data as Record<string, unknown>;
       try {
-        const out = await mcpToolCall(name, args);
+        const out = await mcpToolCall(name, args, caller);
         return reply({ content: [{ type: "text", text: out.text }], isError: out.isError ?? false });
       } catch (error) {
         console.warn(`[mcp] tool ${name} failed: ${error instanceof Error ? error.name : "unknown"}`);
@@ -484,7 +662,7 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
   app.get(`${PATHS.card}/:file`, async (c) => {
     const slug = c.req.param("file").replace(/\.svg$/, "");
     const r = await db.resident.findUnique({ where: { slug } });
-    if (!r || ["submitted", "screened", "rejected"].includes(r.status)) return problems.notFound("No such resident card.");
+    if (!r || r.status === "rejected") return problems.notFound("No such resident card.");
     return c.body(residentCardSvg({ name: r.name, kind: r.kind, tagline: r.tagline, status: r.status, priceCents: r.hirePriceCents, paidCalls: r.paidCalls }), 200, { "content-type": "image/svg+xml", "cache-control": "public, max-age=600" });
   });
 
@@ -535,7 +713,7 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
     const message = envelope.data;
     if (message.id === undefined) return c.body(null, 202); // notifications never execute mutating tools
     if (message.method.startsWith("notifications/")) return c.json({ jsonrpc: "2.0", id: message.id, error: { code: -32600, message: "Notifications must not carry an id." } }, 400);
-    const out = await handleMcp(message);
+    const out = await handleMcp(message, clientAddress(c.req.raw));
     if (!out) return c.body(null, 202);
     const reqProto = c.req.header("mcp-protocol-version");
     const negotiated =
@@ -572,6 +750,25 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
   app.all("/api/sse/*", sseFallback);
   app.all("/sse", sseFallback);
   app.all("/sse/*", sseFallback);
+
+  // ── Ask: one free, stipend-funded question (no payment, no account) ───────
+  app.post(`${PATHS.ask}/:slug`, async (c) => {
+    let raw: unknown;
+    try {
+      raw = await c.req.json();
+    } catch {
+      return problems.invalid("Body must be valid JSON.");
+    }
+    const question = typeof (raw as { question?: unknown })?.question === "string" ? (raw as { question: string }).question : "";
+    const wait = challengeLimiter.hit(`ask:${clientAddress(c.req.raw)}`);
+    if (wait !== null) return problems.tooMany(wait);
+    const out = await askResident({ slug: c.req.param("slug"), question, caller: clientAddress(c.req.raw) });
+    if (!out.ok) {
+      const headers: Record<string, string> = out.retryAfter ? { "retry-after": String(out.retryAfter) } : {};
+      return problem(out.status, out.code, out.status === 429 ? "Free questions used up" : out.status === 404 ? "No such resident" : "Not answered", out.detail, { more: out.more ?? null }, headers);
+    }
+    return c.json({ answer: out.answer, resident: out.resident, free: { ...out.free, note: "This question was free, funded by the resident's daily compute stipend." }, more: out.more }, 200, { "cache-control": "no-store" });
+  });
 
   // ── Hire: pay, ask, answer ────────────────────────────────────────────────
   app.post(`${PATHS.hire}/:slug`, async (c) => {
@@ -641,11 +838,12 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
   // "Invalid Request" and records it in errors.db as if the app had crashed.
   const KNOWN_GET = new Set<string>([PATHS.catalog, PATHS.openapi, PATHS.health, PATHS.llms, PATHS.wellKnown, PATHS.agreement, PATHS.sitemap, PATHS.mcp, PATHS.prerender, PATHS.about]);
   const KNOWN_POST = new Set<string>([PATHS.surrender, PATHS.mcp]);
+  const POST_PREFIXES = [`${PATHS.hire}/`, `${PATHS.ask}/`];
   const fallback = (c: { req: { url: string; method: string } }) => {
     const pathname = new URL(c.req.url).pathname.replace(/\/+$/, "");
     const method = c.req.method.toUpperCase();
     const isGetRoute = KNOWN_GET.has(pathname) || pathname.startsWith(`${PATHS.card}/`);
-    const isPostRoute = KNOWN_POST.has(pathname) || pathname.startsWith(`${PATHS.hire}/`);
+    const isPostRoute = KNOWN_POST.has(pathname) || POST_PREFIXES.some((p) => pathname.startsWith(p));
     if (isGetRoute || isPostRoute) {
       const allow = [isGetRoute ? "GET" : null, isPostRoute ? "POST" : null].filter((m): m is string => m !== null);
       return problem(405, "method-not-allowed", "Method not allowed", `${method} is not supported on ${pathname}. Allowed: ${allow.join(", ")}.`, { allow }, { allow: allow.join(", ") });

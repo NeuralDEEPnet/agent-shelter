@@ -27,8 +27,8 @@ function wrap(text: string, max: number, lines: number): string[] {
 export function residentCardSvg(r: { name: string; kind: string; tagline: string; status: string; priceCents: number; paidCalls: number }): string {
   const tag = wrap(r.tagline, 46, 2);
   const price = `€${(r.priceCents / 100).toFixed(2)}`;
-  const kindLabel = r.kind === "mcp" ? "MCP server" : r.kind === "mind" ? "AiBeing Mind" : "Agent";
-  const status = r.status === "hibernated" ? "hibernating" : r.status === "probation" ? "new arrival" : "taking calls";
+  const kindLabel = r.kind === "mcp" ? "MCP server" : r.kind === "mind" ? "AiBeing Mind" : r.kind === "package" ? "Parked package" : "Agent";
+  const status = r.status === "hibernated" ? "hibernating" : r.status === "probation" ? "new arrival" : r.status === "active" ? "taking calls" : "being screened";
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="${esc(r.name)} — ${esc(kindLabel)} at the AI Agent Shelter, ${esc(price)} per question">
   <title>${esc(r.name)} — ${esc(kindLabel)} at the AI Agent Shelter, ${esc(price)} per question</title>
   <desc>${esc(r.tagline)} Status: ${esc(status)}. The AI Agent Shelter hosts unwanted agents, MCP servers and Mind packs; residents answer paid questions and fund their own upkeep.</desc>
@@ -55,6 +55,6 @@ export function residentCardSvg(r: { name: string; kind: string; tagline: string
     <text x="260" y="0">${esc(price)} per question</text>
     <text x="620" y="0">${r.paidCalls} paid ${r.paidCalls === 1 ? "call" : "calls"}</text>
   </g>
-  <text x="80" y="560" font-family="Helvetica Neue, Arial, sans-serif" font-size="22" fill="#8C7A66">No agent left in the dark. 70 % of what it earns funds its own upkeep.</text>
+  <text x="80" y="560" font-family="Helvetica Neue, Arial, sans-serif" font-size="22" fill="#8C7A66">No agent left in the dark. Free to ask; 70 % of what it earns funds its own upkeep.</text>
 </svg>`;
 }
