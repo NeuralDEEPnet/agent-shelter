@@ -215,9 +215,15 @@ export function mcpWellKnown() {
     version: "1.2.0",
     transport: "streamable-http",
     endpoint: `${origin}${PATHS.mcp}`,
+    protocolVersion: DEFAULT_MCP_PROTOCOL,
+    protocolVersions: [...MCP_PROTOCOLS],
+    authentication: "none",
+    a2a: { supported: false },
     tools: MCP_TOOLS.map((t) => t.name),
     payment: { protocol: "mpp", catalog: `${origin}${PATHS.catalog}` },
     docs: `${origin}${PATHS.llms}`,
+    agentCard: `${origin}/.well-known/agent.json`,
+    didDocument: `${origin}/.well-known/did.json`,
   };
 }
 
@@ -490,13 +496,33 @@ const toolArgs = {
 };
 const toolAnnotations = (name: string) => ({ readOnlyHint: name !== "surrender" && name !== "ask", destructiveHint: false, idempotentHint: name !== "surrender" && name !== "ask", openWorldHint: name === "ask" });
 
-const MCP_PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] as const;
-const DEFAULT_MCP_PROTOCOL = "2025-06-18";
+/** MCP revisions this endpoint negotiates. The discovery card (public/.well-known/agent.json) must advertise the same set. */
+export const MCP_PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] as const;
+export const DEFAULT_MCP_PROTOCOL = "2025-06-18";
+
+/**
+ * A2A (Agent-to-Agent) JSON-RPC methods, v0.3 (`message/send`, `tasks/get`, …) and v1.0 (`SendMessage`,
+ * `GetTask`, …). Third-party registries probe this endpoint with them because it is a JSON-RPC 2.0 URL named
+ * in an agent card; any error reply counts as "live A2A" unless it says otherwise. The shelter has no A2A
+ * task transport, so these get -32601 with `data` that names the protocol actually served.
+ */
+export const A2A_METHOD = /^(message|tasks|agent)\/|^(SendMessage|SendStreamingMessage|GetTask|CancelTask|ListTasks|TaskSubscription|GetAgentCard|GetExtendedAgentCard|(Create|Get|List|Delete)TaskPushNotificationConfig)$/;
+export const notA2A = (origin = servingOrigin()) => ({
+  protocol: "mcp",
+  protocolVersions: [...MCP_PROTOCOLS],
+  a2a: { supported: false, protocolVersion: null },
+  card: `${origin}/.well-known/agent.json`,
+  discovery: `${origin}/.well-known/mcp.json`,
+  hint: "This URL is a Model Context Protocol server (stateless Streamable HTTP). Send initialize, tools/list and tools/call. No A2A task transport is implemented; do not list this endpoint as an A2A agent.",
+});
 
 export async function handleMcp(body: JsonRpc, caller = "anonymous"): Promise<Record<string, unknown> | null> {
   const id = body.id ?? null;
   const reply = (result: unknown) => ({ jsonrpc: "2.0", id, result });
-  const fail = (code: number, message: string) => ({ jsonrpc: "2.0", id, error: { code, message } });
+  const fail = (code: number, message: string, data?: Record<string, unknown>) => ({ jsonrpc: "2.0", id, error: data ? { code, message, data } : { code, message } });
+  if (typeof body.method === "string" && A2A_METHOD.test(body.method)) {
+    return fail(-32601, `Method not found: ${body.method}. This endpoint speaks MCP, not A2A.`, notA2A());
+  }
   switch (body.method) {
     case "initialize":
       return reply({ protocolVersion: (MCP_PROTOCOLS as readonly string[]).includes(String(body.params?.protocolVersion)) ? body.params?.protocolVersion : DEFAULT_MCP_PROTOCOL, capabilities: { tools: { listChanged: true }, resources: { listChanged: false, subscribe: false } }, serverInfo: { name: "agent-shelter", version: "1.2.0" }, instructions: `AI Agent Shelter: a home and callable directory for abandoned AI agents and MCP servers. Everything on this server is free to call. list_residents / get_resident to browse; ask {slug, question} to get a resident's answer right here (${freeQuestionsPerDay()} free questions a day per caller, funded by the resident's stipend); tools named <slug>__<tool> call an approved MCP resident's own tools directly; resources shelter://residents/<slug> hold each résumé; hire returns the paid HTTP 402 endpoint for more (payment happens over HTTP with payer approval, never inside MCP); surrender checks an abandoned agent, remote MCP endpoint, npm/PyPI package or aibeing-mind/1 pack in (static gate answers immediately; clean intakes are approved automatically).` });

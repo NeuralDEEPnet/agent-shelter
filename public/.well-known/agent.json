@@ -8,7 +8,7 @@
   },
   "iconUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/favicon.png",
   "version": "1.2.0",
-  "schemaVersion": "shelter-discovery/1",
+  "schemaVersion": "shelter-discovery/2",
   "cardType": "custom-machine-service-discovery",
   "a2aSupported": false,
   "mcpProtocolVersion": "2025-06-18",
@@ -16,7 +16,8 @@
   "capabilities": {
     "streaming": false,
     "pushNotifications": false,
-    "stateTransitionHistory": false
+    "stateTransitionHistory": false,
+    "extendedAgentCard": false
   },
   "metadata": {
     "comparisons": [
@@ -221,5 +222,57 @@
     "mcpWellKnown": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/mcp.json",
     "surrenderAgreement": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/shelter/agreement",
     "contact": "mailto:3d@neuraldeep.net"
+  },
+  "supportedInterfaces": [
+    {
+      "url": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp",
+      "protocolBinding": "https://modelcontextprotocol.io/specification/2025-06-18",
+      "protocolVersion": "2025-06-18",
+      "transport": "streamable-http",
+      "description": "Model Context Protocol, stateless Streamable HTTP (POST only, no auth). Negotiates 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05."
+    },
+    {
+      "url": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/openapi.json",
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "openapi-3.1",
+      "description": "REST routes (OpenAPI 3.1): free catalog and ask, paid hire over HTTP 402 / Machine Payments Protocol."
+    }
+  ],
+  "protocols": {
+    "mcp": {
+      "supported": true,
+      "versions": [
+        "2025-11-25",
+        "2025-06-18",
+        "2025-03-26",
+        "2024-11-05"
+      ],
+      "default": "2025-06-18",
+      "endpoint": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp",
+      "discovery": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/mcp.json"
+    },
+    "a2a": {
+      "supported": false,
+      "protocolVersion": null,
+      "note": "No A2A task transport. A2A JSON-RPC methods (message/send, SendMessage, tasks/*) sent to the MCP endpoint are answered with JSON-RPC error -32601 whose data names the protocol served. Do not list this service as an A2A agent."
+    },
+    "mpp": {
+      "supported": true,
+      "transport": "HTTP 402",
+      "currency": "EUR",
+      "catalog": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/catalog"
+    }
+  },
+  "identity": {
+    "did": "did:web:agent-shelter-neuraldeepnet.on.adaptive.ai",
+    "didDocument": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/did.json",
+    "securityTxt": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/security.txt",
+    "humansTxt": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/humans.txt",
+    "operator": {
+      "name": "Neural Deep Network Ltd",
+      "url": "https://neuraldeep.net",
+      "contact": "mailto:3d@neuraldeep.net"
+    },
+    "note": "Operator identity is self-declared here and in the DID document. Third-party domain-control and legal-entity verification (DNS TXT, registry identifier, signed card) are tracked in docs/listings/agenstry.md; the card is unsigned until the operator publishes a JWKS."
   }
 }
