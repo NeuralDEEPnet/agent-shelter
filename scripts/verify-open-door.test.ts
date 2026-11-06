@@ -279,6 +279,21 @@ test("package intake: npm and PyPI servers that no longer run anywhere are parke
   assert.match(page.html, /npx -y @acme\/word-mcp/);
   assert.match(page.html, /Hiring opens when screening completes/);
   assert.ok(!page.html.includes("link-cli"), "no pay command before it is live");
+  // Unscreened: direct link only — noindex, banner, absent from the home list, the sitemap, resources and the public listing RPC.
+  assert.equal(page.noindex, true);
+  assert.match(page.html, /Not screened yet/);
+  const { injectFragment } = await import("../vite.prerender-plugin");
+  assert.ok(injectFragment("<!doctype html><html><head><title>x</title></head><body><div id=\"root\"></div></body></html>", page).includes('<meta name="robots" content="noindex" />'));
+  const home = await pre.prerender("/");
+  assert.ok(!home.html.includes(`/r/${npm.slug}`), "screening residents are not listed on the home page");
+  const appForSitemap = machineRoutes({ enqueueScreen: () => undefined });
+  const sitemap = await (await appForSitemap.fetch(new Request(`${ORIGIN}/api/shelter/sitemap.xml`))).text();
+  assert.ok(!sitemap.includes(`/r/${npm.slug}`), "screening residents are not in the sitemap");
+  const rpcSitemap = rpcFor(appForSitemap, "203.0.113.81");
+  const listed = (await rpcSitemap("resources/list"))?.result as { resources: { uri: string }[] };
+  assert.ok(!listed.resources.some((x) => x.uri.endsWith(`/${npm.slug}`)), "screening residents are not listed as resources");
+  const procedures = await import("../src/api/procedures");
+  assert.ok(!(await procedures.listResidents()).some((x) => x.slug === npm.slug), "public listing excludes screening residents");
   const app = machineRoutes({ enqueueScreen: () => undefined });
   const rpc = rpcFor(app, "203.0.113.80");
   const got = JSON.parse(toolText(await rpc("tools/call", { name: "get_resident", arguments: { slug: npm.slug } }))) as { status: string; takingCalls: boolean; install: string; parked: boolean; tools: { name: string }[] };

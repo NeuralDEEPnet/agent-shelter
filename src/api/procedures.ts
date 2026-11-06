@@ -45,6 +45,7 @@ export async function health() {
 /** Everything but rejected: residents are visible from the moment the static gate passes. */
 const PUBLIC_STATUSES = ["submitted", "screened", "approved", "probation", "active", "hibernated"] as const;
 const LIVE_STATUSES = ["probation", "active"] as const;
+const LISTED_STATUSES = ["probation", "active", "hibernated"] as const;
 
 function publicResident(r: {
   slug: string;
@@ -121,10 +122,11 @@ export async function getShelter() {
   };
 }
 
+/** Listed residents only (live + hibernating). Residents still being screened are reachable by direct link and in "Mine". */
 export async function listResidents(input?: { kind?: string; includeHibernated?: boolean }) {
   const rows = await db.resident.findMany({
     where: {
-      status: { in: input?.includeHibernated === false ? [...LIVE_STATUSES] : [...PUBLIC_STATUSES] },
+      status: { in: input?.includeHibernated === false ? [...LIVE_STATUSES] : [...LISTED_STATUSES] },
       ...(input?.kind && (RESIDENT_KINDS as readonly string[]).includes(input.kind) ? { kind: input.kind } : {}),
     },
     orderBy: [{ status: "asc" }, { paidCalls: "desc" }, { createdAt: "desc" }],

@@ -14,7 +14,7 @@ import { createMcpClient, McpError } from "@/api/services/mcpClient";
 import { freeQuestionsPerDay, freeQuotaRefund, freeQuotaTake } from "@/api/services/free-tier";
 import { submitIntake, wakeResident } from "@/api/services/shelter";
 import { residentCardSvg } from "@/api/services/cards";
-import { prerender, PUBLIC_STATUSES } from "@/api/services/prerender";
+import { LISTED_STATUSES, prerender } from "@/api/services/prerender";
 
 /**
  * The machine door. Plain HTTP + JSON-RPC (MCP) routes mounted ABOVE
@@ -428,7 +428,7 @@ async function callProxiedTool(name: string, args: Record<string, unknown>, call
 }
 
 async function resourceList() {
-  const rows = await db.resident.findMany({ where: { status: { not: "rejected" } }, orderBy: [{ status: "asc" }, { paidCalls: "desc" }, { createdAt: "desc" }], take: 200, select: { slug: true, name: true, tagline: true, kind: true, status: true } });
+  const rows = await db.resident.findMany({ where: { status: { in: [...LISTED_STATUSES] } }, orderBy: [{ status: "asc" }, { paidCalls: "desc" }, { createdAt: "desc" }], take: 200, select: { slug: true, name: true, tagline: true, kind: true, status: true } });
   return rows.map((r) => ({ uri: `shelter://residents/${r.slug}`, name: r.name, title: r.name, description: `${r.kind} · ${r.status} · ${r.tagline}`.slice(0, 500), mimeType: "application/json" }));
 }
 
@@ -574,7 +574,7 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
   app.get(PATHS.agreement, (c) => c.text(SURRENDER_AGREEMENT, 200, { "cache-control": "public, max-age=3600" }));
   app.get(PATHS.sitemap, async (c) => {
     const origin = servingOrigin();
-    const rows = await db.resident.findMany({ where: { status: { in: [...PUBLIC_STATUSES] } }, select: { slug: true, updatedAt: true }, orderBy: { updatedAt: "desc" } });
+    const rows = await db.resident.findMany({ where: { status: { in: [...LISTED_STATUSES] } }, select: { slug: true, updatedAt: true }, orderBy: { updatedAt: "desc" } });
     const newest = rows[0]?.updatedAt ?? new Date();
     const day = (d: Date) => d.toISOString().slice(0, 10);
     const entries: { loc: string; lastmod: string }[] = [

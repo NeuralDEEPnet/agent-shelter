@@ -33,7 +33,11 @@ export type Prerender = {
   canonical: string;
   html: string;
   jsonLd: Record<string, unknown> | null;
+  /** Reachable by direct link but not for indexing (e.g. a resident still being screened). */
+  noindex?: boolean;
 };
+/** Statuses that are LISTED (home, sitemap, resources). Screening residents are reachable by direct link only. */
+export const LISTED_STATUSES = ["probation", "active", "hibernated"] as const;
 
 const cache = new Map<string, { at: number; value: Prerender }>();
 
@@ -171,7 +175,7 @@ function renderUseCasesSection(): string {
 async function renderHome(origin: string): Promise<Prerender> {
   const [rows, byStatus, earned, sponsors] = await Promise.all([
     db.resident.findMany({
-      where: { status: { in: [...PUBLIC_STATUSES] } },
+      where: { status: { in: [...LISTED_STATUSES] } },
       orderBy: [{ status: "asc" }, { paidCalls: "desc" }, { createdAt: "desc" }],
       take: 200,
       select: { slug: true, name: true, kind: true, tagline: true, status: true, hirePriceCents: true, paidCalls: true, freeCalls: true, inHouse: true },
@@ -310,6 +314,7 @@ async function renderResident(origin: string, slug: string): Promise<Prerender> 
   const html = wrap(`<main>
 <p><a href="/">← Back to the noticeboard</a></p>
 <p class="eyebrow">${esc(KIND_LABEL[r.kind] ?? r.kind)} · ${esc(STATUS_LABEL[r.status] ?? r.status)}${r.inHouse ? " · shelter staff / demo resident (authored by the operator, not a rescue)" : ""}</p>
+${screening ? `<p><strong>Not screened yet.</strong> This page exists because the static safety gate passed; the text below is what the submitter wrote and has not been reviewed. It is not listed anywhere and not indexed until screening and approval complete.</p>` : ""}
 <h1 class="display mt-3 text-4xl font-semibold">${esc(r.name)}</h1>
 <p><strong>${esc(r.tagline)}</strong></p>
 <img src="${cardUrl}" alt="${esc(r.name)} — resident card" width="600" height="315" loading="lazy" />
@@ -358,6 +363,7 @@ ${forAgents(origin, hireUrl, askUrl)}
 
   return {
     status: 200,
+    noindex: screening,
     title: `${r.name} — ${KIND_LABEL[r.kind] ?? r.kind} at the AI Agent Shelter`,
     description,
     canonical: pageUrl,

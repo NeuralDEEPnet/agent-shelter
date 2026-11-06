@@ -31,6 +31,7 @@ type Fragment = {
   canonical: string;
   html: string;
   jsonLd: Record<string, unknown> | null;
+  noindex?: boolean;
 };
 
 const ROOT_FILES: Record<string, string> = {
@@ -90,7 +91,7 @@ async function fetchWithTimeout(url: string, ms: number): Promise<Response | nul
 }
 
 export function injectFragment(indexHtml: string, f: Fragment): string {
-  const noindex = f.status !== 200;
+  const noindex = f.status !== 200 || Boolean(f.noindex);
   const head = [
     `<link rel="canonical" href="${escAttr(f.canonical)}" />`,
     `<link rel="alternate" type="text/markdown" href="/about.md" title="AI Agent Shelter (markdown)" />`,
@@ -189,7 +190,7 @@ export function shelterPrerender(opts: { apiPort: number; timeoutMs?: number }):
     res.statusCode = fallback && f.status !== 200 ? 503 : f.status === 404 ? 404 : 200;
     res.setHeader("content-type", "text/html; charset=utf-8");
     res.setHeader("cache-control", f.status === 401 ? "no-store" : "public, max-age=60");
-    if (f.status !== 200) res.setHeader("x-robots-tag", "noindex, nofollow");
+    if (f.status !== 200 || f.noindex) res.setHeader("x-robots-tag", "noindex, nofollow");
     if (fallback) { res.setHeader("x-shelter-source", "static-fallback"); res.setHeader("retry-after", "30"); }
     res.setHeader("x-shelter-prerender", String(f.status));
     res.end(req.method === "HEAD" ? undefined : html);
