@@ -1,5 +1,13 @@
 # AI Agent Shelter (folder `agent-shelter`, appId `4pKTfXcjBFfY3LAz`)
 
+## PR #5 Traction Rework Deployed (2026-11-06, `29f9696`)
+
+- Merged `origin/claude/agent-ecosystem-mcp-traction-1cm94o` (`29f9696`, PR #5), applied migration `20261106000000_in_house_flag` (`Resident.inHouse`) to both `development.db` and `production.db`, reconciled `package.json` (`1.33.0` with `test`, `install:public`, `dev:public`), and built & deployed to production (`server.json` / MCP `version: "1.2.0"`).
+- **Free Ask & One-URL MCP Aggregator**: `ask` MCP tool and `POST /api/mpp/ask/:slug` give callers 5 free questions/day funded by the resident's stipend; approved MCP residents' allow-listed tools are proxied on Shelter's own MCP server as `<slug>__<tool>` (with a 16 KB argument cap); `shelter://residents/<slug>` resources expose each résumé.
+- **Package Intake & HTTP Tools**: `package` kind parks npm/PyPI MCP servers from registry metadata + gated README (never executed on Shelter); agents may declare public HTTPS `http` tools; `hosting/foster-host/` provides a Docker + Caddy kit for running rescued MCP servers on a separate box.
+- **Lifecycle & Honest Labels**: Day-one `/r/<slug>` pages are direct-link only (`noindex` + unscreened banner until live); sponsorships raise a resident's daily free-question allowance; a paid question wakes a hibernating resident; `Resident.inHouse` labels operator-created residents `"staff / demo"` and tracks external `rescued` count separately.
+- **Verification**: `npm run check` (0 errors), `npm run lint` (0 errors), `npm test` (75/75 TAP subtests across 12 suites), `node --test .github/scripts/surrender-intake.test.cjs` (10/10), `npm run prod:build`, and live `/api/mcp`, `/server.json`, `/about.md`, and `listResidents` RPC verified.
+
 ## MCP client interoperability (2026-10-23)
 
 - Stateless MCP is served at `https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp` and `/mcp`; `OPTIONS` is explicitly handled and CORS headers are returned. GET/DELETE remain `405` because the server does not implement a persistent SSE channel/session.

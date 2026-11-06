@@ -18,6 +18,7 @@ fi
 
 # Never snapshot over unseen upstream or a dirty mirror. Pull/reconcile first.
 test -z "$(git -C "$MIRROR" status --porcelain)" || { echo "Dirty mirror: reconcile before pushing." >&2; exit 1; }
+git -C "$MIRROR" checkout -q main
 git -C "$MIRROR" fetch origin main
 test "$(git -C "$MIRROR" rev-parse HEAD)" = "$(git -C "$MIRROR" rev-parse origin/main)" || { echo "Upstream differs: run pull-github.sh and review before pushing." >&2; exit 1; }
 
