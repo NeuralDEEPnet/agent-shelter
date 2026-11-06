@@ -27,6 +27,7 @@ export function AdminPage() {
   const pause = useMutation({ mutationFn: (v: { paused: boolean; reason?: string }) => client.setPause(v), onSuccess: (r) => (unwrap(r), refresh()) });
   const hib = useMutation({ mutationFn: (id: string) => client.hibernate({ residentId: id }), onSuccess: (r) => (unwrap(r), refresh()) });
   const wake = useMutation({ mutationFn: (id: string) => client.wake({ residentId: id }), onSuccess: (r) => (unwrap(r), refresh()) });
+  const inHouse = useMutation({ mutationFn: (v: { residentId: string; inHouse: boolean }) => client.setInHouse(v), onSuccess: (r) => (unwrap(r), refresh()) });
   const [tab, setTab] = useState<"queue" | "live" | "money" | "samples" | "outreach" | "setup">("queue");
 
   if (q.isPending) {
@@ -107,7 +108,7 @@ export function AdminPage() {
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2 text-right">Budget</th>
                 <th className="px-3 py-2 text-right">Wallet</th>
-                <th className="px-3 py-2 text-right">Paid calls</th>
+                <th className="px-3 py-2 text-right">Calls (free / paid)</th>
                 <th className="px-3 py-2 text-right">Today</th>
                 <th className="px-3 py-2">Last active</th>
                 <th className="px-3 py-2"></th>
@@ -121,6 +122,9 @@ export function AdminPage() {
                       {r.name}
                     </a>
                     <span className="ml-2 text-xs text-muted-foreground">{kindLabel(r.kind)}</span>
+                    <button type="button" className={cn("ml-2 rounded-none border px-1.5 py-0.5 font-mono text-[10px] uppercase", r.inHouse ? "border-primary/50 text-primary" : "border-border text-muted-foreground hover:text-foreground")} title="Toggle the public staff / demo label (authored by the operator, not a rescue)" onClick={() => inHouse.mutate({ residentId: r.id, inHouse: !r.inHouse })}>
+                      {r.inHouse ? "staff / demo" : "mark staff"}
+                    </button>
                   </td>
                   <td className="px-3 py-2">
                     <span className="flex items-center gap-1.5">
@@ -131,7 +135,7 @@ export function AdminPage() {
                     {r.budgetUnits}/{r.stipendUnits}u
                   </td>
                   <td className="px-3 py-2 text-right">{euro(r.walletCents)}</td>
-                  <td className="px-3 py-2 text-right">{r.paidCalls}</td>
+                  <td className="px-3 py-2 text-right">{r.freeCalls} / {r.paidCalls}</td>
                   <td className="px-3 py-2 text-right">
                     {r.todayUnits}u{r.todayRefunds ? ` · ${r.todayRefunds} refund` : ""}
                     {r.todayInjections ? ` · ${r.todayInjections} inj` : ""}

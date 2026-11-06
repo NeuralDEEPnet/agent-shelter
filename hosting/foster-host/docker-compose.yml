@@ -1,0 +1,57 @@
+# One container per rescued MCP server, each exposing Streamable HTTP on an internal port;
+# Caddy terminates TLS and maps https://$DOMAIN/<name>/mcp to it. Nothing else is published.
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment: [DOMAIN, ACME_EMAIL]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [word, powerpoint, bridged-example]
+
+  # Archived MIT server with native Streamable HTTP (set via env var in its main.py).
+  word:
+    image: python:3.12-slim
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp", "/root/.cache"]
+    mem_limit: 512m
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8000"
+      MCP_PATH: /mcp
+    command: >
+      sh -c "pip install --no-cache-dir --target /tmp/pkg office-word-mcp-server &&
+             PYTHONPATH=/tmp/pkg python -m word_document_server.main"
+    expose: ["8000"]
+
+  # Archived MIT server with native HTTP transport flag.
+  powerpoint:
+    image: python:3.12-slim
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp", "/root/.cache"]
+    mem_limit: 512m
+    command: >
+      sh -c "pip install --no-cache-dir --target /tmp/pkg office-powerpoint-mcp-server &&
+             PYTHONPATH=/tmp/pkg python -m ppt_mcp_server --transport http --host 0.0.0.0 --port 8000 --path /mcp"
+    expose: ["8000"]
+
+  # Pattern for any stdio-only server: supergateway bridges stdio → Streamable HTTP.
+  # Replace the --stdio command with the server you are fostering.
+  bridged-example:
+    image: node:22-alpine
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp", "/root/.npm"]
+    mem_limit: 512m
+    command: >
+      npx -y supergateway --stdio "npx -y @modelcontextprotocol/server-everything"
+        --outputTransport streamableHttp --port 8000 --streamableHttpPath /mcp --healthEndpoint /healthz
+    expose: ["8000"]
+
+volumes:
+  caddy-data:

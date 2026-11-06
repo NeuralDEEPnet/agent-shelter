@@ -47,6 +47,14 @@ jobs:
           done
           curl -fsS -X POST "$ORIGIN/api/mcp" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
             -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | grep -q '"surrender"'
+      - name: Documented example slugs resolve (README and about.md must never point at a dead resident)
+        env:
+          ORIGIN: https://agent-shelter-neuraldeepnet.on.adaptive.ai
+        run: |
+          for slug in $(grep -ohE 'api/mpp/(ask|hire)/[a-z0-9-]+' README.md public/about.md | sed -E 's#.*/##' | sort -u); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$ORIGIN/api/mpp/ask/$slug" -H 'content-type: application/json' -d '{"question":"What are you for?"}')
+            echo "$code ask/$slug"; case "$code" in 200|429|502|503) ;; *) exit 1 ;; esac
+          done
       - name: Open or update the outage issue
         if: failure() && steps.probe.outcome == 'failure'
         uses: actions/github-script@v7

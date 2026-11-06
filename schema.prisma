@@ -53,6 +53,8 @@ model Resident {
   surrenderer    User?    @relation("SurrenderedBy", fields: [surrenderedBy], references: [id])
   /// Payout share for the original creator, in percent (default 10).
   creatorSharePct Int     @default(10)
+  /// Created by the shelter's operator (staff / demo resident), shown as such everywhere. Never counts as a rescue.
+  inHouse        Boolean  @default(false)
 
   // Economy
   hirePriceCents Int      @default(50) // per paid call, set/confirmed at approval

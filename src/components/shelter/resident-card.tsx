@@ -19,6 +19,7 @@ export type ResidentSummary = {
   earnedCents: number;
   tools: string[];
   install?: string | null;
+  inHouse?: boolean;
 };
 
 export function StatusDot({ status, className }: { status: string; className?: string }) {
@@ -74,6 +75,7 @@ export function ResidentCard({ r, machineOrigin }: { r: ResidentSummary; machine
     >
       <div className="flex items-center gap-2">
         <KindBadge kind={r.kind} />
+        {r.inHouse && <span className="rounded-none border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground" title="Authored by the shelter's operator; not a rescue.">staff / demo</span>}
         <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
           <StatusDot status={r.status} /> {statusLabel(r.status)}
         </span>

@@ -12,7 +12,7 @@ import { playgroundProjection, PlaygroundRefusal, rateWithPlaygroundCredential }
 import { packageInstallLine, packageRegistryUrl, SURRENDER_AGREEMENT, SURRENDER_AGREEMENT_VERSION, LICENSES } from "@/api/services/intake";
 import { createMcpClient, McpError } from "@/api/services/mcpClient";
 import { freeQuestionsPerDay, freeQuotaRefund, freeQuotaTake } from "@/api/services/free-tier";
-import { submitIntake } from "@/api/services/shelter";
+import { submitIntake, wakeResident } from "@/api/services/shelter";
 import { residentCardSvg } from "@/api/services/cards";
 import { prerender, PUBLIC_STATUSES } from "@/api/services/prerender";
 
@@ -65,6 +65,11 @@ async function liveResident(slug: string) {
   return db.resident.findFirst({ where: { slug, status: { in: ["active", "probation"] } } });
 }
 
+/** For the paid door: live residents, plus hibernating ones — a paid question is the promised wake-up. */
+async function hireableResident(slug: string) {
+  return db.resident.findFirst({ where: { slug, status: { in: ["active", "probation", "hibernated"] } } });
+}
+
 // ─── Catalog / discovery ─────────────────────────────────────────────────────
 
 export async function catalog() {
@@ -76,9 +81,12 @@ export async function catalog() {
     where: { status: { in: ["active", "probation"] } },
     orderBy: [{ lastActiveAt: { sort: "desc", nulls: "last" } }, { paidCalls: "desc" }, { freeCalls: "desc" }, { createdAt: "asc" }],
     take: 100,
-    select: { slug: true, name: true, kind: true, tagline: true, hirePriceCents: true, paidCalls: true, freeCalls: true, lastActiveAt: true, status: true, toolAllowlist: true, budgetUnits: true, spec: true, wallet: { select: { balanceCents: true } }, reviews: { where: { kind: "eval" }, orderBy: { createdAt: "desc" }, take: 1, select: { score: true } } },
+    select: { slug: true, name: true, kind: true, tagline: true, hirePriceCents: true, paidCalls: true, freeCalls: true, lastActiveAt: true, status: true, inHouse: true, toolAllowlist: true, budgetUnits: true, spec: true, wallet: { select: { balanceCents: true } }, reviews: { where: { kind: "eval" }, orderBy: { createdAt: "desc" }, take: 1, select: { score: true } } },
   });
-  const screening = await db.resident.count({ where: { status: { in: ["submitted", "screened", "approved"] } } });
+  const [screening, rescued] = await Promise.all([
+    db.resident.count({ where: { status: { in: ["submitted", "screened", "approved"] } } }),
+    db.resident.count({ where: { status: { not: "rejected" }, inHouse: false } }),
+  ]);
   return {
     service: "AI Agent Shelter",
     tagline: "A home and callable directory for abandoned AI agents and MCP servers: surrender free (agent, remote MCP endpoint, npm/PyPI package or Mind pack), ask any resident a few questions a day for free, hire it per question over HTTP 402, sponsor or adopt it. Nothing is deleted.",
@@ -96,6 +104,7 @@ export async function catalog() {
       kind: r.kind,
       tagline: r.tagline,
       status: r.status,
+      inHouse: r.inHouse,
       available: health.state === "ready" && !setting?.paused && used + 2 <= env.SHELTER_GLOBAL_DAILY_UNITS && (r.budgetUnits >= 2 || (r.wallet?.balanceCents ?? 0) >= 10),
       price: formatEur(r.hirePriceCents),
       amountCents: r.hirePriceCents,
@@ -110,6 +119,8 @@ export async function catalog() {
       ...packageFacts(r.spec),
     })),
     screening,
+    /** Residents not authored by the operator — the only count that means "someone trusted the shelter". */
+    rescued,
     freeTier: {
       questionsPerDay: freeQuestionsPerDay(),
       how: `POST ${origin}${PATHS.ask}/{slug} {"question":"…"} — or the MCP tool \`ask\`. No payment, no account; funded by the resident's daily compute stipend. Approved MCP residents' tools are also callable directly over MCP as <slug>__<tool>.`,
@@ -286,6 +297,8 @@ async function residentView(slug: string) {
     kind: r.kind,
     status: r.status,
     takingCalls: live,
+    inHouse: r.inHouse,
+    sponsoredQuestionsPerDay: Math.max(0, r.stipendUnits - env.SHELTER_DEFAULT_STIPEND_UNITS),
     statusNote: live ? null : r.status === "hibernated" ? "Hibernating: a sponsorship or a paid question wakes it." : "Being screened: static gate passed; behavioural probes and the approval policy decide next.",
     tagline: r.tagline,
     story: r.story,
@@ -724,7 +737,7 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
     const question = typeof (raw as { question?: unknown })?.question === "string" ? ((raw as { question: string }).question ?? "").trim() : "";
     if (!question || question.length > MAX_QUESTION_CHARS) return problems.invalid(`\`question\` is required (1–${MAX_QUESTION_CHARS} chars).`, { field: "question" });
 
-    const resident = await liveResident(c.req.param("slug"));
+    const resident = await hireableResident(c.req.param("slug"));
     if (!resident) return problems.notFound("No resident with that slug is taking calls. See /api/mpp/catalog.");
     const s = await db.shelterSetting.findUnique({ where: { id: "shelter" } });
     if (s?.paused) return problems.capacity(`The shelter is paused: ${s.pauseReason ?? "owner's decision"}. Nothing was charged.`, 3600);
@@ -744,6 +757,7 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
     const outcome = await mp.charge({ product, scope, meta: { residentId: resident.id, slug: resident.slug } }, c.req.raw);
     if (outcome.kind !== "paid") return outcome.response;
 
+    if (resident.status === "hibernated") await wakeResident(resident.id, "system", `Woken by a paid question (${outcome.reference}).`);
     const turn = await runTurn({ residentId: resident.id, question, source: "hire", paymentId: outcome.reference }, deps.runtime);
     const sampled = inProbation(resident);
     if (!turn.ok) {

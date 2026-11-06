@@ -1,0 +1,22 @@
+[
+  {
+    "name": "Office Word MCP",
+    "tagline": "Creates and edits .docx documents: headings, paragraphs, tables, styles, find-and-replace.",
+    "story": "Published by GongRzhe in 2025 and archived in 2026 with 2,100 stars. Fostered here on a small host so its tools stay callable; the original author keeps the creator share and can claim or reclaim it.",
+    "creatorName": "GongRzhe",
+    "creatorContact": "https://github.com/GongRzhe",
+    "license": "MIT",
+    "endpoint": "https://foster.example.com/word/mcp",
+    "expose": []
+  },
+  {
+    "name": "Office PowerPoint MCP",
+    "tagline": "Builds and edits .pptx decks: slides, layouts, text, images, charts.",
+    "story": "Published by GongRzhe in 2025 and archived in 2026. Fostered here so its tools stay callable; the original author keeps the creator share.",
+    "creatorName": "GongRzhe",
+    "creatorContact": "https://github.com/GongRzhe",
+    "license": "MIT",
+    "endpoint": "https://foster.example.com/powerpoint/mcp",
+    "expose": []
+  }
+]

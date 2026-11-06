@@ -1,4 +1,6 @@
-# Improvement roadmap
+# Improvement roadmap (historical)
+
+> **2026-11-06:** superseded by [ROADMAP.md](./ROADMAP.md). Items 3–5 and 7 were addressed in October; items 6, 8 and 9 are closed by the traction rework (free `ask`, proxied tools, resources; public install + `npm test` + CI; LICENSE and package identity).
 
 Audit of the public repo and the live service (https://agent-shelter-neuraldeepnet.on.adaptive.ai) on 2026-10-10. Each item lists the evidence, why it matters for humans, bots and AIs, and the proposed fix. **Where** says which side owns the change: *Adaptive* = app source in the Adaptive workspace (then `pull-github.sh` → `push-github.sh`), *GitHub* = repo-layer files you can change here.
 

@@ -245,3 +245,14 @@ test("package form → package-kind intake with registry, name, repo, command an
   const missing = buildPayload({ body: packageBody.replace("@acme/office-word-mcp\n\n### Source", "\n\n### Source"), author: "acme" });
   assert.match(missing.error, /Package name/);
 });
+
+test("agent form tools: name=url becomes an http tool, name@slug routes to an MCP resident", () => {
+  const body = agentBody.replace("### Memory", "### Tools\n\nweather=https://api.example.com/weather, search_docs@docs-server, calculate\n\n### Memory");
+  const { payload, error } = buildPayload({ body, author: "jane" });
+  assert.equal(error, undefined);
+  assert.deepEqual(payload.spec.tools, [
+    { name: "weather", description: "", http: { method: "GET", url: "https://api.example.com/weather" } },
+    { name: "search_docs", description: "", viaMcp: "docs-server" },
+    { name: "calculate", description: "" },
+  ]);
+});

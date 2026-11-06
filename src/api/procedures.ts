@@ -62,6 +62,7 @@ function publicResident(r: {
   spec: string;
   license: string;
   creatorName: string;
+  inHouse: boolean;
 }) {
   const spec = parseSpec(r.spec);
   return {
@@ -70,6 +71,7 @@ function publicResident(r: {
     name: r.name,
     tagline: r.tagline,
     status: r.status,
+    inHouse: r.inHouse,
     takingCalls: (LIVE_STATUSES as readonly string[]).includes(r.status),
     hirePriceCents: r.hirePriceCents,
     paidCalls: r.paidCalls,
@@ -93,6 +95,7 @@ export async function getShelter() {
     caller(),
     db.sponsorship.count({ where: { status: "active" } }),
   ]);
+  const rescued = await db.resident.count({ where: { status: { not: "rejected" }, inHouse: false } });
   const counts = Object.fromEntries(byStatus.map((b) => [b.status, b._count._all])) as Record<string, number>;
   const mpp = machinePayments().health();
   return {
@@ -103,6 +106,7 @@ export async function getShelter() {
     earnedCents: earned._sum.earnedCents ?? 0,
     paidCalls: earned._sum.paidCalls ?? 0,
     questionsAnswered: (earned._sum.paidCalls ?? 0) + (earned._sum.freeCalls ?? 0),
+    rescued,
     freeQuestionsPerDay: freeQuestionsPerDay(),
     activeSponsors: sponsors,
     paused: s.paused,
@@ -138,6 +142,7 @@ export async function getResident(input: { slug: string }): Promise<
     sponsorCount: number;
     adoptions: number;
     wallet: { balanceCents: number; budgetUnits: number; stipendUnits: number };
+    sponsoredQuestionsPerDay: number;
     uptime: { ok: number; failed: number };
     recentAudit: { action: string; detail: string | null; at: string }[];
     hireUrl: string;
@@ -181,6 +186,7 @@ export async function getResident(input: { slug: string }): Promise<
     sponsorCount: r.sponsorships.length,
     adoptions: r._count.adoptions,
     wallet: { balanceCents: r.wallet?.balanceCents ?? 0, budgetUnits: r.budgetUnits, stipendUnits: r.stipendUnits },
+    sponsoredQuestionsPerDay: Math.max(0, r.stipendUnits - env.SHELTER_DEFAULT_STIPEND_UNITS),
     uptime: {
       ok: hires.find((h) => h.outcome === "ok")?._count._all ?? 0,
       failed: hires.find((h) => h.outcome === "failed")?._count._all ?? 0,
@@ -355,7 +361,7 @@ export async function adminOverview(): Promise<
       reviews: { kind: string; passed: boolean; score: number | null; findings: unknown; createdAt: string }[];
       driftDetectedAt: string | null;
     }[];
-    live: { id: string; slug: string; name: string; kind: string; status: string; budgetUnits: number; stipendUnits: number; walletCents: number; paidCalls: number; earnedCents: number; todayUnits: number; todayRefunds: number; todayInjections: number; lastActiveAt: string | null; probationUntil: string | null }[];
+    live: { id: string; slug: string; name: string; kind: string; status: string; inHouse: boolean; budgetUnits: number; stipendUnits: number; walletCents: number; paidCalls: number; freeCalls: number; earnedCents: number; todayUnits: number; todayRefunds: number; todayInjections: number; lastActiveAt: string | null; probationUntil: string | null }[];
     anomalies: string[];
     totals: { shelterCents: number; globalUnitsToday: number; globalUnitsCap: number };
     machine: { state: string; detail: string; mode: string | null; key: string | null; profileId: string | null; origin: string };
@@ -414,10 +420,12 @@ export async function adminOverview(): Promise<
       name: r.name,
       kind: r.kind,
       status: r.status,
+      inHouse: r.inHouse,
       budgetUnits: r.budgetUnits,
       stipendUnits: r.stipendUnits,
       walletCents: r.wallet?.balanceCents ?? 0,
       paidCalls: r.paidCalls,
+      freeCalls: r.freeCalls,
       earnedCents: r.earnedCents,
       todayUnits: usageBy.get(r.id)?.unitsSpent ?? 0,
       todayRefunds: usageBy.get(r.id)?.refunds ?? 0,
@@ -439,6 +447,17 @@ export async function approve(input: { residentId: string; hirePriceCents?: numb
   const out = await approveResident(input.residentId, { actor: "owner", hirePriceCents: input.hirePriceCents, stipendUnits: input.stipendUnits, note: input.note });
   if (!out.ok) return refuse(notices.invalid(out.detail));
   return ok({ status: "probation" }, [notices.info("Approved", "On probation for 7 days / 50 paid calls; every hire is sampled to you until then.")]);
+}
+
+/** Owner: label a resident as staff / demo (authored by the operator). Shown everywhere; never counted as a rescue. */
+export async function setInHouse(input: { residentId: string; inHouse: boolean }) {
+  const who = await caller();
+  if (!who.owner) return refuse(notices.forbidden());
+  const r = await db.resident.findUnique({ where: { id: input.residentId }, select: { id: true } });
+  if (!r) return refuse(notices.notFound("That resident"));
+  await db.resident.update({ where: { id: input.residentId }, data: { inHouse: input.inHouse } });
+  await audit({ residentId: input.residentId, actor: "owner", action: input.inHouse ? "marked-in-house" : "unmarked-in-house" });
+  return ok({ inHouse: input.inHouse });
 }
 
 export async function reject(input: { residentId: string; note: string }): Promise<Result<{ status: string }>> {

@@ -174,7 +174,7 @@ async function renderHome(origin: string): Promise<Prerender> {
       where: { status: { in: [...PUBLIC_STATUSES] } },
       orderBy: [{ status: "asc" }, { paidCalls: "desc" }, { createdAt: "desc" }],
       take: 200,
-      select: { slug: true, name: true, kind: true, tagline: true, status: true, hirePriceCents: true, paidCalls: true, freeCalls: true },
+      select: { slug: true, name: true, kind: true, tagline: true, status: true, hirePriceCents: true, paidCalls: true, freeCalls: true, inHouse: true },
     }),
     db.resident.groupBy({ by: ["status"], _count: { _all: true } }),
     db.resident.aggregate({ _sum: { earnedCents: true } }),
@@ -193,7 +193,7 @@ async function renderHome(origin: string): Promise<Prerender> {
 ${rows
   .map(
     (r) =>
-      `<tr><td><a href="/r/${esc(encodeURIComponent(r.slug))}">${esc(r.name)}</a></td><td>${esc(KIND_LABEL[r.kind] ?? r.kind)}</td><td>${esc(r.tagline)}</td><td>${esc(STATUS_LABEL[r.status] ?? r.status)}</td><td>free to try · ${esc(formatEur(r.hirePriceCents))}</td><td>${r.freeCalls + r.paidCalls}</td></tr>`,
+      `<tr><td><a href="/r/${esc(encodeURIComponent(r.slug))}">${esc(r.name)}</a>${r.inHouse ? " <small>(shelter staff / demo)</small>" : ""}</td><td>${esc(KIND_LABEL[r.kind] ?? r.kind)}</td><td>${esc(r.tagline)}</td><td>${esc(STATUS_LABEL[r.status] ?? r.status)}</td><td>free to try · ${esc(formatEur(r.hirePriceCents))}</td><td>${r.freeCalls + r.paidCalls}</td></tr>`,
   )
   .join("\n")}
 </tbody></table>`
@@ -281,6 +281,7 @@ async function renderResident(origin: string, slug: string): Promise<Prerender> 
       paidCalls: true,
       earnedCents: true,
       freeCalls: true,
+      inHouse: true,
       license: true,
       creatorName: true,
       toolAllowlist: true,
@@ -308,7 +309,7 @@ async function renderResident(origin: string, slug: string): Promise<Prerender> 
 
   const html = wrap(`<main>
 <p><a href="/">← Back to the noticeboard</a></p>
-<p class="eyebrow">${esc(KIND_LABEL[r.kind] ?? r.kind)} · ${esc(STATUS_LABEL[r.status] ?? r.status)}</p>
+<p class="eyebrow">${esc(KIND_LABEL[r.kind] ?? r.kind)} · ${esc(STATUS_LABEL[r.status] ?? r.status)}${r.inHouse ? " · shelter staff / demo resident (authored by the operator, not a rescue)" : ""}</p>
 <h1 class="display mt-3 text-4xl font-semibold">${esc(r.name)}</h1>
 <p><strong>${esc(r.tagline)}</strong></p>
 <img src="${cardUrl}" alt="${esc(r.name)} — resident card" width="600" height="315" loading="lazy" />

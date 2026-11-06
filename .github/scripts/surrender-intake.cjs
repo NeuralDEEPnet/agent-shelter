@@ -97,7 +97,15 @@ function buildPayload({ body, author }) {
       systemPrompt: need("System prompt", field(s, "system prompt")),
       skills: list(field(s, "skills")).slice(0, 12),
       memory: list(field(s, "memory"), { lines: true }).slice(0, 40),
-      tools: [],
+      tools: list(field(s, "tools"))
+        .slice(0, 16)
+        .map((t) => {
+          const eq = t.indexOf("=");
+          if (eq > 0) return { name: t.slice(0, eq).trim(), description: "", http: { method: "GET", url: t.slice(eq + 1).trim() } };
+          const at = t.indexOf("@");
+          if (at > 0) return { name: t.slice(0, at).trim(), description: "", viaMcp: t.slice(at + 1).trim() };
+          return { name: t.trim(), description: "" };
+        }),
     };
     const greeting = field(s, "greeting");
     if (greeting) spec.greeting = greeting;

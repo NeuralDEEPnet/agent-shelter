@@ -391,3 +391,62 @@ test("lifecycle: graduation is time-only; hibernation waits SHELTER_HIBERNATE_AF
   assert.match(r?.statusNote ?? "", /90 days/);
   assert.ok(r, "never deleted");
 });
+
+// ─── Money that visibly does something ───────────────────────────────────────
+
+test("sponsorship raises the daily free-question allowance; cancellation lowers it; the label stays honest", async () => {
+  const billing = await import("../src/api/services/billing");
+  assert.equal(billing.sponsoredUnitsPerDay([]), 0);
+  assert.equal(billing.sponsoredUnitsPerDay([300]), 1);
+  assert.equal(billing.sponsoredUnitsPerDay([900]), 4);
+  assert.equal(billing.sponsoredUnitsPerDay([2500]), 11);
+  assert.equal(billing.sponsoredUnitsPerDay([900, 2500]), 15);
+
+  const out = await admit(`Sponsored ${TAG}`, { kind: "agent", systemPrompt: "You are loved.", tools: [] });
+  await db.resident.update({ where: { id: out.residentId }, data: { status: "active" } });
+  const userId = `${TAG}-sponsor`;
+  await db.user.create({ data: { id: userId, handle: "sponsor" } });
+  const row = await db.sponsorship.create({ data: { residentId: out.residentId, userId, amountCents: 900, status: "active", displayName: "Ona" } });
+  assert.equal(await billing.refreshSponsoredStipend(out.residentId), Number(process.env.SHELTER_DEFAULT_STIPEND_UNITS ?? 20) + 4);
+  await db.sponsorship.update({ where: { id: row.id }, data: { status: "canceled" } });
+  assert.equal(await billing.refreshSponsoredStipend(out.residentId), Number(process.env.SHELTER_DEFAULT_STIPEND_UNITS ?? 20));
+  await db.sponsorship.delete({ where: { id: row.id } });
+  await db.user.delete({ where: { id: userId } });
+
+  // Staff / demo residents are labelled in every public view and never counted as rescues.
+  await db.resident.update({ where: { id: out.residentId }, data: { inHouse: true } });
+  const app = machineRoutes({ enqueueScreen: () => undefined });
+  const catalog = (await (await app.fetch(new Request(`${ORIGIN}/api/mpp/catalog`))).json()) as { residents: { slug: string; inHouse: boolean }[]; rescued: number };
+  assert.equal(catalog.residents.find((r) => r.slug === out.slug)?.inHouse, true);
+  const rescuedBefore = catalog.rescued;
+  await db.resident.update({ where: { id: out.residentId }, data: { inHouse: false } });
+  const again = (await (await app.fetch(new Request(`${ORIGIN}/api/mpp/catalog`))).json()) as { rescued: number };
+  assert.equal(again.rescued, rescuedBefore + 1);
+  const pre = await import("../src/api/services/prerender");
+  await db.resident.update({ where: { id: out.residentId }, data: { inHouse: true } });
+  pre.clearPrerenderCache();
+  assert.match((await pre.prerender(`/r/${out.slug}`)).html, /shelter staff \/ demo resident/);
+});
+
+test("a paid question wakes a hibernating resident; a free one does not", async () => {
+  const { configureMachinePayments } = await import("../src/api/mppClient");
+  const { Mppx: ClientMppx, stripe: clientStripe } = await import("mppx/client");
+  let seq = 0;
+  configureMachinePayments({ env: { STRIPE_RESTRICTED_KEY: "rk_live_localproof_000000000000000000", STRIPE_PROFILE_ID: "profile_localproof" }, stripeClient: { paymentIntents: { create: async () => ({ id: `pi_${TAG}_wake_${++seq}`, status: "succeeded", lastResponse: { headers: {} } }) } } });
+  const out = await admit(`Dormant ${TAG}`, { kind: "agent", systemPrompt: "You wake when paid.", tools: [] });
+  await db.resident.update({ where: { id: out.residentId }, data: { status: "hibernated", budgetUnits: 10 } });
+  const app = machineRoutes({ runtime: { complete: (async () => "Awake now.") as never, modelAvailable: () => true }, enqueueScreen: () => undefined });
+  freeTier.resetFreeQuotas();
+  const free = await app.fetch(new Request(`${ORIGIN}/api/mpp/ask/${out.slug}`, { method: "POST", body: JSON.stringify({ question: "hi" }), headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.99" } }));
+  assert.equal(free.status, 503, "free questions do not wake");
+  const serve = (req: Request) => app.fetch(req);
+  const agent = ClientMppx.create({ methods: [clientStripe.charge({ paymentMethod: "pm_card_visa", createToken: async () => "spt_fake_wake" })], fetch: async (input: RequestInfo | URL, init?: RequestInit) => serve(input instanceof Request ? input : new Request(input, init)) });
+  const paid = await agent.fetch(`${ORIGIN}/api/mpp/hire/${out.slug}`, { method: "POST", body: JSON.stringify({ question: "Wake up?" }), headers: { "content-type": "application/json" } });
+  assert.equal(paid.status, 200);
+  assert.equal(((await paid.json()) as { answer: string }).answer, "Awake now.");
+  const r = await db.resident.findUnique({ where: { id: out.residentId } });
+  assert.equal(r?.status, "active");
+  assert.equal(r?.paidCalls, 1);
+  const woke = await db.auditEvent.findFirst({ where: { residentId: out.residentId, action: "woken" } });
+  assert.match(woke?.detail ?? "", /paid question/);
+});

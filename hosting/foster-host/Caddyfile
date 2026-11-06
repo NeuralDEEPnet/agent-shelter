@@ -1,0 +1,25 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	# Only the MCP paths, only the verbs MCP uses. Everything else is 404.
+	@word path /word/mcp
+	@ppt path /powerpoint/mcp
+	@bridged path /bridged/mcp
+	@mcpverbs method POST OPTIONS
+
+	handle @word {
+		handle @mcpverbs { uri strip_prefix /word; reverse_proxy word:8000 }
+		respond 405
+	}
+	handle @ppt {
+		handle @mcpverbs { uri strip_prefix /powerpoint; reverse_proxy powerpoint:8000 }
+		respond 405
+	}
+	handle @bridged {
+		handle @mcpverbs { uri strip_prefix /bridged; reverse_proxy bridged-example:8000 }
+		respond 405
+	}
+	handle { respond 404 }
+}

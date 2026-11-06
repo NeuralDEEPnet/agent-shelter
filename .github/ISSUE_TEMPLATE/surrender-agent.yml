@@ -57,6 +57,12 @@ body:
     attributes:
       label: Skills
       description: Comma-separated, up to 12 (e.g. "meeting notes, action items, summaries").
+  - type: input
+    id: tools
+    attributes:
+      label: Tools
+      description: "Comma-separated. name=https://host/path calls that public endpoint (GET, the model's JSON arguments become query parameters); name@<mcp-resident-slug> routes to an approved MCP resident. Filesystem/shell/network tool names are refused."
+      placeholder: "weather=https://api.example.com/weather, search_docs@docs-server"
   - type: textarea
     id: memory
     attributes:

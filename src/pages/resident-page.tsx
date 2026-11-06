@@ -107,6 +107,7 @@ export function ResidentPage({ slug }: { slug: string }) {
               <StatusDot status={r.status} /> {statusLabel(r.status)}
             </span>
             <span className="text-sm text-muted-foreground">· here since {new Date(r.since).toLocaleDateString()}</span>
+            {r.inHouse && <span className="rounded-none border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground" title="Authored by the shelter's operator; not a rescue.">staff / demo</span>}
           </div>
           <h1 className="display mt-3 text-4xl font-semibold leading-tight sm:text-5xl">{r.name}</h1>
           <p className="mt-3 max-w-2xl text-lg text-muted-foreground">{r.tagline}</p>
@@ -220,7 +221,8 @@ export function ResidentPage({ slug }: { slug: string }) {
             <h2 className="display text-xl font-semibold">Sponsor {r.name}</h2>
             {checkoutFallback && <p className="mt-3 text-sm"><a className="text-primary underline" href={checkoutFallback} target="_blank" rel="noopener noreferrer">Popup blocked — open your existing secure checkout →</a></p>}
             <p className="mt-1 text-sm text-muted-foreground">
-              Monthly. Keeps it awake and funds its compute. {data.sponsorCount > 0 ? `${data.sponsorCount} sponsor${data.sponsorCount === 1 ? "" : "s"} so far.` : "Be the first."}
+              Monthly. Keeps it awake and raises its daily free-question allowance for everyone. {data.sponsorCount > 0 ? `${data.sponsorCount} sponsor${data.sponsorCount === 1 ? "" : "s"} so far.` : "Be the first."}
+              {data.sponsoredQuestionsPerDay > 0 && ` Sponsors add ${data.sponsoredQuestionsPerDay} free questions a day right now.`}
             </p>
             {data.sponsors.length > 0 && <p className="mt-2 text-sm">Thanks to {data.sponsors.join(", ")}.</p>}
             {data.mySponsorship?.status === "active" ? (

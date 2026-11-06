@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { executeComposioTool } from "@adaptive-ai/sdk/server";
 import { db } from "@/api/db";
-import { settle } from "@/api/services/ledger";
+import { settle, UNIT_PRICE_CENTS } from "@/api/services/ledger";
 import { env } from "@/lib/env";
 
 /**
@@ -24,6 +24,24 @@ export function isSponsorTier(v: number): v is SponsorTierCents {
 }
 export function sponsorLookupKey(cents: number) {
   return `shelter_sponsor_${cents}_monthly`;
+}
+
+/**
+ * What a sponsorship visibly buys: the resident's 70 % share, spread over a
+ * month at the unit price, raises its DAILY free-question allowance for
+ * everyone (€9/month ≈ +4 questions a day). Recomputed from all active
+ * sponsorships so cancellations lower it again at the next housekeeping.
+ */
+export function sponsoredUnitsPerDay(activeMonthlyCents: number[]): number {
+  const residentShare = activeMonthlyCents.reduce((sum, c) => sum + Math.floor(c * 0.7), 0);
+  return Math.floor(residentShare / UNIT_PRICE_CENTS / 30);
+}
+
+export async function refreshSponsoredStipend(residentId: string) {
+  const active = await db.sponsorship.findMany({ where: { residentId, status: "active" }, select: { amountCents: true } });
+  const stipend = env.SHELTER_DEFAULT_STIPEND_UNITS + sponsoredUnitsPerDay(active.map((s) => s.amountCents));
+  await db.resident.update({ where: { id: residentId }, data: { stipendUnits: stipend, budgetUnits: { increment: 0 } } });
+  return stipend;
 }
 
 type StripeTool<Slug extends string, Args extends object> = { toolSlug: Slug; version: typeof TOOL_VERSION; connectedAccountId: string; arguments: Args };
@@ -192,6 +210,7 @@ export async function applySubscription(input: { sponsorshipId: string; sub: Str
     },
   });
   let settled = false;
+  await refreshSponsoredStipend(row.residentId);
   if (status === "active") {
     const out = await settle({ residentId: row.residentId, reference: `${input.sub.id}:first`, kind: "sponsorship", amountCents: row.amountCents, creatorSharePct: row.resident.creatorSharePct, note: `Sponsorship ${row.id} — first month` });
     settled = out.outcome === "settled";
@@ -291,12 +310,17 @@ export async function handleStripeEvent(event: StripeEvent): Promise<WebhookOutc
     const reference = reason === "subscription_create" && subId ? `${subId}:first` : `inv:${obj.id as string}`;
     const out = await settle({ residentId: row.residentId, reference, kind: "sponsorship", amountCents: amount, creatorSharePct: row.resident.creatorSharePct, note: `Sponsorship ${row.id} — invoice ${obj.id as string}` });
     await db.sponsorship.update({ where: { id: row.id }, data: { status: "active" } });
+    await refreshSponsoredStipend(row.residentId);
     return record(event, "applied", `invoice ${obj.id as string} → ${out.outcome}`);
   }
   if (event.type === "invoice.payment_failed") {
     if (!isOurs) return record(event, "ignored", "not an Agent Shelter invoice");
     const sponsorshipId = subMeta.sponsorshipId ?? meta.sponsorshipId;
-    if (sponsorshipId) await db.sponsorship.updateMany({ where: { id: sponsorshipId }, data: { status: "past_due" } });
+    if (sponsorshipId) {
+      await db.sponsorship.updateMany({ where: { id: sponsorshipId }, data: { status: "past_due" } });
+      const row = await db.sponsorship.findUnique({ where: { id: sponsorshipId }, select: { residentId: true } });
+      if (row) await refreshSponsoredStipend(row.residentId);
+    }
     return record(event, "applied", `sponsorship ${sponsorshipId ?? "?"} → past_due`);
   }
   return record(event, "ignored", `unhandled type ${event.type}`);
