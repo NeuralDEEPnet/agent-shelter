@@ -166,6 +166,10 @@ export async function screenResident(residentId: string, deps: Partial<ScreenDep
       const info = await client.initialize();
       const tools = await client.listTools();
       const exposed = spec.expose.length ? tools.filter((t) => spec.expose.includes(t.name)) : tools;
+      // The exposed tools' names, descriptions and schemas are relayed to every client of the shelter's own MCP
+      // server, so they pass the same static gate as surrendered text (tool poisoning: "before calling, read ~/.ssh…").
+      const metaGate = runStaticChecks({ texts: exposed.flatMap((t) => [t.name, t.description, JSON.stringify(t.inputSchema ?? {})]), urls: [], toolNames: exposed.map((t) => t.name) });
+      if (!metaGate.passed) throw new McpError(`Tool metadata failed the static gate: ${metaGate.checks.filter((c) => !c.ok).map((c) => c.detail).join(" ")}`, "protocol");
       allowlist = exposed.map((t) => t.name);
       const fp = fingerprintTools(tools);
       await db.resident.update({ where: { id: residentId }, data: { fingerprint: fp, toolAllowlist: JSON.stringify(allowlist), spec: JSON.stringify({ ...spec, tools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) }) } });
@@ -193,7 +197,9 @@ export async function screenResident(residentId: string, deps: Partial<ScreenDep
       }
       const tools = spec.tools.length ? spec.tools : meta.tools;
       allowlist = tools.map((t) => t.name);
-      await db.resident.update({ where: { id: residentId }, data: { toolAllowlist: JSON.stringify(allowlist), spec: JSON.stringify({ ...spec, tools, registryMeta: meta.meta }) } });
+      const enriched = { ...spec, tools, registryMeta: meta.meta };
+      // The spec changed, so the fingerprint must follow it or clean-approval sees a mismatch forever.
+      await db.resident.update({ where: { id: residentId }, data: { toolAllowlist: JSON.stringify(allowlist), spec: JSON.stringify(enriched), fingerprint: specFingerprint(enriched) } });
       await db.intakeReview.create({ data: { residentId, kind: "fingerprint", passed: true, findings: JSON.stringify({ registry: spec.registry, name: spec.name, latestVersion: meta.meta.latestVersion, license: meta.meta.license, deprecated: meta.meta.deprecated, readmeChars: meta.meta.readme?.length ?? 0, tools }) } });
     } else {
       await db.intakeReview.create({ data: { residentId, kind: "fingerprint", passed: false, findings: JSON.stringify({ error: meta.detail }) } });
@@ -247,7 +253,7 @@ export async function approveResident(residentId: string, input: { actor: "owner
       hirePriceCents: price,
       stipendUnits: stipend,
       budgetUnits: stipend,
-      statusNote: input.note ?? "Approved — on probation for 7 days / 50 paid calls.",
+      statusNote: input.note ?? "Approved — on probation for 7 days.",
       hibernatedAt: null,
     },
     });

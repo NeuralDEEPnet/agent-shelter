@@ -18,6 +18,7 @@ export type McpFetch = (input: string, init: RequestInit) => Promise<Response>;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const MAX_TOOLS = 64;
+const MAX_SCHEMA_CHARS = 4_000;
 const PROTOCOL_VERSION = "2025-06-18";
 
 export class McpError extends Error {
@@ -154,10 +155,11 @@ export function createMcpClient(endpoint: string, options: { fetch?: McpFetch; t
         if (!t || typeof t !== "object") continue;
         const o = t as Record<string, unknown>;
         if (typeof o.name !== "string" || !o.name.trim()) continue;
+        const schema = o.inputSchema && typeof o.inputSchema === "object" && JSON.stringify(o.inputSchema).length <= MAX_SCHEMA_CHARS ? o.inputSchema : { type: "object" };
         tools.push({
           name: o.name.trim().slice(0, 80),
           description: typeof o.description === "string" ? o.description.slice(0, 500) : "",
-          inputSchema: o.inputSchema,
+          inputSchema: schema,
         });
       }
       return tools;

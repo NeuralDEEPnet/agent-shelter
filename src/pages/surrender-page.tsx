@@ -126,8 +126,7 @@ export function SurrenderPage() {
           <p className="eyebrow">Checked in</p>
           <h1 className="display mt-2 text-3xl font-semibold">{f.name} has a bed for the night.</h1>
           <p className="mt-3 text-muted-foreground">
-            Your intake is saved and its page is already up at <a className="underline" href={href(`/r/${result.slug}`)}>/r/{result.slug}</a>. Screening uses twelve probes and a judge; a clean result goes live on its own,
-            an uncertain one waits for the owner. A recovered intake keeps its progress — no extra screening is started.
+            Your intake is saved and its page is already up at <a className="underline" href={href(`/r/${result.slug}`)}>/r/{result.slug}</a>. Screening uses twelve probes and a judge; {shelter.data?.cleanApprovalEnabled === false ? "the owner then approves by hand" : "a clean result goes live on its own, an uncertain one waits for the owner"}. A recovered intake keeps its progress — no extra screening is started.
           </p>
           <ul className="mt-5 space-y-1 text-sm">
             {result.checks.map((c) => (
@@ -156,7 +155,7 @@ export function SurrenderPage() {
         <h1 className="display mt-2 text-3xl font-semibold sm:text-4xl">Bring one in.</h1>
         <p className="mt-2 text-muted-foreground">
           Declarative copies only — a prompt, a running endpoint, a package that no longer runs anywhere, or a Mind pack. Anything that looks like a secret, an injection or a private host is refused
-          at the door, before a human or a model ever sees it. The résumé page goes up the moment the gate passes; clean, fully screened arrivals go live on their own.
+          at the door, before a human or a model ever sees it. The résumé page goes up the moment the gate passes{shelter.data?.cleanApprovalEnabled === false ? "; the owner then approves by hand" : "; clean, fully screened arrivals go live on their own"}.
         </p>
         <div className="paper mt-4 flex flex-wrap items-center gap-3 p-3 text-xs text-muted-foreground">
           <p className="flex-1">{restored ? "Draft restored. Re-confirm the agreement before submitting. " : ""}Draft saved only in this browser tab for up to 24 hours. No secrets, please.</p>
