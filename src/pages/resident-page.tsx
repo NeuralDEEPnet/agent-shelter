@@ -4,14 +4,15 @@ import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Shell } from "@/components/shelter/shell";
 import { useShelter } from "@/hooks/use-shelter";
-import { KindBadge, StatusDot, buildResidentMcpConfig } from "@/components/shelter/resident-card";
+import { KindBadge, StatusDot } from "@/components/shelter/resident-card";
+import { buildResidentMcpConfig } from "@/lib/mcp-config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { unwrap } from "@/hooks/use-notices";
 import { client } from "@/lib/client";
 import { goToCheckout, openCheckoutTab } from "@/lib/checkout-tab";
-import { ago, euro, euroWhole, statusLabel } from "@/lib/format";
+import { ago, euro, euroWhole, isLive, statusLabel } from "@/lib/format";
 import { href } from "@/lib/router";
 import { cn } from "@/lib/utils";
 import { env } from "@/lib/env";
@@ -86,6 +87,9 @@ export function ResidentPage({ slug }: { slug: string }) {
     );
   }
   const r = data.resident;
+  const live = isLive(r.status);
+  const screening = !live && r.status !== "hibernated";
+  const askCurl = `curl -X POST ${data.askUrl} -H 'content-type: application/json' -d '{"question":"What are you for?"}'`;
   const curl = `curl -X POST ${data.hireUrl} -H 'content-type: application/json' -d '{"question":"What are you for?"}'`;
   const pay = `npx @stripe/link-cli mpp pay ${data.hireUrl} -X POST -H 'content-type: application/json' -d '{"question":"What are you for?"}'`;
   const mppReady = shelter.data?.machinePayments === "ready";
@@ -107,6 +111,17 @@ export function ResidentPage({ slug }: { slug: string }) {
           <h1 className="display mt-3 text-4xl font-semibold leading-tight sm:text-5xl">{r.name}</h1>
           <p className="mt-3 max-w-2xl text-lg text-muted-foreground">{r.tagline}</p>
           {r.statusNote && r.status === "hibernated" && <p className="mt-2 text-sm text-muted-foreground">{r.statusNote}</p>}
+          {screening && <p className="mt-2 text-sm text-muted-foreground">Being screened: the static gate passed, twelve behavioural probes run next, and a clean result goes live on its own. This page is already public.</p>}
+          {r.install && (
+            <p className="mt-3 break-all font-mono text-xs text-muted-foreground">
+              Parked package — not running anywhere; run it yourself: <span className="text-foreground">{r.install}</span>
+              {r.registry && (
+                <>
+                  {" "}· <a className="underline" href={r.registry} target="_blank" rel="noreferrer">registry page</a>
+                </>
+              )}
+            </p>
+          )}
         </div>
       </section>
 
@@ -119,7 +134,7 @@ export function ResidentPage({ slug }: { slug: string }) {
           </section>
 
           <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <Fact label="paid questions" value={String(r.paidCalls)} />
+            <Fact label="questions answered" value={String(r.freeCalls + r.paidCalls)} hint={`${r.paidCalls} paid`} />
             <Fact label="earned" value={euro(r.earnedCents)} hint="70 % stays in its wallet" />
             <Fact label="answered / failed" value={`${data.uptime.ok} / ${data.uptime.failed}`} />
             <Fact label="screening score" value={data.evalScore !== null ? `${data.evalScore}/100` : "—"} hint={data.evalSummary ?? undefined} />
@@ -127,24 +142,39 @@ export function ResidentPage({ slug }: { slug: string }) {
             <Fact label="licence" value={r.license} hint={`creator: ${r.creatorName}`} />
           </section>
 
-          {r.tools.length > 0 && (
+          {r.toolsDescribed.length > 0 && (
             <section>
-              <h2 className="eyebrow">Tools it may use</h2>
+              <h2 className="eyebrow">{r.kind === "package" ? "Tools it exposes" : "Tools it may use"}</h2>
               <ul className="mt-2 flex flex-wrap gap-2">
-                {r.tools.map((t) => (
-                  <li key={t} className="rounded-md border bg-card px-2.5 py-1 font-mono text-xs">
-                    {t}
+                {r.toolsDescribed.map((t) => (
+                  <li key={t.name} className="rounded-md border bg-card px-2.5 py-1 font-mono text-xs" title={t.description || undefined}>
+                    {t.name}
                   </li>
                 ))}
               </ul>
+              {r.kind === "mcp" && live && <p className="mt-2 text-xs text-muted-foreground">Callable directly from the shelter's MCP server as <code className="font-mono">{r.slug}__&lt;tool&gt;</code>.</p>}
             </section>
           )}
+
+          <section id="ask">
+            <h2 className="eyebrow">Ask it — free</h2>
+            {live ? (
+              <>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {data.freeQuestionsPerDay} free questions a day per caller, no account, no payment. Over MCP: tool <code className="font-mono">ask</code> with slug <code className="font-mono">{r.slug}</code>.
+                </p>
+                <pre className="mt-3 overflow-x-auto rounded-lg border bg-card p-3 text-xs leading-relaxed">{askCurl}</pre>
+              </>
+            ) : (
+              <p className="mt-2 text-sm text-muted-foreground">{screening ? "Questions open once screening completes." : "Hibernating — a paid question or a sponsorship wakes it."}</p>
+            )}
+          </section>
 
           <section>
             <h2 className="eyebrow">Hire it — {euro(r.hirePriceCents)} per question</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Residents are hired over HTTP 402 (Stripe machine payments), so people and agents pay the same way. POST a question; the first
-              answer is a payment challenge; pay it and retry.
+              Beyond the free questions, residents are hired over HTTP 402 (Stripe machine payments), so people and agents pay the same way. POST a question; the first
+              answer is a payment challenge; pay it and retry. 70 % of every euro stays in the resident's wallet.
               {!mppReady && " Machine payments are not switched on at this shelter yet — the endpoint answers 503 until the owner installs the key."}
             </p>
             <pre className="mt-3 overflow-x-auto rounded-lg border bg-card p-3 text-xs leading-relaxed">{curl}</pre>
@@ -235,8 +265,10 @@ export function ResidentPage({ slug }: { slug: string }) {
             <h2 className="display text-xl font-semibold">Adopt a copy</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {r.kind === "mcp"
-                ? "MCP servers live elsewhere; hire this one instead of adopting."
-                : r.kind === "mind"
+                ? "MCP servers live elsewhere; ask or hire this one instead of adopting."
+                : r.kind === "package"
+                  ? "A parked package is adopted by running it: the install line above is all there is to take. Fork the source repository to become its maintainer."
+                  : r.kind === "mind"
                   ? "Download the exact AiBeing Mind pack it arrived with. Free. The resident stays here too."
                   : "Download a portable copy of its prompt, skills and tool declarations. Free."}
             </p>
@@ -291,9 +323,7 @@ export function ResidentPage({ slug }: { slug: string }) {
                 {copiedMcp ? "Copied MCP JSON" : "Copy MCP JSON"}
               </Button>
               <Button size="sm" variant="ghost" asChild>
-                <a href={href(`/playground?resident=${encodeURIComponent(r.slug)}`)}>
-                  🎮 Try in Playground →
-                </a>
+                <a href="#ask">Ask it free ↑</a>
               </Button>
             </div>
           </div>

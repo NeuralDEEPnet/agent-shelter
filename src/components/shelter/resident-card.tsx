@@ -3,6 +3,7 @@ import { Check, Copy, ExternalLink, Terminal, Zap, ChevronDown, ChevronUp } from
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { euro, kindLabel, statusLabel } from "@/lib/format";
+import { buildResidentMcpConfig, DEFAULT_SERVING_ORIGIN } from "@/lib/mcp-config";
 import { href } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -14,29 +15,11 @@ export type ResidentSummary = {
   status: string;
   hirePriceCents: number;
   paidCalls: number;
+  freeCalls?: number;
   earnedCents: number;
   tools: string[];
+  install?: string | null;
 };
-
-const DEFAULT_SERVING_ORIGIN = "https://agent-shelter-neuraldeepnet.on.adaptive.ai";
-
-export function buildResidentMcpConfig(slug: string, origin: string = DEFAULT_SERVING_ORIGIN) {
-  const cleanOrigin = (origin || DEFAULT_SERVING_ORIGIN).replace(/\/+$/, "");
-  const serverKey = `shelter-${slug}`;
-  return JSON.stringify(
-    {
-      mcpServers: {
-        [serverKey]: {
-          type: "streamable-http",
-          url: `${cleanOrigin}/api/mcp`,
-          description: `AI Agent Shelter resident "${slug}" — call get_resident or hire with {"slug":"${slug}"}`,
-        },
-      },
-    },
-    null,
-    2,
-  );
-}
 
 export function StatusDot({ status, className }: { status: string; className?: string }) {
   const tone = status === "active" ? "bg-[var(--glow)]" : status === "probation" ? "bg-chart-2" : status === "hibernated" ? "bg-muted-foreground/50" : "bg-muted-foreground";
@@ -59,10 +42,11 @@ export function ResidentCard({ r, machineOrigin }: { r: ResidentSummary; machine
   const [copiedProbe, setCopiedProbe] = useState(false);
 
   const origin = (machineOrigin || DEFAULT_SERVING_ORIGIN).replace(/\/+$/, "");
-  const mcpUrl = `${origin}/api/mcp`;
   const hireUrl = `${origin}/api/mpp/hire/${encodeURIComponent(r.slug)}`;
   const mcpJson = buildResidentMcpConfig(r.slug, origin);
-  const probeCurl = `curl -sS -X POST ${mcpUrl} -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_resident","arguments":{"slug":"${r.slug}"}}}'`;
+  const askUrl = `${origin}/api/mpp/ask/${encodeURIComponent(r.slug)}`;
+  const probeCurl = `curl -sS -X POST ${askUrl} -H 'content-type: application/json' -d '{"question":"What are you for?"}'`;
+  const live = r.status === "active" || r.status === "probation";
 
   const copyText = async (text: string, which: "mcp" | "probe") => {
     try {
@@ -74,7 +58,7 @@ export function ResidentCard({ r, machineOrigin }: { r: ResidentSummary; machine
       } else {
         setCopiedProbe(true);
         setTimeout(() => setCopiedProbe(false), 1800);
-        toast("Zero-cost MCP probe copied", { description: "Run in any terminal to inspect live status and tools." });
+        toast("Free question copied", { description: "Run it in any terminal — no account, no payment." });
       }
     } catch {
       toast("Copy unavailable", { description: "Select the snippet below and copy it manually." });
@@ -111,13 +95,18 @@ export function ResidentCard({ r, machineOrigin }: { r: ResidentSummary; machine
       </a>
 
       <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border pt-3 font-mono text-xs text-muted-foreground">
-        <span className="flex items-center gap-1 font-medium text-primary">
-          <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Sponsored
-        </span>
+        {live ? (
+          <span className="flex items-center gap-1 font-medium text-primary">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Free to ask
+          </span>
+        ) : (
+          <span className="flex items-center gap-1 font-medium">{statusLabel(r.status)}</span>
+        )}
         <span className="font-medium text-foreground">{euro(r.hirePriceCents)}</span>
-        <span>per question</span>
-        <span className="ml-auto">{r.paidCalls} paid</span>
+        <span>per paid question</span>
+        <span className="ml-auto">{(r.freeCalls ?? 0) + r.paidCalls} answered</span>
       </div>
+      {r.install && <p className="break-all font-mono text-[11px] text-muted-foreground">Parked package · run it yourself: <span className="text-foreground">{r.install}</span></p>}
 
       <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
         <button
@@ -132,7 +121,7 @@ export function ResidentCard({ r, machineOrigin }: { r: ResidentSummary; machine
           )}
         >
           <Zap className="h-3.5 w-3.5" aria-hidden="true" />
-          <span>⚡ Test &amp; Connect MCP</span>
+          <span>⚡ Ask free &amp; connect MCP</span>
           {drawerOpen ? <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
         </button>
 
@@ -177,7 +166,7 @@ export function ResidentCard({ r, machineOrigin }: { r: ResidentSummary; machine
 
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-[11px] text-muted-foreground">Free capability check (`get_resident` over MCP):</span>
+              <span className="text-[11px] text-muted-foreground">Ask it one free question from a terminal:</span>
               <button
                 type="button"
                 onClick={() => void copyText(probeCurl, "probe")}
@@ -194,10 +183,10 @@ export function ResidentCard({ r, machineOrigin }: { r: ResidentSummary; machine
 
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
             <a
-              href={href(`/playground?resident=${encodeURIComponent(r.slug)}&prompt=${encodeURIComponent(`Hi ${r.name}, what can we build or solve together today?`)}`)}
+              href={href(`/r/${r.slug}#ask`)}
               className="inline-flex min-h-9 items-center gap-1.5 border border-primary bg-primary px-3 py-1.5 text-[11px] font-semibold uppercase text-primary-foreground hover:opacity-90"
             >
-              🎮 Try Free in Sponsored Playground →
+              Ask it free on its page →
             </a>
             <a
               href={href(`/r/${r.slug}`)}

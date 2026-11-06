@@ -26,6 +26,7 @@
     "check:config": "tsx app.config.ts",
     "test": "node scripts/test.mjs",
     "install:public": "node scripts/install-public.mjs",
+    "dev:public": "node scripts/dev-public.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

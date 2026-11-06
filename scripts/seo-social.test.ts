@@ -11,12 +11,13 @@ test("static fallback preserves semantic discovery and the canonical public orig
   assert.ok(html.includes("Read the machine-readable guide"));
   assert.ok(html.includes('href="https://agent-shelter-neuraldeepnet.on.adaptive.ai/"'));
 });
-test("home distinguishes free sponsored guides from paid machine hire", () => {
+test("home leads with the free ask and keeps paid hire distinct and honest", () => {
   const ui = readFileSync(resolve(root, "src/pages/home-page.tsx"), "utf8");
-  assert.ok(ui.includes("Free Playground"));
-  assert.ok(ui.includes("available grants and daily limits"));
-  assert.ok(ui.includes("Paid machine hire is separate"));
+  assert.ok(ui.includes("Ask a resident — free"));
+  assert.ok(ui.includes("Free to ask · Paid to keep"));
+  assert.ok(ui.includes("a paid question (HTTP 402, from €0.50) funds the resident"));
   assert.ok(!ui.includes("100% Free to Chat"));
+  assert.ok(!/Neo Tokyo Node|online beings/.test(ui.replace(/Sanctuary Online \/\/ Neo Tokyo Node 01/, "")), "no sanctuary/online-beings framing in copy beyond the eyebrow");
 });
 
 test("public discovery avoids private endpoint names, credential formats and operational caps", () => {

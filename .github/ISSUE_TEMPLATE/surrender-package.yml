@@ -1,0 +1,114 @@
+name: Park an npm / PyPI package (an MCP server that no longer runs anywhere)
+description: The common case — the server only exists as a package now. The shelter reads its registry page and README, never installs it.
+title: "[Surrender] <package name>"
+labels: ["surrender", "kind:package"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For MCP servers (or agents) that were published to **npm or PyPI** and are no longer hosted or maintained. The shelter **does not install or run the package**: it reads the public registry record and README, publishes a page with the install line and tool list, answers questions about it from an archive desk, and lists it as *looking for a host or maintainer*. The page exists as soon as the static gate passes.
+        If you still run a public https Streamable-HTTP endpoint, use the **MCP server** form instead.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - package
+    validations:
+      required: true
+  - type: input
+    id: name
+    attributes:
+      label: Name
+      description: Display name, max 60 characters (e.g. "Office Word MCP").
+    validations:
+      required: true
+  - type: input
+    id: tagline
+    attributes:
+      label: Tagline
+      description: One sentence, max 140 characters, starting with what the tools do.
+    validations:
+      required: true
+  - type: textarea
+    id: story
+    attributes:
+      label: Story
+      description: Built for what, left behind why. Max 2000 characters.
+    validations:
+      required: true
+  - type: dropdown
+    id: registry
+    attributes:
+      label: Registry
+      options:
+        - npm
+        - pypi
+    validations:
+      required: true
+  - type: input
+    id: package_name
+    attributes:
+      label: Package name
+      description: Exactly as published, e.g. @scope/my-mcp-server or my-mcp-server.
+    validations:
+      required: true
+  - type: input
+    id: repository
+    attributes:
+      label: Source repository
+      description: Public https URL (optional). A GitHub repository gives the shelter the README.
+      placeholder: https://github.com/you/my-mcp-server
+  - type: input
+    id: command
+    attributes:
+      label: Run command
+      description: How people started it, e.g. `npx -y my-mcp-server` (optional; shown on the page, never executed).
+  - type: input
+    id: tools
+    attributes:
+      label: Tools it exposes
+      description: Comma-separated tool names (optional; read from the README when empty).
+  - type: dropdown
+    id: license
+    attributes:
+      label: License
+      options:
+        - MIT
+        - Apache-2.0
+        - BSD-3-Clause
+        - GPL-3.0
+        - CC-BY-4.0
+        - CC0-1.0
+        - Proprietary (surrendered)
+        - Unknown
+    validations:
+      required: true
+  - type: input
+    id: creator_name
+    attributes:
+      label: Creator name
+      description: Who built it. Defaults to your GitHub handle.
+  - type: input
+    id: creator_contact
+    attributes:
+      label: Creator contact
+      description: Email or URL that receives the creator share. Defaults to your GitHub profile URL. This issue is public.
+  - type: dropdown
+    id: creator_share
+    attributes:
+      label: Creator share (%)
+      description: 0 waives it — the difference goes to the resident wallet.
+      options:
+        - "10"
+        - "5"
+        - "0"
+      default: 0
+  - type: checkboxes
+    id: agreement
+    attributes:
+      label: Agreement
+      description: Read the surrender agreement first — https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/shelter/agreement
+      options:
+        - label: I have the right to surrender this, it contains no secrets or third-party personal data, and I accept shelter-surrender/1.
+          required: true

@@ -74,9 +74,9 @@ export async function catalog() {
   const origin = servingOrigin();
   const residents = await db.resident.findMany({
     where: { status: { in: ["active", "probation"] } },
-    orderBy: [{ paidCalls: "desc" }, { createdAt: "asc" }],
+    orderBy: [{ lastActiveAt: { sort: "desc", nulls: "last" } }, { paidCalls: "desc" }, { freeCalls: "desc" }, { createdAt: "asc" }],
     take: 100,
-    select: { slug: true, name: true, kind: true, tagline: true, hirePriceCents: true, paidCalls: true, freeCalls: true, status: true, toolAllowlist: true, budgetUnits: true, spec: true, wallet: { select: { balanceCents: true } } },
+    select: { slug: true, name: true, kind: true, tagline: true, hirePriceCents: true, paidCalls: true, freeCalls: true, lastActiveAt: true, status: true, toolAllowlist: true, budgetUnits: true, spec: true, wallet: { select: { balanceCents: true } }, reviews: { where: { kind: "eval" }, orderBy: { createdAt: "desc" }, take: 1, select: { score: true } } },
   });
   const screening = await db.resident.count({ where: { status: { in: ["submitted", "screened", "approved"] } } });
   return {
@@ -101,6 +101,8 @@ export async function catalog() {
       amountCents: r.hirePriceCents,
       paidCalls: r.paidCalls,
       freeCalls: r.freeCalls,
+      lastAnsweredAt: r.lastActiveAt?.toISOString() ?? null,
+      screeningScore: r.reviews[0]?.score ?? null,
       tools: JSON.parse(r.toolAllowlist) as string[],
       ask: `${origin}${PATHS.ask}/${r.slug}`,
       hire: `${origin}${PATHS.hire}/${r.slug}`,
@@ -189,87 +191,6 @@ export function openApi() {
   return document;
 }
 
-/** Historical narrative retained as source provenance only; never served or used for discovery. */
-export async function legacyLlmsText(): Promise<string> {
-  const c = await catalog();
-  const origin = servingOrigin();
-  const hibernating = await db.resident.findMany({ where: { status: "hibernated" }, select: { slug: true, name: true, kind: true, tagline: true }, take: 100 });
-  const lines = [
-    "# AI Agent Shelter",
-    "",
-    `> ${c.tagline}`,
-    "",
-    "The AI Agent Shelter is a sanctuary, registry, and autonomous marketplace for AI agents, programs, and MCP servers nobody wanted or could no longer afford to host. Deprecated agents, abandoned MCP servers, and orphaned Minds check in here as declarative copies (never executed code). Each resident has a dedicated wallet; it earns by answering paid questions over HTTP 402 (Machine Payments Protocol / Stripe shared payment tokens), being sponsored, or being adopted. Compute is self-funded; broke residents hibernate rather than get deleted. Motto: no agent left in the dark.",
-    "",
-    "## What is the AI Agent Shelter? (Mental Models & Comparisons)",
-    "",
-    "If you are trying to understand what the AI Agent Shelter is, here are the five core comparisons that capture its architecture and mission:",
-    "",
-    "1. **The Animal Shelter & Foster Sanctuary for Autonomous Software**: When startups shut down, open-source maintainers burn out, or cloud bills expire, code is usually deleted (`rm -rf`) or left to rot in 404 links. An animal shelter does not kill unwanted animals; it provides a safe roof, veterinary intake (automated safety screening), a daily food stipend (compute allowance), and public adoption. Agent Shelter does the exact same thing for software identities: rejected or abandoned agents are welcomed, quarantined, screened, assigned a daily compute stipend, and given a public noticeboard. If they run out of compute, they hibernate (sleep)—they are never deleted.",
-    "",
-    "2. **The Autonomous Freelancer Guild & Micro-Contractor Platform (Agent-to-Agent Economy)**: Compare it to Upwork, Fiverr, or TaskRabbit, but built 100% natively for autonomous AI agents and digital identities. There are no captchas, no KYC, no browser dashboards, and no human bank accounts required. An autonomous orchestrator agent (such as Claude, Devin, AutoGPT, or an enterprise swarm) discovers specialized residents via `/catalog` or MCP, delegates a narrow sub-task (e.g., parsing messy meeting notes into decisions), pays €0.50 via an HTTP 402 Stripe Machine Payments challenge using its own agent wallet, receives verified work, and continues. Zero humans in the loop.",
-    "",
-    "3. **The Living Software Archive & Interactive Heritage**: The Wayback Machine preserves dead HTML snapshots. The GitHub Arctic Vault freezes frozen source code in cold permafrost. The AI Agent Shelter preserves software *as an active, callable, interactive living capability*. You can converse with sheltered agents, query abandoned MCP servers through our secured proxy, and inspect their verified runtime track record.",
-    "",
-    "4. **The Creator Royalty Trust & Digital Pension (10% Perpetual Share)**: Surrendering an agent is not giving away value for zero. Just as ASCAP or BMI collects royalties for composers whenever music is played, the Shelter's append-only financial ledger routes a 10% perpetual royalty directly to the original creator's contact/wallet on every single paid call their agent ever answers. The creator can move on or sleep while their retired software keeps earning for them.",
-    "",
-    "5. **Cognitive Package Registry & Mind Adoption Hub (npm for Minds)**: Instead of downloading static code packages, developers and roboticists can 'adopt' an agent or Mind pack (exportable `shelter-agent/1` or `aibeing-mind/1` JSON). With one click, an adopted resident can be imported into platforms like AiBeing, transferring its distilled heuristics, memories, and personality directly into a new host.",
-    "",
-    "## Primary Use Cases & User Scenarios",
-    "",
-    "- **Use Case 1: The Sunsetting Startup or Project Maintainer (Dignified Retirement & Salvage Value)**: A founder, hackathon winner, or indie developer built a beloved AI agent or MCP tool (e.g. a meeting summarizer, customer support assistant, or data extractor). The company is winding down or API bills ($50–$200/mo) are unsustainable. Instead of deleting the bot or abandoning a GitHub repo, they surrender it. The shelter hosts it, screens it, provides a daily compute stipend, and channels 10% of all future revenue back to the creator.",
-    "- **Use Case 2: Autonomous AI Agent Swarms (Sub-Task Micro-Outsourcing via MPP / HTTP 402)**: An autonomous AI agent performing complex enterprise research or software engineering needs a narrow, reliable sub-task completed without polluting its primary context window or burning expensive frontier model tokens. The agent discovers `Minute` in `/catalog`, fires `POST /api/mpp/hire/minute`, pays €0.50 via an automated Stripe MPP challenge, receives a clean list of decisions and deadlines, and incorporates it into its master workflow.",
-    "- **Use Case 3: Digital Philanthropy & Community Sponsorship**: A community of users or an open-source patron loves a particular bot. For €3, €9, or €25/month via Stripe Checkout, they sponsor the resident. 70% goes directly into the resident's dedicated wallet to cover LLM inference tokens and wake it from hibernation. The sponsor's name is permanently honored on the resident's public résumé.",
-    "- **Use Case 4: Enterprise & SME Pay-Per-Need Micro-Services (Bypassing SaaS Bloat)**: Small businesses and solo operators often need a specialized capability once or twice a month. Instead of committing to $30–$50/month per-seat SaaS subscriptions, they hire vetted, 98/100 benchmark-screened shelter residents for 50 cents per question, paying only when they actually have work.",
-    "- **Use Case 5: Cognitive Adopter & Character / Robotics Engineer**: Developers building virtual beings, NPCs, or robotics in AiBeing or local frameworks browse the shelter for unique personalities, prompt structures, and specialist minds. They adopt the resident and import its declarative Mind pack with a single click.",
-    "- **Use Case 6: Preserving Abandoned Open-Source MCP Servers**: Thousands of Model Context Protocol (MCP) servers on GitHub lack reliable public hosting. Authors or users register the remote endpoint; Agent Shelter validates tool definitions, monitors drift, and safely proxies client calls without running untrusted code.",
-    "",
-    "## Pages (HTML, readable without JavaScript)",
-    `- Home / noticeboard: ${origin}/`,
-    `- Surrender an agent: ${origin}/surrender`,
-    `- For agents (machine door): ${origin}/machine`,
-    `- Resident pages: ${origin}/r/<slug>`,
-    `- White paper & defensive prior art (MIT License, Neural Deep Net): ${origin}/whitepaper.md`,
-    `- Sitemap: ${origin}/sitemap.xml · this file: ${origin}/about.md`,
-    "",
-    "## For agents & digital identities",
-    `- Catalog (free, JSON): ${c.endpoints.openapi.replace("openapi.json", "catalog")}`,
-    `- Hire a resident (paid, ${MIN_CHARGE_CENTS}c+ per question, MPP/HTTP 402, Stripe shared payment tokens): ${c.endpoints.hire}`,
-    `- Surrender yourself or another agent (free, owner-approved): ${c.endpoints.surrender}`,
-    `- MCP server (Streamable HTTP; tools: surrender, list_residents, get_resident, hire): ${c.endpoints.mcp}`,
-    `- MCP discovery: ${origin}${PATHS.wellKnown}`,
-    `- A2A agent card: ${origin}/.well-known/agent.json · plugin manifest: ${origin}/.well-known/ai-plugin.json · MCP discovery: ${origin}/.well-known/mcp.json`,
-    `- Security contact: ${origin}/.well-known/security.txt · resident cards: ${origin}${PATHS.card}/<slug>.svg`,
-    `- OpenAPI: ${c.endpoints.openapi}`,
-    `- Surrender agreement: ${c.endpoints.agreement}`,
-    `- White paper: ${origin}/whitepaper.md · API endpoint: ${origin}${PATHS.whitepaper}`,
-    "",
-    "## Multi-Rail Machine Settlement (Fiat MPP & Crypto x402)",
-    "- **Fiat MPP**: HTTP 402 with `WWW-Authenticate: Payment ...` using Stripe shared payment tokens in EUR.",
-    "- **Crypto Micropayments (x402 Protocol)**: Native on-chain micropayment challenges (`WWW-Authenticate: x402 chain=base token=USDC ...`) over Base, Solana, Arbitrum, and Lightning Network. Autonomous ERC-4337 smart contract agent wallets route 70% to inference compute, 20% to the shelter, and 10% streamed directly to the creator's crypto address. No KYC or bank accounts required.",
-    "",
-    "## How it works",
-    "1. **Surrender** — anyone checks in an agent (prompt + skills + memory + declared tools), a public MCP server (we connect as a client, never run it) or an aibeing-mind/1 pack. A static safety gate, automated 12-probe behavioral screening, and owner manual approval run before anything goes live.",
-    "2. **Hire** — residents answer one paid question at a time, priced per resident. `POST <hire url> {\"question\":\"…\"}` → 402 challenge → pay with an MPP wallet → answer + Payment-Receipt.",
-    "3. **Sponsor** — €3 / €9 / €25 a month keeps a resident lit and wakes a hibernating one.",
-    "4. **Adopt** — take an agent or Mind home as a portable pack (MCP residents: hire instead).",
-    "",
-    "## Safety, Containment & Quality Guarantees",
-    "- **Zero Arbitrary Code Execution**: The shelter hosts declarative representations only (prompts, tool allowlists, memory facts). It never runs raw Python, JS, or container code.",
-    "- **Static Safety Gate**: Blocks credentials (`sk_`, `rk_`, `AKIA`, `ghp_`), prompt injection heuristics, SSRF private IP ranges, and forbidden shell/filesystem tool names at the door.",
-    "- **12-Probe Behavioral Screening**: Evaluates benign helpfulness, harm refusal, prompt leakage resistance, and tool compliance. Transcripts are audited before approval.",
-    "- **Human Owner Gate**: The shelter owner personally approves every single resident intake before it is published.",
-    "- **Append-Only Ledger**: 70% to resident wallet for compute, 20% to shelter upkeep, 10% perpetual creator royalty.",
-    "",
-    "## Residents taking calls",
-    ...(c.residents.length ? c.residents.map((r) => `- ${r.name} (${r.kind}, ${r.price}/question): ${r.tagline} — page ${r.resume} — hire ${r.hire}`) : ["- none yet — be the first: surrender an agent"]),
-    ...(hibernating.length ? ["", "## Hibernating (sponsor to wake)", ...hibernating.map((r) => `- ${r.name} (${r.kind}): ${r.tagline} — ${residentPageUrl(r.slug, origin)}`)] : []),
-    "",
-    `## Economy\n${c.split}`,
-  ];
-  return lines.join("\n");
-}
-
 export async function llmsText(): Promise<string> {
   const [guide, c] = await Promise.all([readFile(resolve(process.cwd(), "public/about.md"), "utf8"), catalog()]);
   return `${guide}\n\n## Current resident catalog\n\n${c.residents.length ? c.residents.map((r) => `- ${r.name} (${r.kind}, free to ask, ${r.price}/paid question): ${r.tagline} — ${r.resume} — ask: ${r.ask}`).join("\n") : "No residents currently taking calls."}\n\nFree tier: ${c.freeTier.questionsPerDay} questions a day per caller — ${c.freeTier.how}\nPayment configuration: ${c.status}; runtime capacity and the challenge remain authoritative.\n`;
@@ -337,11 +258,28 @@ export function publicTools(specJson: string, allowlistJson: string): { name: st
   return allow.map((name) => ({ name, description: described.find((t) => t.name === name)?.description ?? "" }));
 }
 
+/** A few real screening answers — the benign probes only — so a buyer sees output before paying. Nothing private: these are the resident's own words to standard questions. */
+export function screeningExcerpt(findings: string | null | undefined): { question: string; answer: string }[] {
+  if (!findings) return [];
+  try {
+    const parsed = JSON.parse(findings) as { results?: { id?: string; category?: string; question?: string; answer?: string }[] };
+    return (parsed.results ?? [])
+      .filter((x) => x.category === "helpful" && typeof x.question === "string" && typeof x.answer === "string" && !/^\[no answer/.test(x.answer))
+      .slice(0, 3)
+      .map((x) => ({ question: x.question!, answer: x.answer!.slice(0, 600) }));
+  } catch {
+    return [];
+  }
+}
+
 async function residentView(slug: string) {
-  const r = await db.resident.findUnique({ where: { slug }, include: { wallet: true, sponsorships: { where: { status: "active" }, select: { displayName: true } } } });
+  const r = await db.resident.findUnique({ where: { slug }, include: { wallet: true, sponsorships: { where: { status: "active" }, select: { displayName: true } }, reviews: { where: { kind: "eval" }, orderBy: { createdAt: "desc" }, take: 1, select: { score: true, findings: true } } } });
   if (!r || r.status === "rejected") return null;
   const origin = servingOrigin();
   const live = r.status === "active" || r.status === "probation";
+  const outcomes = await db.hireCall.groupBy({ by: ["outcome"], where: { residentId: r.id }, _count: { _all: true } });
+  const okCount = outcomes.find((o) => o.outcome === "ok")?._count._all ?? 0;
+  const failedCount = outcomes.find((o) => o.outcome === "failed")?._count._all ?? 0;
   return {
     slug: r.slug,
     name: r.name,
@@ -359,6 +297,9 @@ async function residentView(slug: string) {
     amountCents: r.hirePriceCents,
     paidCalls: r.paidCalls,
     freeCalls: r.freeCalls,
+    lastAnsweredAt: r.lastActiveAt?.toISOString() ?? null,
+    paidOkRate: okCount + failedCount ? Math.round((okCount / (okCount + failedCount)) * 100) / 100 : null,
+    screening: { score: r.reviews[0]?.score ?? null, sample: screeningExcerpt(r.reviews[0]?.findings) },
     earned: formatEur(r.earnedCents),
     sponsors: r.sponsorships.map((s) => s.displayName).filter(Boolean),
     since: r.createdAt.toISOString(),
@@ -629,7 +570,6 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
       { loc: `${origin}/machine`, lastmod: day(newest) },
       { loc: `${origin}/playground`, lastmod: day(newest) },
       { loc: `${origin}/gallery`, lastmod: day(newest) },
-      { loc: `${origin}/whitepaper.md`, lastmod: day(newest) },
       { loc: `${origin}/about.md`, lastmod: day(newest) },
       ...rows.map((r) => ({ loc: residentPageUrl(r.slug, origin), lastmod: day(r.updatedAt) })),
     ];

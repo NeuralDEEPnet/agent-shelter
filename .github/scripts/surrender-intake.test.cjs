@@ -178,3 +178,70 @@ test("server error is treated as uncertain to prevent duplicate submissions", as
   assert.match(userComment, /HTTP 503[\s\S]*cannot confirm whether intake succeeded[\s\S]*don't retry/i);
   assert.deepEqual(calls.labels, []);
 });
+
+
+const packageBody = `### Kind
+
+package
+
+### Name
+
+Office Word MCP
+
+### Tagline
+
+Creates and edits .docx documents over MCP.
+
+### Story
+
+Archived in 2025.
+
+### Registry
+
+npm
+
+### Package name
+
+@acme/office-word-mcp
+
+### Source repository
+
+https://github.com/acme/office-word-mcp
+
+### Run command
+
+npx -y @acme/office-word-mcp
+
+### Tools it exposes
+
+create_document, add_paragraph
+
+### License
+
+MIT
+
+### Creator name
+
+_No response_
+
+### Creator contact
+
+_No response_
+
+### Creator share (%)
+
+10
+
+### Agreement
+
+- [X] I have the right to surrender this, it contains no secrets or third-party personal data, and I accept shelter-surrender/1.`;
+
+test("package form → package-kind intake with registry, name, repo, command and declared tools", () => {
+  const { payload, error } = buildPayload({ body: packageBody, author: "acme" });
+  assert.equal(error, undefined);
+  assert.deepEqual(payload.spec, { kind: "package", registry: "npm", name: "@acme/office-word-mcp", tools: [{ name: "create_document", description: "" }, { name: "add_paragraph", description: "" }], repo: "https://github.com/acme/office-word-mcp", command: "npx -y @acme/office-word-mcp" });
+  assert.equal(payload.creatorName, "acme");
+  assert.equal(payload.creatorSharePct, 10);
+  const missing = buildPayload({ body: packageBody.replace("@acme/office-word-mcp\n\n### Source", "\n\n### Source"), author: "acme" });
+  assert.match(missing.error, /Package name/);
+});

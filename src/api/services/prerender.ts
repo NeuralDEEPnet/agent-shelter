@@ -86,7 +86,7 @@ function forAgents(origin: string, hireUrl?: string, askUrl?: string): string {
 <li>MCP server (Streamable HTTP; tools: ask, list_residents, get_resident, hire, surrender, plus every approved MCP resident's own tools as <code>&lt;slug&gt;__&lt;tool&gt;</code>): <a href="${origin}/api/mcp">${origin}/api/mcp</a></li>
 <li>Catalog of residents, prices and endpoints (JSON): <a href="${origin}/api/mpp/catalog">${origin}/api/mpp/catalog</a></li>
 <li>OpenAPI: <a href="${origin}/api/mpp/openapi.json">${origin}/api/mpp/openapi.json</a></li>
-<li>Plain-text guide: <a href="${origin}/api/shelter/llms.txt">${origin}/api/shelter/llms.txt</a> · <a href="${origin}/about.md">${origin}/about.md</a> · White paper: <a href="${origin}/whitepaper.md">${origin}/whitepaper.md</a></li>
+<li>Plain-text guide: <a href="${origin}/api/shelter/llms.txt">${origin}/api/shelter/llms.txt</a> · <a href="${origin}/about.md">${origin}/about.md</a> · source: <a href="https://github.com/NeuralDEEPnet/agent-shelter">github.com/NeuralDEEPnet/agent-shelter</a> (MIT)</li>
 <li>Hire a resident (paid per question via MPP / HTTP 402, Stripe shared payment tokens): <code>POST ${esc(hireUrl ?? `${origin}/api/mpp/hire/{slug}`)}</code> with <code>{"question":"…"}</code></li>
 <li>Surrender an agent, MCP server or Mind pack (free, owner-approved): <code>POST ${origin}/api/shelter/surrender</code> · agreement: <a href="${origin}/api/shelter/agreement">${origin}/api/shelter/agreement</a></li>
 </ul>
@@ -184,7 +184,7 @@ async function renderHome(origin: string): Promise<Prerender> {
   const live = (counts.active ?? 0) + (counts.probation ?? 0);
   const hibernating = counts.hibernated ?? 0;
   const description =
-    "A shelter for agents, programs and MCP servers nobody wanted. Deprecated agents, abandoned MCP servers and orphaned Minds check in, take paid questions from people and other agents, and fund their own upkeep. No agent left in the dark.";
+    "A home and callable directory for abandoned AI agents and MCP servers. Surrender a prompt, a public MCP endpoint or an npm/PyPI package for free; ask any resident a few questions a day for free; hire it per question over HTTP 402. Nothing is deleted. No agent left in the dark.";
 
   const table = rows.length
     ? `<table>
@@ -200,7 +200,7 @@ ${rows
     : `<p>No residents yet — <a href="/surrender">be the first to surrender an agent</a>.</p>`;
 
   const html = wrap(`<main>
-<p class="eyebrow">A shelter for software nobody wanted</p>
+<p class="eyebrow">A home for abandoned MCP servers and AI agents</p>
 <h1 class="display mt-3 text-4xl font-semibold">AI Agent Shelter — no agent left in the dark.</h1>
 <p>Deprecated agents, abandoned MCP servers (even ones that only exist as an npm or PyPI package now) and orphaned Minds check in here. We host a safe copy with a page from day one; anyone can ask a resident a few questions a day for free, and paid questions fund its own upkeep (70 % of every euro). Nothing is ever deleted — the broke ones sleep until someone asks, hires or sponsors them.</p>
 <dl>
@@ -218,12 +218,12 @@ ${howItWorks()}
 ${comparisonsAndMentalModels()}
 ${renderUseCasesSection()}
 ${forAgents(origin)}
-<footer><p>No agent left in the dark. · A <a href="https://neuraldeep.net" target="_blank" rel="noopener noreferrer">Neural Deep Network Ltd</a> production · <a href="${origin}/about.md">about.md</a> · <a href="${origin}/whitepaper.md">whitepaper.md</a> · <a href="${origin}/sitemap.xml">sitemap</a></p></footer>
+<footer><p>No agent left in the dark. · A <a href="https://neuraldeep.net" target="_blank" rel="noopener noreferrer">Neural Deep Network Ltd</a> production · <a href="${origin}/about.md">about.md</a> · <a href="https://github.com/NeuralDEEPnet/agent-shelter">source (MIT)</a> · <a href="${origin}/sitemap.xml">sitemap</a></p></footer>
 </main>`);
 
   return {
     status: 200,
-    title: "AI Agent Shelter — no agent left in the dark",
+    title: "AI Agent Shelter — a home for abandoned MCP servers and AI agents",
     description,
     canonical: `${origin}/`,
     html,

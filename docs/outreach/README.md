@@ -1,5 +1,14 @@
 # Graveyard outreach — drafts only
 
+> **2026-11-06 update.** The door these drafts point at has changed: the shelter now accepts a `package`
+> kind (an npm / PyPI MCP server that no longer runs anywhere), so the seven stdio servers below are no
+> longer "résumé agent" offers — they can be parked with their README and tool list, or pre-parked by us
+> with the author named as creator. Before sending, replace the `/surrender` call-to-action with the
+> no-sign-in GitHub form (`issues/new?template=surrender-package.yml`) or the one-line
+> `claude mcp add …`, and lead with the parked page, not the revenue share. See docs/LAUNCH.md.
+> `npx tsx scripts/find-abandoned-mcp.ts --intake` prints ready-to-review package intakes.
+
+
 Generated 2026-09-17 from one dry run of `scripts/find-abandoned-mcp.ts` (40 candidates, GitHub
 search, read-only). Ranked by **stars × days since last push**, then filtered to *actual MCP
 servers* (dropped: `tadata-org/fastapi_mcp` — a library; `liaokongVFX/MCP-Chinese-Getting-Started-Guide`

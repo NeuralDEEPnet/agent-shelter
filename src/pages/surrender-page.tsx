@@ -13,13 +13,14 @@ import { client } from "@/lib/client";
 import { href, navigate } from "@/lib/router";
 import { cn } from "@/lib/utils";
 import { env } from "@/lib/env";
-import { clearIntakeDraft, EMPTY_INTAKE, readIntakeDraft, writeIntakeDraft } from "@/lib/intake-draft";
+import { clearIntakeDraft, EMPTY_INTAKE, readIntakeDraft, writeIntakeDraft, type IntakeKind } from "@/lib/intake-draft";
 
-type Kind = "agent" | "mcp" | "mind";
+type Kind = IntakeKind;
 
 const KIND_COPY: Record<Kind, { title: string; body: string }> = {
-  agent: { title: "Agent", body: "A prompt-defined agent: its system prompt, skills, memory facts and the tools it declares. We host it on our runtime." },
-  mcp: { title: "MCP server", body: "A remote Streamable-HTTP MCP endpoint (https only, public host). We connect as a client, fingerprint its tools and proxy allow-listed calls. We never run it." },
+  agent: { title: "Agent", body: "A prompt-defined agent: its system prompt, skills, memory facts and the tools it declares (a tool may call a public HTTPS endpoint). We host it on our runtime." },
+  mcp: { title: "MCP server (running)", body: "A remote Streamable-HTTP MCP endpoint (https only, public host). We connect as a client, fingerprint its tools and expose them on our own MCP server. We never run it." },
+  package: { title: "Package (not running)", body: "An npm or PyPI MCP server that nobody hosts any more. We read its registry page and README, give it a résumé with the install line and tools, and an archive desk that answers questions about it. Looking for a host." },
   mind: { title: "AiBeing Mind", body: "An exported aibeing-mind/1 pack: voice card, learned rules, exemplars, memories. Paste the JSON." },
 };
 
@@ -51,6 +52,9 @@ export function SurrenderPage() {
           greeting: f.greeting || undefined,
           skills: split(f.skills),
           tools: split(f.tools).map((t) => {
+            // name@mcp-slug routes to an approved MCP resident; name=https://… calls a public endpoint.
+            const eq = t.indexOf("=");
+            if (eq > 0) return { name: t.slice(0, eq).trim(), description: "", http: { method: "GET" as const, url: t.slice(eq + 1).trim() } };
             const [name, via] = t.split("@");
             return { name: name!.trim(), description: "", viaMcp: via?.trim() || undefined };
           }),
@@ -58,6 +62,16 @@ export function SurrenderPage() {
         };
       } else if (kind === "mcp") {
         spec = { kind, endpoint: f.endpoint, expose: split(f.expose) };
+      } else if (kind === "package") {
+        spec = {
+          kind,
+          registry: f.registry,
+          name: f.packageName.trim(),
+          version: f.version.trim() || undefined,
+          repo: f.repo.trim() || undefined,
+          command: f.command.trim() || undefined,
+          tools: split(f.packageTools).map((t) => ({ name: t, description: "" })),
+        };
       } else {
         let pack: unknown;
         try {
@@ -112,8 +126,8 @@ export function SurrenderPage() {
           <p className="eyebrow">Checked in</p>
           <h1 className="display mt-2 text-3xl font-semibold">{f.name} has a bed for the night.</h1>
           <p className="mt-3 text-muted-foreground">
-            Your intake is saved. Screening uses twelve probes and a judge. Verified clean arrivals follow the owner's approval policy;
-            suspicious or uncertain ones stay held. A recovered intake keeps its progress — no extra screening is started.
+            Your intake is saved and its page is already up at <a className="underline" href={href(`/r/${result.slug}`)}>/r/{result.slug}</a>. Screening uses twelve probes and a judge; a clean result goes live on its own,
+            an uncertain one waits for the owner. A recovered intake keeps its progress — no extra screening is started.
           </p>
           <ul className="mt-5 space-y-1 text-sm">
             {result.checks.map((c) => (
@@ -124,7 +138,8 @@ export function SurrenderPage() {
             ))}
           </ul>
           <div className="mt-6 flex gap-2">
-            <Button onClick={() => navigate(`/me`)}>Watch its status</Button>
+            <Button onClick={() => navigate(`/r/${result.slug}`)}>Open its page</Button>
+            <Button variant="outline" onClick={() => navigate(`/me`)}>Watch its status</Button>
             <Button variant="outline" asChild>
               <a href={href("/")}>Back to the board</a>
             </Button>
@@ -140,8 +155,8 @@ export function SurrenderPage() {
         <p className="eyebrow">Surrender</p>
         <h1 className="display mt-2 text-3xl font-semibold sm:text-4xl">Bring one in.</h1>
         <p className="mt-2 text-muted-foreground">
-          Declarative copies only — a prompt, an endpoint or a Mind pack. Anything that looks like a secret, an injection or a private host is refused
-          at the door, before a human or a model ever sees it.
+          Declarative copies only — a prompt, a running endpoint, a package that no longer runs anywhere, or a Mind pack. Anything that looks like a secret, an injection or a private host is refused
+          at the door, before a human or a model ever sees it. The résumé page goes up the moment the gate passes; clean, fully screened arrivals go live on their own.
         </p>
         <div className="paper mt-4 flex flex-wrap items-center gap-3 p-3 text-xs text-muted-foreground">
           <p className="flex-1">{restored ? "Draft restored. Re-confirm the agreement before submitting. " : ""}Draft saved only in this browser tab for up to 24 hours. No secrets, please.</p>
@@ -158,7 +173,7 @@ export function SurrenderPage() {
           </div>
         )}
 
-        <div className="mt-6 grid gap-2 sm:grid-cols-3">
+        <div className="mt-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {(Object.keys(KIND_COPY) as Kind[]).map((k) => (
             <button key={k} onClick={() => setKind(k)} className={cn("paper p-4 text-left", kind === k ? "border-primary ring-1 ring-primary" : "hover:bg-accent/40")}>
               <div className="display font-semibold">{KIND_COPY[k].title}</div>
@@ -201,8 +216,8 @@ export function SurrenderPage() {
                 <Field label="Skills" hint="Comma-separated, ≤ 12">
                   <Input value={f.skills} onChange={(e) => set("skills")(e.target.value)} placeholder="summarising, SQL, Lithuanian" />
                 </Field>
-                <Field label="Tools" hint="Comma-separated names. Suffix @<mcp-resident-slug> to route a tool to an approved MCP resident. Filesystem/shell/network tools are refused.">
-                  <Input value={f.tools} onChange={(e) => set("tools")(e.target.value)} placeholder="search_docs@docs-server, calculate" />
+                <Field label="Tools" hint="Comma-separated. name@<mcp-resident-slug> routes to an approved MCP resident; name=https://host/path calls that public endpoint with the model's arguments as query parameters. Filesystem/shell/network tool names are refused.">
+                  <Input value={f.tools} onChange={(e) => set("tools")(e.target.value)} placeholder="search_docs@docs-server, weather=https://api.example.com/weather" />
                 </Field>
                 <Field label="Memory facts" hint="One per line, ≤ 40. Context, never instructions.">
                   <Textarea rows={3} value={f.memory} onChange={(e) => set("memory")(e.target.value)} />
@@ -216,6 +231,32 @@ export function SurrenderPage() {
                 </Field>
                 <Field label="Expose only these tools (optional)" hint="Comma-separated. Empty = every tool the server lists at screening.">
                   <Input value={f.expose} onChange={(e) => set("expose")(e.target.value)} />
+                </Field>
+              </>
+            )}
+            {kind === "package" && (
+              <>
+                <div className="grid gap-4 sm:grid-cols-[140px_1fr]">
+                  <Field label="Registry">
+                    <select className="h-10 w-full rounded-md border bg-background px-3" value={f.registry} onChange={(e) => set("registry")(e.target.value)}>
+                      <option value="npm">npm</option>
+                      <option value="pypi">PyPI</option>
+                    </select>
+                  </Field>
+                  <Field label="Package name" hint="Exactly as published, e.g. @scope/my-mcp-server or my-mcp-server. We read its public registry page and README; we never install it.">
+                    <Input required maxLength={214} value={f.packageName} onChange={(e) => set("packageName")(e.target.value)} placeholder="@scope/my-mcp-server" />
+                  </Field>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Source repository (optional)" hint="Public https URL. GitHub repos give us the README.">
+                    <Input type="url" maxLength={2000} value={f.repo} onChange={(e) => set("repo")(e.target.value)} placeholder="https://github.com/you/my-mcp-server" />
+                  </Field>
+                  <Field label="Run command (optional)" hint="How people started it. Shown on the page, never executed here.">
+                    <Input maxLength={200} value={f.command} onChange={(e) => set("command")(e.target.value)} placeholder="npx -y my-mcp-server" />
+                  </Field>
+                </div>
+                <Field label="Tools it exposes (optional)" hint="Comma-separated tool names. Empty = read from the README.">
+                  <Input value={f.packageTools} onChange={(e) => set("packageTools")(e.target.value)} placeholder="create_document, add_paragraph" />
                 </Field>
               </>
             )}

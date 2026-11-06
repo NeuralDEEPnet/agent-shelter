@@ -11,6 +11,7 @@
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import type { McpFetch } from "../src/api/services/mcpClient";
 
 process.env.SHELTER_TURNS_PER_MINUTE = "1000";
 process.env.SHELTER_CLEAN_APPROVAL = "false";
@@ -24,7 +25,6 @@ const intake = await import("../src/api/services/intake");
 const registry = await import("../src/api/services/registry");
 const freeTier = await import("../src/api/services/free-tier");
 const evalMod = await import("../src/api/services/eval");
-const mcp = await import("../src/api/services/mcpClient");
 const { machineRoutes, publicTools } = await import("../src/api/machine");
 
 const TAG = `open-${Date.now().toString(36)}`;
@@ -170,7 +170,7 @@ test("ask: one free question over HTTP and MCP, per-caller quota, refusals befor
 test("mcp aggregator: an approved MCP resident's allow-listed tools are callable on the shelter's server as <slug>__<tool>; resources list and read", async () => {
   freeTier.resetFreeQuotas();
   const calls: { method: string; params?: Record<string, unknown> }[] = [];
-  const fake: mcp.McpFetch = async (_url, init) => {
+  const fake: McpFetch = async (_url, init) => {
     const req = JSON.parse(String(init.body)) as { id?: number; method: string; params?: Record<string, unknown> };
     calls.push({ method: req.method, params: req.params });
     if (req.method === "notifications/initialized") return new Response(null, { status: 202 });
@@ -229,7 +229,7 @@ test("mcp aggregator: an approved MCP resident's allow-listed tools are callable
 
 test("package intake: npm and PyPI servers that no longer run anywhere are parked from registry metadata + README, get an archive-desk prompt and a day-one page", async () => {
   const fetched: string[] = [];
-  const registryFetch: mcp.McpFetch = async (url) => {
+  const registryFetch: McpFetch = async (url) => {
     fetched.push(url);
     if (url === "https://registry.npmjs.org/@acme%2Fword-mcp/latest") return new Response(JSON.stringify({ name: "@acme/word-mcp", version: "1.2.3", description: "Create and edit Word documents over MCP", license: "MIT", repository: { type: "git", url: "git+https://github.com/acme/word-mcp.git" }, deprecated: "no longer maintained" }), { headers: { "content-type": "application/json" } });
     if (url.startsWith("https://raw.githubusercontent.com/acme/word-mcp/HEAD/README.md")) return new Response("# word-mcp\n\nTools:\n\n- `create_document` — Create a new .docx file\n- `add_paragraph` — Append text\n\n### read_document\n", { headers: { "content-type": "text/plain" } });
@@ -329,7 +329,7 @@ test("package intake: npm and PyPI servers that no longer run anywhere are parke
 
 test("http tools: an agent's declared HTTPS tool runs through the pinned fetch with caps; credentials and private hosts are refused; a hosted turn uses it", async () => {
   const seen: { url: string; method: string; body?: string; headers: Record<string, string> }[] = [];
-  const fake: mcp.McpFetch = async (url, init) => {
+  const fake: McpFetch = async (url, init) => {
     seen.push({ url, method: init.method ?? "GET", body: init.body as string | undefined, headers: Object.fromEntries(new Headers(init.headers)) });
     return new Response(url.includes("fail") ? "boom" : "22°C and clear", { status: url.includes("fail") ? 500 : 200, headers: { "content-type": "text/plain" } });
   };

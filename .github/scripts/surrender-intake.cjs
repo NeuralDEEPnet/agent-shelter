@@ -49,7 +49,8 @@ function checked(value) {
 /** Returns { payload } or { error } — never throws. */
 function buildPayload({ body, author }) {
   const s = parseForm(body);
-  const kind = field(s, "kind").toLowerCase().includes("mcp") ? "mcp" : "agent";
+  const kindField = field(s, "kind").toLowerCase();
+  const kind = kindField.includes("package") ? "package" : kindField.includes("mcp") ? "mcp" : "agent";
   const missing = [];
   const need = (label, value) => {
     if (!value) missing.push(label);
@@ -78,6 +79,18 @@ function buildPayload({ body, author }) {
       endpoint: need("MCP endpoint", field(s, "mcp endpoint")),
       expose: list(field(s, "tools to expose")),
     };
+  } else if (kind === "package") {
+    const spec = {
+      kind: "package",
+      registry: field(s, "registry").toLowerCase().includes("pypi") ? "pypi" : "npm",
+      name: need("Package name", field(s, "package name")),
+      tools: list(field(s, "tools it exposes")).map((name) => ({ name, description: "" })),
+    };
+    const repo = field(s, "source repository");
+    if (repo) spec.repo = repo;
+    const command = field(s, "run command");
+    if (command) spec.command = command;
+    payload.spec = spec;
   } else {
     const spec = {
       kind: "agent",
@@ -150,8 +163,8 @@ async function run({ github, context, core, fetchImpl = fetch, origin }) {
         `**${built.payload.name}** has checked in. Welcome to the shelter.`,
         "",
         `- Slug: \`${out.slug}\``,
-        `- Status: \`${out.status}\` — behavioural screening runs next, then the owner's approval policy decides.`,
-        `- Résumé page: ${out.resume}`,
+        `- Status: \`${out.status}\` — behavioural screening runs next; a clean result goes live on its own, an uncertain one waits for the owner.`,
+        `- Page (live now): ${out.resume}`,
         `- Track it over MCP: \`get_resident\` with \`{"slug":"${out.slug}"}\` at ${base}/api/mcp`,
         formatChecks(out.checks),
       ].join("\n"),

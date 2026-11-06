@@ -75,8 +75,12 @@ export function Shell({ children, wide = false }: { children: ReactNode; wide?: 
               A <a href="https://neuraldeep.net" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">Neural Deep Network Ltd</a> production
             </span>
             <span>·</span>
-            <a href="/whitepaper.md" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground font-medium">
-              White Paper
+            <a href="https://github.com/NeuralDEEPnet/agent-shelter" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground font-medium">
+              Source (MIT)
+            </a>
+            <span>·</span>
+            <a href="/about.md" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">
+              about.md
             </a>
           </span>
         </div>

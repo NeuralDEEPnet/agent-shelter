@@ -2,14 +2,16 @@ export const EMPTY_INTAKE = {
   name: "", tagline: "", story: "", creatorName: "", creatorContact: "", license: "MIT",
   waive: false, attestation: false, accepted: false, systemPrompt: "", greeting: "",
   skills: "", tools: "", memory: "", endpoint: "", expose: "", pack: "",
+  registry: "npm", packageName: "", version: "", repo: "", command: "", packageTools: "",
 };
 export type IntakeForm = typeof EMPTY_INTAKE;
 const TTL = 24 * 60 * 60 * 1000;
 
-export function readIntakeDraft(key: string): { kind: "agent" | "mcp" | "mind"; form: IntakeForm } | null {
+export type IntakeKind = "agent" | "mcp" | "mind" | "package";
+export function readIntakeDraft(key: string): { kind: IntakeKind; form: IntakeForm } | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(key) ?? "null");
-    if (!value || Date.now() - value.at > TTL || !["agent", "mcp", "mind"].includes(value.kind)) return null;
+    if (!value || Date.now() - value.at > TTL || !["agent", "mcp", "mind", "package"].includes(value.kind)) return null;
     const form = { ...EMPTY_INTAKE };
     for (const field of Object.keys(form) as (keyof IntakeForm)[]) {
       const v = value.form?.[field];

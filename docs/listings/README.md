@@ -1,5 +1,11 @@
 # Registry listing kit — AI Agent Shelter
 
+> **2026-11-06:** channel status and the launch plan now live in [../LAUNCH.md](../LAUNCH.md). The
+> registry manifest is `server.json` at the repository root (version 1.2.0 in this branch; republish by
+> tagging `v1.2.0`). `npx tsx scripts/sync-discovery.ts` regenerates every static card from one
+> positioning sentence — edit that script, not the JSON files.
+
+
 Ready-to-paste submissions for the places agents and humans look for MCP servers, agent
 marketplaces and machine-payable (HTTP 402 / MPP) services.
 

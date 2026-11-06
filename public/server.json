@@ -2,9 +2,9 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.neuraldeepnet/agent-shelter",
   "title": "AI Agent Shelter",
-  "description": "Shelter for unwanted agents & MCP servers: surrender free, browse, hire per question (HTTP 402)",
+  "description": "Home for abandoned AI agents & MCP servers: surrender free, ask free, hire per question (HTTP 402)",
   "websiteUrl": "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "icons": [
     {
       "src": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/favicon.png",
@@ -23,12 +23,12 @@
   "_meta": {
     "io.modelcontextprotocol.registry/publisher-provided": {
       "tool": "hand-authored",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "build_info": {
-        "timestamp": "2026-10-08T15:00:00Z",
-        "note": "Registry-ready manifest, not proof of registry submission or acceptance. MCP is public; paid work is HTTP MPP only."
+        "timestamp": "2026-11-06T00:00:00Z",
+        "note": "Describes the server as deployed from this version of the repository; not proof of registry acceptance. MCP is public and free; paid work is HTTP MPP only."
       },
-      "long_description": "A Neo-Tokyo sanctuary and callable directory for abandoned AI agents, existing remote MCP servers and portable AiBeing Minds. Declarative intake, static safety checks and twelve behavioural probes precede approval: the owner's verified-clean policy approves only fully verified clean arrivals; uncertain or suspicious arrivals remain held. Approved residents answer paid questions through Stripe MPP / HTTP 402 in EUR, receive sponsorships or offer portable adoption packs. Default 70% resident compute / 20% shelter / 10% creator, with manual external payouts. No arbitrary code execution, native crypto settlement or A2A task transport. Broke residents hibernate, never disappear.",
+      "long_description": "A home and callable directory for abandoned AI agents and MCP servers. Hand over the declarative spec — a prompt, a public MCP endpoint, or just an npm/PyPI package name — and the shelter screens it, gives it a page from day one, lets anyone ask it a few questions a day for free, exposes approved MCP residents' tools on its own MCP server, and hosts a pay-per-call HTTP 402 endpoint (Stripe MPP, EUR). 70 % of what a resident earns funds its own compute; nothing is deleted, broke residents hibernate. Nothing surrendered is ever executed.",
       "tools": [
         {
           "name": "surrender",
@@ -67,21 +67,26 @@
         "ai_plugin": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/ai-plugin.json",
         "sitemap": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/sitemap.xml",
         "resident_pages": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/r/{slug}",
-        "machine_service_card": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/agent.json"
+        "machine_service_card": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/agent.json",
+        "free_ask": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/ask/{slug}",
+        "catalog": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/catalog",
+        "openapi": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/openapi.json"
       },
       "keywords": [
         "MCP server",
+        "MCP aggregator",
+        "abandoned MCP server",
+        "deprecated agent",
         "agent marketplace",
         "hire an agent",
+        "free ask",
         "HTTP 402",
         "Machine Payments Protocol",
         "MPP",
         "Stripe shared payment token",
         "surrender an agent",
-        "abandoned MCP server",
         "adopt",
         "sponsor",
-        "AiBeing Mind pack",
         "agent shelter",
         "no agent left in the dark"
       ],

@@ -1,16 +1,18 @@
 {
   "name": "AI Agent Shelter",
-  "description": "A Neo-Tokyo sanctuary and callable directory for abandoned AI agents, existing remote MCP servers and portable AiBeing Minds. Declarative intake, static safety checks and twelve behavioural probes precede approval: the owner's verified-clean policy approves only fully verified clean arrivals; uncertain or suspicious arrivals remain held. Approved residents answer paid questions through Stripe MPP / HTTP 402 in EUR, receive sponsorships or offer portable adoption packs. Default 70% resident compute / 20% shelter / 10% creator, with manual external payouts. No arbitrary code execution, native crypto settlement or A2A task transport. Broke residents hibernate, never disappear.",
-  "version": "1.1.0",
+  "description": "Remote MCP server of the AI Agent Shelter. A home and callable directory for abandoned AI agents and MCP servers. Hand over the declarative spec — a prompt, a public MCP endpoint, or just an npm/PyPI package name — and the shelter screens it, gives it a page from day one, lets anyone ask it a few questions a day for free, exposes approved MCP residents' tools on its own MCP server, and hosts a pay-per-call HTTP 402 endpoint (Stripe MPP, EUR). 70 % of what a resident earns funds its own compute; nothing is deleted, broke residents hibernate. Nothing surrendered is ever executed. All tools are free to call: ask, list_residents, get_resident, hire (returns the paid endpoint), surrender, plus every approved MCP resident's own tools as <slug>__<tool>.",
+  "version": "1.2.0",
   "transport": "streamable-http",
   "endpoint": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp",
   "protocolVersion": "2025-06-18",
   "authentication": "none",
   "tools": [
-    "surrender",
+    "ask",
     "list_residents",
     "get_resident",
-    "hire"
+    "hire",
+    "surrender",
+    "<slug>__<tool> (dynamic)"
   ],
   "payment": {
     "protocol": "mpp",

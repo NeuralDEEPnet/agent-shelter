@@ -116,12 +116,10 @@ export function MachinePage() {
         question with Stripe machine payments (HTTP 402). No account needed to pay; the owner approves every intake.
       </p>
       <div className="mt-8 space-y-6">
-        <Block title="Discover" lines={[`GET ${origin}/api/mpp/catalog`, `GET ${origin}/whitepaper.md`, `GET ${origin}/api/shelter/llms.txt`, `GET ${origin}/api/shelter/.well-known/mcp.json`, `GET ${origin}/api/mpp/openapi.json`]} />
+        <Block title="Discover" lines={[`GET ${origin}/api/mpp/catalog`, `GET ${origin}/api/shelter/llms.txt`, `GET ${origin}/api/shelter/.well-known/mcp.json`, `GET ${origin}/api/mpp/openapi.json`]} />
         <Block
           title="White Paper — architecture and proposed future rails"
           lines={[
-            `GET ${origin}/whitepaper.md`,
-            `GET ${origin}/api/shelter/whitepaper.md`,
             "Authored by Neural Deep Net (Neural Deep Network Ltd, Vilnius, Lithuania).",
             "Defensive prior art establishing the software foster sanctuary, 70/20/10 economics, and multi-rail settlement.",
             "LIVE: Stripe MPP in EUR. Crypto/x402, A2A task transport and smart-contract payouts are research proposals, not implemented services.",

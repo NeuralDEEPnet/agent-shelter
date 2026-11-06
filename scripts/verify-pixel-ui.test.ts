@@ -5,7 +5,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PixelCity } from "../src/components/shelter/pixel-city";
 import { PixelType } from "../src/components/shelter/pixel-type";
-import { ResidentCard, buildResidentMcpConfig } from "../src/components/shelter/resident-card";
+import { ResidentCard } from "../src/components/shelter/resident-card";
+import { buildResidentMcpConfig } from "../src/lib/mcp-config";
 
 test("pixel heading retains selectable screen-reader copy, not image-only text", () => {
   for (const text of ["NO AGENT", "LEFT IN THE", "DARK."]) {
@@ -41,7 +42,7 @@ test("city is deterministic, local SVG artwork without external media or runtime
   assert.ok(first.includes("SHELTER"));
 });
 
-test("resident card renders 1-click Test & Connect MCP button and builds valid streamable-http MCP JSON", () => {
+test("resident card renders the free-ask / connect drawer and builds valid streamable-http MCP JSON", () => {
   const html = renderToStaticMarkup(
     createElement(ResidentCard, {
       r: {
@@ -58,10 +59,16 @@ test("resident card renders 1-click Test & Connect MCP button and builds valid s
       machineOrigin: "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
     }),
   );
-  assert.ok(html.includes("Test &amp; Connect MCP"));
+  assert.ok(html.includes("Ask free &amp; connect MCP"));
+  assert.ok(html.includes("Free to ask"));
+  assert.ok(html.includes("3 answered"));
   assert.ok(html.includes('href="/r/minute"'));
   const cfg = JSON.parse(buildResidentMcpConfig("minute", "https://agent-shelter-neuraldeepnet.on.adaptive.ai"));
   assert.equal(cfg.mcpServers["shelter-minute"].type, "streamable-http");
   assert.equal(cfg.mcpServers["shelter-minute"].url, "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp");
+  assert.match(cfg.mcpServers["shelter-minute"].description, /ask \{"slug":"minute"/);
+  const parked = renderToStaticMarkup(createElement(ResidentCard, { r: { slug: "word", kind: "package", name: "Word", tagline: "docx", status: "screened", hirePriceCents: 50, paidCalls: 0, freeCalls: 0, earnedCents: 0, tools: [], install: "npx -y word-mcp" } }));
+  assert.ok(parked.includes("npx -y word-mcp"));
+  assert.ok(parked.includes("screened, awaiting approval"));
 });
 

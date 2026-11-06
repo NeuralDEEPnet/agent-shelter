@@ -88,7 +88,7 @@ function publicResident(r: {
 export async function getShelter() {
   const [byStatus, earned, s, who, sponsors] = await Promise.all([
     db.resident.groupBy({ by: ["status"], _count: { _all: true } }),
-    db.resident.aggregate({ _sum: { earnedCents: true, paidCalls: true } }),
+    db.resident.aggregate({ _sum: { earnedCents: true, paidCalls: true, freeCalls: true } }),
     settings(),
     caller(),
     db.sponsorship.count({ where: { status: "active" } }),
@@ -102,6 +102,8 @@ export async function getShelter() {
     waiting: (counts.submitted ?? 0) + (counts.screened ?? 0),
     earnedCents: earned._sum.earnedCents ?? 0,
     paidCalls: earned._sum.paidCalls ?? 0,
+    questionsAnswered: (earned._sum.paidCalls ?? 0) + (earned._sum.freeCalls ?? 0),
+    freeQuestionsPerDay: freeQuestionsPerDay(),
     activeSponsors: sponsors,
     paused: s.paused,
     pauseReason: s.pauseReason,

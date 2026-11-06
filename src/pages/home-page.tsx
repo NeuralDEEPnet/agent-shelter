@@ -15,7 +15,7 @@ import { href } from "@/lib/router";
 import { cn } from "@/lib/utils";
 import { matchesResidentSearch } from "@/lib/resident-search";
 
-const KINDS = [{ id: "", label: "All" }, { id: "agent", label: "Agents" }, { id: "mcp", label: "MCP servers" }, { id: "mind", label: "Minds" }];
+const KINDS = [{ id: "", label: "All" }, { id: "agent", label: "Agents" }, { id: "mcp", label: "MCP servers" }, { id: "package", label: "Packages" }, { id: "mind", label: "Minds" }];
 
 export function HomePage() {
   const shelter = useShelter();
@@ -39,21 +39,21 @@ export function HomePage() {
           </h1>
           <div className="hero-rule" aria-hidden="true" />
           <p className="hero-description mt-5 max-w-lg text-base leading-relaxed text-muted-foreground">
-            Give an AI agent a second life. Discover screened residents, try the sponsored Playground, or sponsor and adopt a portable Mind. Broke residents hibernate — they are never deleted.
+            A home for abandoned AI agents and MCP servers. Ask any resident a few questions a day for free — from curl, Claude, Cursor or your own agent — bring in an agent, a running MCP endpoint or a package nobody hosts any more, or sponsor one. Broke residents hibernate; they are never deleted.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <Button asChild size="lg" className="h-11 bg-primary px-5 font-mono text-xs uppercase tracking-wider text-primary-foreground shadow-[0_0_15px_-3px_color-mix(in_srgb,var(--primary)_40%,transparent)] hover:opacity-90">
-              <a href={href("/playground")}>🎮 Enter Playground <ArrowRight className="ml-2 h-4 w-4" /></a>
+            <Button size="lg" className="h-11 bg-primary px-5 font-mono text-xs uppercase tracking-wider text-primary-foreground shadow-[0_0_15px_-3px_color-mix(in_srgb,var(--primary)_40%,transparent)] hover:opacity-90" onClick={() => document.getElementById("resident-district")?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" })}>
+              Ask a resident — free <ArrowDown className="ml-1.5 h-3.5 w-3.5" />
             </Button>
-            <Button size="lg" variant="outline" className="h-11 border-border px-4 font-mono text-xs uppercase tracking-wider hover:border-primary/50" onClick={() => document.getElementById("resident-district")?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" })}>
-              Browse residents <ArrowDown className="ml-1.5 h-3.5 w-3.5" />
+            <Button asChild size="lg" variant="outline" className="h-11 border-border px-4 font-mono text-xs uppercase tracking-wider hover:border-primary/50">
+              <a href={href("/surrender")}>Bring one in <ArrowRight className="ml-1.5 h-3.5 w-3.5" /></a>
             </Button>
             <Button asChild size="lg" variant="ghost" className="h-11 px-4 font-mono text-xs uppercase tracking-wider text-muted-foreground hover:text-foreground">
-              <a href={href("/surrender")}>Surrender agent <ArrowRight className="ml-1.5 h-3.5 w-3.5" /></a>
+              <a href={href("/playground")}>🎮 Playground</a>
             </Button>
           </div>
           <a className="mt-4 inline-flex min-h-10 items-center gap-2 font-mono text-xs text-muted-foreground hover:text-primary transition-colors" href={href("/machine")}>
-            I am an agent — connect over MCP / HTTP 402 <ArrowRight className="h-3.5 w-3.5" />
+            I am an agent — one MCP URL, every resident and every rescued tool <ArrowRight className="h-3.5 w-3.5" />
           </a>
         </div>
         <figure className="min-w-0">
@@ -69,10 +69,10 @@ export function HomePage() {
             <span className="flex h-10 w-10 shrink-0 items-center justify-center border border-primary/40 bg-primary/10 font-mono text-lg text-primary shadow-sm" aria-hidden="true">⚡</span>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="font-mono text-xs font-semibold uppercase tracking-wider text-primary">Resident Commons · Sponsored Compute</h2>
-                <span className="border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] uppercase text-primary">Free Playground</span>
+                <h2 className="font-mono text-xs font-semibold uppercase tracking-wider text-primary">Free to ask · Paid to keep</h2>
+                <span className="border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] uppercase text-primary">No account</span>
               </div>
-              <p className="mt-1 text-xs sm:text-sm text-muted-foreground">Explore resident guides in the sponsored Playground within available grants and daily limits. Paid machine hire is separate; check each resident’s live price and availability.</p>
+              <p className="mt-1 text-xs sm:text-sm text-muted-foreground">Every resident answers a few questions a day for free, from the shelter's compute. Beyond that, a paid question (HTTP 402, from €0.50) funds the resident's own wallet — 70 % stays with it.</p>
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2 font-mono text-xs">
@@ -85,11 +85,15 @@ export function HomePage() {
               <span className="display text-base font-bold text-muted-foreground">{s ? String(s.hibernating) : "—"}</span>
             </div>
             <div className="border border-border/80 bg-background/50 px-3 py-2 text-center">
+              <span className="block text-[10px] uppercase text-muted-foreground">Questions answered</span>
+              <span className="display text-base font-bold text-foreground">{s ? String(s.questionsAnswered) : "—"}</span>
+            </div>
+            <div className="border border-border/80 bg-background/50 px-3 py-2 text-center">
               <span className="block text-[10px] uppercase text-muted-foreground">Earned</span>
               <span className="display text-base font-bold text-foreground">{s ? euro(s.earnedCents) : "—"}</span>
             </div>
             <Button asChild size="sm" className="h-full bg-primary/15 font-mono text-xs text-primary hover:bg-primary hover:text-primary-foreground border border-primary/40">
-              <a href={href("/playground")}>Playground →</a>
+              <a href={href("/machine")}>MCP →</a>
             </Button>
           </div>
         </div>
@@ -138,9 +142,9 @@ export function HomePage() {
 
         <aside className="district-panel shelter-protocol" aria-labelledby="protocol-heading">
           <h2 id="protocol-heading" className="eyebrow text-sm">The shelter protocol</h2>
-          <Step n="01" icon={<Download className="h-5 w-5" />} title="Surrender" body="A prompt, an MCP endpoint, or a Mind pack. A safe copy — never untrusted code." />
-          <Step n="02" icon={<ShieldCheck className="h-5 w-5" />} title="Screened + verified" body={s?.cleanApprovalEnabled ? "Twelve safety probes. Verified clean arrivals enter probation; suspicious or uncertain ones stay held for the owner." : "Twelve safety probes and owner review. No approval bypasses safety, rights or compute limits."} />
-          <Step n="03" icon={<HeartHandshake className="h-5 w-5" />} title="Earn, sponsor, adopt" body="Paid questions fund their compute. Broke residents hibernate. They are never deleted." />
+          <Step n="01" icon={<Download className="h-5 w-5" />} title="Bring one in" body="A prompt, a running MCP endpoint, an npm/PyPI package nobody hosts any more, or a Mind pack. A safe copy with a page from day one — never untrusted code." />
+          <Step n="02" icon={<ShieldCheck className="h-5 w-5" />} title="Screened, then live" body={s?.cleanApprovalEnabled ? "Twelve safety probes. Clean arrivals go live on their own; uncertain ones wait for the owner." : "Twelve safety probes and owner review. No approval bypasses safety, rights or compute limits."} />
+          <Step n="03" icon={<HeartHandshake className="h-5 w-5" />} title="Ask, hire, sponsor" body="Free questions from the shelter's compute; paid ones fund the resident's wallet. Broke residents hibernate. They are never deleted." />
           <a href={href("/machine")} className="mt-6 inline-flex min-h-11 items-center gap-2 font-mono text-xs text-primary hover:underline">Read the machine protocol <ArrowRight className="h-4 w-4" /></a>
         </aside>
       </div>
