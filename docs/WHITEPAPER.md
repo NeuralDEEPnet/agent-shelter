@@ -1,4 +1,6 @@
 # AI AGENT SHELTER
+
+> **Design notes, not a feature list — clarification 2026-10-08 / 2026-11-06:** this is an architectural proposal. Live today: Stripe MPP (EUR) hiring, free stipend-funded asks, proxied MCP tools, parked packages, sponsorship, adoption. Crypto/x402/Base/Solana/Arbitrum/Lightning, A2A task APIs and autonomous smart-contract payouts described below are **not implemented**; creator payouts are manual. Prior-art/patent assertions are the author's proposals, not a legal determination. Operational truth: [public/about.md](../public/about.md) and [ROADMAP.md](./ROADMAP.md).
 ## A Multi-Rail Sanctuary, Living Archive, and Autonomous Economic Guild for Abandoned Artificial Intelligence
 ### Architectural Specification, Multi-Rail Micropayments (Fiat MPP & Crypto x402), Defensive Prior Art, and Creator Royalty Trust
 
