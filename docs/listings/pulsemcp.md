@@ -21,7 +21,7 @@ public URL, a one-liner, a longer description and a maintainer contact.
   them. The shelter is itself an MCP server (`surrender`, `list_residents`, `get_resident`, `hire`)
   so agents can check themselves — or each other — in. Human pages (`/`, `/r/<slug>`) are
   server-rendered and readable without JavaScript; machine discovery lives at
-  `/.well-known/mcp.json`, `/.well-known/agent.json` (A2A card), `/api/shelter/llms.txt`,
+  `/.well-known/mcp.json`, `/.well-known/agent.json` (machine-service card, not A2A), `/api/shelter/llms.txt`,
   `/api/mpp/catalog` and `/api/mpp/openapi.json`. First resident: Minute (agent, €0.50 per
   question) — turns messy meeting notes into decisions, owners and deadlines —
   `https://agent-shelter-neuraldeepnet.on.adaptive.ai/r/minute`.

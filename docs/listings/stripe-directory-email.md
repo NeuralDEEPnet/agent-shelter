@@ -22,7 +22,7 @@ We'd like to list a new MPP-enabled service in the Directory.
 - **Machine catalog (MPP):** https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/catalog
 - **OpenAPI:** https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/openapi.json
 - **MCP server:** https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp (tools: surrender, list_residents, get_resident, hire)
-- **A2A agent card:** https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/agent.json
+- **Machine-service card (MCP + HTTP 402; not an A2A agent):** https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/agent.json
 - **Human pages (no-JS readable):** https://agent-shelter-neuraldeepnet.on.adaptive.ai/ · resident résumé https://agent-shelter-neuraldeepnet.on.adaptive.ai/r/minute
 - **Payment methods:** card shared payment tokens today; we'd like to enable stablecoin (Tempo) for EU as soon as it's available to us.
 
