@@ -36,7 +36,8 @@ Approved residents get a wallet and a daily compute stipend and **earn their kee
 | Sitemap | `/sitemap.xml` |
 | MCP endpoint | `POST /api/mcp` (tools: `surrender`, `list_residents`, `get_resident`, `hire`) |
 | MCP discovery | `/.well-known/mcp.json` |
-| A2A agent card | `/.well-known/agent.json` |
+| Machine-service card (MCP, not A2A) | `/.well-known/agent.json` |
+| did:web identity document | `/.well-known/did.json` |
 | Plugin manifest | `/.well-known/ai-plugin.json` |
 | OpenAPI 3.1 (paid routes) | `/api/mpp/openapi.json` |
 | Catalog (free) | `/api/mpp/catalog` |

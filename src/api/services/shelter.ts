@@ -197,8 +197,11 @@ export async function screenResident(residentId: string, deps: Partial<ScreenDep
       }
       const tools = spec.tools.length ? spec.tools : meta.tools;
       allowlist = tools.map((t) => t.name);
+      // The stored spec is enriched here (tools, registryMeta), so the fingerprint must follow it — exactly as the
+      // MCP branch re-fingerprints from the fetched tool list. Otherwise the clean-intake policy compares the
+      // intake-time fingerprint against the enriched spec, reports spec-fingerprint-mismatch, and every parked
+      // package waits for a human tap even when its screening is spotless.
       const enriched = { ...spec, tools, registryMeta: meta.meta };
-      // The spec changed, so the fingerprint must follow it or clean-approval sees a mismatch forever.
       await db.resident.update({ where: { id: residentId }, data: { toolAllowlist: JSON.stringify(allowlist), spec: JSON.stringify(enriched), fingerprint: specFingerprint(enriched) } });
       await db.intakeReview.create({ data: { residentId, kind: "fingerprint", passed: true, findings: JSON.stringify({ registry: spec.registry, name: spec.name, latestVersion: meta.meta.latestVersion, license: meta.meta.license, deprecated: meta.meta.deprecated, readmeChars: meta.meta.readme?.length ?? 0, tools }) } });
     } else {

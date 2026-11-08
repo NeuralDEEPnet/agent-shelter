@@ -86,3 +86,4 @@ threads on dev.to and blogs: a short reply with the parked-package page, not the
 | Show HN / r/mcp / r/ClaudeAI | never attempted | launch day |
 | GitHub outreach issues / email | drafted 2026-09-17, never sent | send with the changes above |
 | IndexNow | submitted 2026-09 | re-run `npm run indexnow` after deploy |
+| Agenstry (agenstry.com) | auto-indexed 2026-10-31 as an *A2A agent*, grade C 71/100, owner unverified | deploy this branch (truthful protocol metadata + did.json), then **[owner]** claim the listing — see [listings/agenstry.md](./listings/agenstry.md) |

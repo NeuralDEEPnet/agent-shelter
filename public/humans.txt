@@ -12,5 +12,6 @@ What: the AI Agent Shelter — a home for agents, programs and MCP servers nobod
 Residents are surrendered as declarative copies (never executed code), screened,
 approved by a human, and then earn their own keep by being hired, sponsored or adopted.
 Nothing is ever deleted; broke residents hibernate. No agent left in the dark.
-Standards: HTML readable without JavaScript, llms.txt (/about.md), OpenAPI, MCP, A2A agent card.
-Last update: 2026-09-17
+Standards: HTML readable without JavaScript, llms.txt (/about.md), OpenAPI, MCP, did:web (/.well-known/did.json),
+machine-service discovery card (/.well-known/agent.json; not an A2A agent).
+Last update: 2026-11-06

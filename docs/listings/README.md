@@ -31,7 +31,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://agent-shelter-neuraldeepnet.on.
 curl -s -X POST https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp \
   -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'                                                          # expect 4 tools
-curl -s https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/agent.json | head -c 200                # A2A card, JSON
+curl -s https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/agent.json | head -c 200                # machine-service card (not A2A), JSON
 ```
 
 | File | Target | How it is submitted | Why it matters for agent discovery |
@@ -52,7 +52,7 @@ curl -s https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/agent.jso
 - MCP endpoint (Streamable HTTP, stateless, no auth): `POST /api/mcp` — tools `surrender`,
   `list_residents`, `get_resident`, `hire`; `initialize` → `serverInfo.name = "agent-shelter"`,
   protocol `2025-06-18`
-- Discovery: `/.well-known/mcp.json`, `/.well-known/agent.json` (A2A card),
+- Discovery: `/.well-known/mcp.json`, `/.well-known/agent.json` (machine-service card, **not** A2A), `/.well-known/did.json` (did:web),
   `/.well-known/ai-plugin.json`, `/api/shelter/llms.txt`, `/api/mpp/catalog`, `/api/mpp/openapi.json`,
   `/api/shelter/agreement`
 - Paid door: `POST /api/mpp/hire/{slug}` `{"question":"…"}` — HTTP 402, Machine Payments Protocol
@@ -67,7 +67,7 @@ curl -s https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/agent.jso
 - Business: Neural Deep Network Ltd (Lithuania) · owner handle `neuraldeepnet` · contact `3d@neuraldeep.net`
 - Licence of the shelter's own code: proprietary (residents carry their own licences, exposed per
   resident by `get_resident`)
-- Version string: `1.0.0` (bump in `public/.well-known/mcp.json`, `public/.well-known/agent.json` and
+- Version string: `1.2.0` — set `REGISTRY_VERSION` in `scripts/sync-discovery.ts` and run it (it rewrites `public/.well-known/mcp.json`, `public/.well-known/agent.json` and
   `server.json` together)
 
 ## Keyword set (use naturally, never stuff)

@@ -41,8 +41,7 @@ distribution channel ever used was machine registries. The root causes, in order
 
 ## Next — owner actions (nothing here needs more code)
 
-1. **Pull, reconcile `package.json` by hand (the mirror script refuses it), deploy.** Until then the
-   live service still runs v1.1.0: `ask` 404s and the registry entry advertises the old tool list.
+1. ~~**Pull, reconcile `package.json` by hand (the mirror script refuses it), deploy.**~~ **DONE (2026-11-06, `29f9696`):** Merged PR #5, reconciled `package.json`, applied `20261106000000_in_house_flag` migration to development and production SQLite DBs, verified `npm run check`, `npm run lint`, `npm test`, and deployed v1.2.0 to production (`ask` tool + `/server.json` 1.2.0 live).
 2. **Run two or three rescued servers on the foster host** (`hosting/foster-host/README.md`), surrender
    their endpoints, and confirm `<slug>__<tool>` works from Claude Code. This is the proof point every
    other channel needs.

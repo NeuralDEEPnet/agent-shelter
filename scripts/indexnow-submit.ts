@@ -36,7 +36,7 @@ async function sitemapUrls(): Promise<string[]> {
 async function main() {
   const { key, keyLocation } = findKey();
   const fromSitemap = await sitemapUrls();
-  const extras = ["/", "/about.md", "/whitepaper.md", "/robots.txt", "/.well-known/mcp.json", "/.well-known/agent.json", "/.well-known/ai-plugin.json", "/api/mpp/catalog", "/api/mpp/openapi.json", "/api/shelter/llms.txt"].map((p) => `${ORIGIN}${p}`);
+  const extras = ["/", "/about.md", "/whitepaper.md", "/robots.txt", "/.well-known/mcp.json", "/.well-known/agent.json", "/.well-known/did.json", "/.well-known/ai-plugin.json", "/api/mpp/catalog", "/api/mpp/openapi.json", "/api/shelter/llms.txt"].map((p) => `${ORIGIN}${p}`);
   // IndexNow only accepts URLs on the key's host; hash URLs are not real pages.
   const urlList = [...new Set([...extras, ...fromSitemap])].filter((u) => new URL(u).host === HOST && !u.includes("#"));
   const skipped = fromSitemap.filter((u) => !urlList.includes(u));

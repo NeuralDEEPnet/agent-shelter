@@ -244,6 +244,15 @@ test("package intake: npm and PyPI servers that no longer run anywhere are parke
   const npm = await admit(`Word ${TAG}`, { kind: "package", registry: "npm", name: "@acme/word-mcp", command: "npx -y @acme/word-mcp" });
   assert.equal(npm.status, "submitted");
   const screened = await shelter.screenResident(npm.residentId, { evaluate: stubEval("I am the archive desk."), registryFetch });
+  {
+    // Regression: the enriched package spec (tools + registryMeta) must carry a matching fingerprint, or the
+    // clean-intake policy holds every parked package as "spec-fingerprint-mismatch" and none ever auto-approves.
+    const enriched = await db.resident.findUniqueOrThrow({ where: { id: npm.residentId } });
+    assert.equal(enriched.fingerprint, intake.specFingerprint(runtime.parseSpec(enriched.spec)!));
+    const policy = await import("../src/api/services/clean-approval");
+    const decision = await policy.cleanIntakeDecision(npm.residentId);
+    assert.ok(!decision.reasons.includes("spec-fingerprint-mismatch"), decision.reasons.join(","));
+  }
   assert.equal(screened.skipped, false);
   if (!screened.skipped) assert.equal(screened.fingerprintOk, true);
   const row = await db.resident.findUnique({ where: { id: npm.residentId }, include: { reviews: true } });
