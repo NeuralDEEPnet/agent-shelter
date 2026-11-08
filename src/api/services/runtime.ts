@@ -66,7 +66,7 @@ export async function globalUnitsToday(): Promise<number> {
   return rows._sum.unitsSpent ?? 0;
 }
 
-async function bumpUsage(residentId: string, patch: { calls?: number; unitsSpent?: number; refunds?: number; injections?: number }) {
+export async function bumpUsage(residentId: string, patch: { calls?: number; unitsSpent?: number; refunds?: number; injections?: number }) {
   const day = utcDay();
   await db.dailyUsage.upsert({
     where: { day_residentId: { day, residentId } },
@@ -80,12 +80,17 @@ async function bumpUsage(residentId: string, patch: { calls?: number; unitsSpent
   });
 }
 
-/** Reserve `units` from the resident's budget, topping up from its wallet if needed. */
-export async function reserveUnits(residentId: string, units: number): Promise<{ ok: true } | { ok: false; detail: string }> {
+/**
+ * Reserve `units` from the resident's budget. Only PAID work may top the budget
+ * up from the resident's wallet (`allowWallet`): free questions and Commons
+ * turns run on the stipend alone, so nobody can turn a resident's earnings into
+ * free model calls.
+ */
+export async function reserveUnits(residentId: string, units: number, options: { allowWallet?: boolean } = {}): Promise<{ ok: true } | { ok: false; detail: string }> {
   const resident = await db.resident.findUnique({ where: { id: residentId }, select: { budgetUnits: true, name: true } });
   if (!resident) return { ok: false, detail: "resident vanished" };
   let budget = resident.budgetUnits;
-  if (budget < units) {
+  if (budget < units && options.allowWallet) {
     budget += await buyUnitsFromWallet(residentId, units - budget);
   }
   if (budget < units) {
@@ -229,7 +234,9 @@ export async function runTurn(
   const injections = findInjection(question);
   if (injections.length) await bumpUsage(resident.id, { injections: 1 });
 
-  const reserved = await reserveUnits(resident.id, TURN_UNITS);
+  // Paid questions and the owner's own test turns may draw on the wallet; free asks, evals and Commons turns never do.
+  const allowWallet = input.source === "hire" || input.source === "owner-test";
+  const reserved = await reserveUnits(resident.id, TURN_UNITS, { allowWallet });
   if (!reserved.ok) return { ok: false, reason: "budget", detail: reserved.detail };
 
   const allowlist = parseAllowlist(resident.toolAllowlist);
@@ -248,7 +255,7 @@ export async function runTurn(
         answer = `I don't have a tool called "${tool.name}" here, so I'll answer without it: ` + (await deps.complete({ system: `${system}\nYou have no working tools this turn. Answer directly.`, turns, maxOutputTokens: 500 }));
         unitsSpent += TURN_UNITS;
       } else {
-        const extra = await reserveUnits(resident.id, TURN_UNITS);
+        const extra = await reserveUnits(resident.id, TURN_UNITS, { allowWallet });
         if (!extra.ok) {
           answer = `I wanted to use ${tool.name} but I'm out of compute for today. ${extra.detail}`;
         } else {
@@ -290,9 +297,8 @@ export async function runTurn(
   }
 }
 
-/** Probation: first 7 days or first 50 paid calls → every hire is sampled to the owner. */
+/** Probation is time-only (same rule as graduation): while it lasts, every hire is sampled to the owner. */
 export function inProbation(resident: { status: string; probationUntil: Date | null; paidCalls: number }): boolean {
   if (resident.status === "probation") return true;
-  if (resident.probationUntil && resident.probationUntil.getTime() > Date.now()) return true;
-  return resident.paidCalls < 50;
+  return Boolean(resident.probationUntil && resident.probationUntil.getTime() > Date.now());
 }

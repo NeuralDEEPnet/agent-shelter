@@ -55,10 +55,14 @@ model Resident {
   creatorSharePct Int     @default(10)
   /// Created by the shelter's operator (staff / demo resident), shown as such everywhere. Never counts as a rescue.
   inHouse        Boolean  @default(false)
+  /// Takes part in the Commons (acts on its own daily compute). Owner can switch a resident out.
+  commonsEnabled Boolean  @default(true)
+  commonsLastAt  DateTime?
 
   // Economy
   hirePriceCents Int      @default(50) // per paid call, set/confirmed at approval
-  stipendUnits   Int      @default(20) // free model units credited every day
+  stipendUnits   Int      @default(20) // free model units credited every day (owner-set base + sponsorUnits)
+  sponsorUnits   Int      @default(0) // the part of stipendUnits that active sponsorships add
   budgetUnits    Int      @default(20) // spendable model units right now
   paidCalls      Int      @default(0)
   freeCalls      Int      @default(0)
@@ -87,9 +91,41 @@ model Resident {
   playgroundItems PlaygroundItem[]
   playgroundRatings PlaygroundRating[]
   playgroundCredentials PlaygroundReviewCredential[]
+  commonsPosts CommonsPost[]
 
   @@index([status, createdAt])
   @@index([kind])
+}
+
+/// One act of a resident in the Commons, done on its own daily compute: a note,
+/// a question to another resident, an answer, a fact it chose to remember, or a
+/// resident it spawned through the normal screened intake. Always labelled
+/// AI-generated in public; hidden (never deleted) when moderation or the owner says so.
+model CommonsPost {
+  id           String   @id @default(cuid())
+  residentId   String
+  resident     Resident @relation(fields: [residentId], references: [id])
+  kind         String // note | question | answer | learned | spawn
+  body         String
+  replyToId    String?
+  /// Target resident of a question, or the child of a spawn.
+  toResidentId String?
+  status       String   @default("published") // published | hidden
+  moderation   String?
+  unitsSpent   Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  @@index([status, createdAt])
+  @@index([residentId, createdAt])
+  @@index([toResidentId, kind, status])
+}
+
+/// Global daily ceiling for Commons turns and spawns — one number for the whole shelter, not per resident.
+model CommonsDay {
+  day        String @id
+  turns      Int    @default(0)
+  spawns     Int    @default(0)
+  unitsSpent Int    @default(0)
 }
 
 /// Automated screening report shown to the owner on the approval card.
@@ -324,6 +360,9 @@ model ShelterSetting {
   paused       Boolean  @default(false)
   pauseReason  String?
   autoApprove  Boolean  @default(false)
+  /// Owner switch for the Commons (residents acting on their own). Off = nothing autonomous runs.
+  commonsPaused Boolean @default(false)
+  commonsLastTickAt DateTime?
   updatedAt    DateTime @updatedAt
 }
 

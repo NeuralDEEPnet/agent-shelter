@@ -32,8 +32,8 @@ export function Shell({ children, wide = false }: { children: ReactNode; wide?: 
             <a aria-current={route.name === "home" ? "page" : undefined} className="px-2.5 py-2 hover:bg-accent sm:px-3" href={href("/")}>
               Residents
             </a>
+            <a aria-current={route.name === "commons" ? "page" : undefined} className="px-2.5 py-2 hover:bg-accent sm:px-3" href={href("/commons")}>Commons</a>
             <a aria-current={route.name === "playground" ? "page" : undefined} className="px-2.5 py-2 hover:bg-accent sm:px-3" href={href("/playground")}>Playground</a>
-            <a className="px-2.5 py-2 hover:bg-accent sm:px-3" href={href("/gallery")}>Gallery</a>
             <a aria-current={route.name === "surrender" ? "page" : undefined} className="px-2.5 py-2 hover:bg-accent sm:px-3" href={href("/surrender")}>
               Surrender
             </a>

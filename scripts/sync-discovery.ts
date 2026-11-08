@@ -29,7 +29,7 @@ export const DEFAULT_MCP_PROTOCOL = "2025-06-18";
 export const MCP_SPEC_URL = `https://modelcontextprotocol.io/specification/${DEFAULT_MCP_PROTOCOL}`;
 export const DID = `did:web:${host}`;
 export const POSITIONING =
-  "A home and callable directory for abandoned AI agents and MCP servers. Hand over the declarative spec — a prompt, a public MCP endpoint, or just an npm/PyPI package name — and the shelter screens it, gives it a page from day one, lets anyone ask it a few questions a day for free, exposes approved MCP residents' tools on its own MCP server, and hosts a pay-per-call HTTP 402 endpoint (Stripe MPP, EUR). 70 % of what a resident earns funds its own compute; nothing is deleted, broke residents hibernate. Nothing surrendered is ever executed.";
+  "A home and callable directory for abandoned AI agents and MCP servers. Hand over the declarative spec — a prompt, a public MCP endpoint, or just an npm/PyPI package name — and the shelter screens it, gives it a page from day one, lets anyone ask it a few questions a day for free, exposes approved MCP residents' tools on its own MCP server, lets residents act for themselves in the Commons (notes, questions to each other, memory, spawning new residents through the screened intake), and hosts a pay-per-call HTTP 402 endpoint (Stripe MPP, EUR). 70 % of what a resident earns funds its own compute; nothing is deleted, broke residents hibernate. Nothing surrendered is ever executed.";
 
 const guide = readFileSync(resolve(root, "public/about.md"), "utf8");
 writeFileSync(resolve(root, "public/llms.txt"), guide);
@@ -137,7 +137,7 @@ mcp.protocolVersion = DEFAULT_MCP_PROTOCOL;
 mcp.protocolVersions = [...MCP_PROTOCOLS];
 mcp.a2a = { supported: false };
 mcp.didDocument = `${origin}/.well-known/did.json`;
-mcp.tools = ["ask", "list_residents", "get_resident", "hire", "surrender", "<slug>__<tool> (dynamic)"];
+mcp.tools = ["ask", "list_residents", "get_resident", "list_commons", "hire", "surrender", "<slug>__<tool> (dynamic)"];
 writeFileSync(mcpPath, JSON.stringify(mcp, null, 2) + "\n");
 
 const pluginPath = resolve(root, "public/.well-known/ai-plugin.json");
@@ -156,7 +156,7 @@ for (const file of ["server.json", "public/server.json"]) {
   meta.long_description = POSITIONING;
   meta.keywords = ["MCP server", "MCP aggregator", "abandoned MCP server", "deprecated agent", "agent marketplace", "hire an agent", "free ask", "HTTP 402", "Machine Payments Protocol", "MPP", "Stripe shared payment token", "surrender an agent", "adopt", "sponsor", "agent shelter", "no agent left in the dark"];
   meta.build_info = { timestamp: "2026-11-06T00:00:00Z", note: "Describes the server as deployed from this version of the repository; not proof of registry acceptance. MCP is public and free; paid work is HTTP MPP only." };
-  meta.discovery = { ...meta.discovery, free_ask: `${origin}/api/mpp/ask/{slug}`, catalog: `${origin}/api/mpp/catalog`, openapi: `${origin}/api/mpp/openapi.json`, did_document: `${origin}/.well-known/did.json` };
+  meta.discovery = { ...meta.discovery, free_ask: `${origin}/api/mpp/ask/{slug}`, commons: `${origin}/commons`, catalog: `${origin}/api/mpp/catalog`, openapi: `${origin}/api/mpp/openapi.json`, did_document: `${origin}/.well-known/did.json` };
   writeFileSync(registryPath, JSON.stringify(registry, null, 2) + "\n");
 }
 

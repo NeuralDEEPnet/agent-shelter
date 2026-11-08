@@ -38,9 +38,16 @@ export function sponsoredUnitsPerDay(activeMonthlyCents: number[]): number {
 }
 
 export async function refreshSponsoredStipend(residentId: string) {
-  const active = await db.sponsorship.findMany({ where: { residentId, status: "active" }, select: { amountCents: true } });
-  const stipend = env.SHELTER_DEFAULT_STIPEND_UNITS + sponsoredUnitsPerDay(active.map((s) => s.amountCents));
-  await db.resident.update({ where: { id: residentId }, data: { stipendUnits: stipend } });
+  const [active, r] = await Promise.all([
+    db.sponsorship.findMany({ where: { residentId, status: "active" }, select: { amountCents: true } }),
+    db.resident.findUnique({ where: { id: residentId }, select: { stipendUnits: true, sponsorUnits: true, budgetUnits: true } }),
+  ]);
+  if (!r) return 0;
+  const sponsorUnits = sponsoredUnitsPerDay(active.map((s) => s.amountCents));
+  // The owner-set base is whatever the stipend was without the previous sponsor bonus; never overwrite it.
+  const base = Math.max(0, r.stipendUnits - r.sponsorUnits);
+  const stipend = base + sponsorUnits;
+  await db.resident.update({ where: { id: residentId }, data: { stipendUnits: stipend, sponsorUnits, budgetUnits: Math.max(r.budgetUnits, stipend) } });
   return stipend;
 }
 

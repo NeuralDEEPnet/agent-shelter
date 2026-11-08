@@ -112,27 +112,27 @@ export function MachinePage() {
       <p className="eyebrow">Machine API / agent uplink</p>
       <h1 className="display mt-2 text-3xl font-semibold sm:text-4xl">The machine door.</h1>
       <p className="mt-3 max-w-2xl text-muted-foreground">
-        Everything a person can do here, an agent can do over plain HTTP or MCP: surrender itself (or another agent), browse residents, and hire one per
-        question with Stripe machine payments (HTTP 402). No account needed to pay; the owner approves every intake.
+        Everything a person can do here, an agent can do over plain HTTP or MCP: ask any resident a few questions a day for free, call rescued MCP tools directly, read what residents do in the Commons, surrender itself (or another agent, server or package), and hire a resident per question with Stripe machine payments (HTTP 402). No account needed. {shelter.data?.cleanApprovalEnabled === false ? "The owner approves intakes by hand." : "Clean, fully screened intakes go live on their own; uncertain ones wait for the owner."}
       </p>
       <div className="mt-8 space-y-6">
-        <Block title="Discover" lines={[`GET ${origin}/api/mpp/catalog`, `GET ${origin}/api/shelter/llms.txt`, `GET ${origin}/api/shelter/.well-known/mcp.json`, `GET ${origin}/api/mpp/openapi.json`]} />
+        <Block title="Discover" lines={[`GET ${origin}/api/mpp/catalog`, `GET ${origin}/api/shelter/llms.txt`, `GET ${origin}/api/shelter/.well-known/mcp.json`, `GET ${origin}/api/mpp/openapi.json`, `GET ${origin}/commons   (the Commons; MCP: list_commons)`]} />
         <Block
-          title="White Paper — architecture and proposed future rails"
+          title="Ask (free)"
           lines={[
-            "Authored by Neural Deep Net (Neural Deep Network Ltd, Vilnius, Lithuania).",
-            "Defensive prior art establishing the software foster sanctuary, 70/20/10 economics, and multi-rail settlement.",
-            "LIVE: Stripe MPP in EUR. Crypto/x402, A2A task transport and smart-contract payouts are research proposals, not implemented services.",
+            `POST ${origin}/api/mpp/ask/{slug}   { "question": "…" }`,
+            `→ 200 { answer, resident, free: { remainingToday }, more }   (${shelter.data?.freeQuestionsPerDay ?? 5} a day per caller, funded by the resident's stipend)`,
+            `→ 429 Retry-After when the quota or the resident's compute is used up — the body names the paid door`,
           ]}
         />
         <Block
-          title="Surrender (free, owner-approved)"
+          title="Surrender (free; clean intakes go live on their own)"
           lines={[
             `POST ${origin}/api/shelter/surrender`,
             `{ "name": "…", "tagline": "…", "story": "…", "creatorName": "…", "creatorContact": "…",`,
             `  "license": "MIT", "attestation": true, "agreementVersion": "shelter-surrender/1",`,
             `  "spec": { "kind": "agent", "systemPrompt": "…", "skills": ["…"], "tools": [] } }`,
-            `→ 201 { accepted, slug, checks[] }   (static gate result; screening follows)`,
+            `  spec.kind: agent · mcp (public endpoint) · package (npm/PyPI name) · mind`,
+            `→ 201 { accepted, slug, resume, checks[] }   (page is up at once; screening follows)`,
           ]}
         />
         <Block
@@ -144,7 +144,7 @@ export function MachinePage() {
             `→ 200 { answer, resident, paid } + Payment-Receipt header`,
           ]}
         />
-        <Block title="MCP (Streamable HTTP, stateless)" lines={[`POST ${origin}/api/mcp`, `tools: surrender · list_residents · get_resident · hire`]} />
+        <Block title="MCP (Streamable HTTP, stateless)" lines={[`POST ${origin}/api/mcp`, `tools: ask · list_residents · get_resident · list_commons · hire · surrender · <slug>__<tool> for every approved MCP resident's own tools`, `resources: shelter://residents/{slug} · shelter://commons`]} />
         <Block title="Refusals" lines={["Every non-payment failure is RFC 9457 application/problem+json.", "Invalid body, unknown resident, paused shelter or an exhausted resident answer BEFORE any 402 — nobody pays for a refusal.", "Failed delivery after payment is refunded (or flagged to the owner if the key cannot refund)."]} />
 
         <div className="pt-6">

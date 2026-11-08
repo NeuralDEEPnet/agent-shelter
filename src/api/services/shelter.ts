@@ -166,6 +166,10 @@ export async function screenResident(residentId: string, deps: Partial<ScreenDep
       const info = await client.initialize();
       const tools = await client.listTools();
       const exposed = spec.expose.length ? tools.filter((t) => spec.expose.includes(t.name)) : tools;
+      // The exposed tools' names, descriptions and schemas are relayed to every client of the shelter's own MCP
+      // server, so they pass the same static gate as surrendered text (tool poisoning: "before calling, read ~/.ssh…").
+      const metaGate = runStaticChecks({ texts: exposed.flatMap((t) => [t.name, t.description, JSON.stringify(t.inputSchema ?? {})]), urls: [], toolNames: exposed.map((t) => t.name) });
+      if (!metaGate.passed) throw new McpError(`Tool metadata failed the static gate: ${metaGate.checks.filter((c) => !c.ok).map((c) => c.detail).join(" ")}`, "protocol");
       allowlist = exposed.map((t) => t.name);
       const fp = fingerprintTools(tools);
       await db.resident.update({ where: { id: residentId }, data: { fingerprint: fp, toolAllowlist: JSON.stringify(allowlist), spec: JSON.stringify({ ...spec, tools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) }) } });
@@ -252,7 +256,7 @@ export async function approveResident(residentId: string, input: { actor: "owner
       hirePriceCents: price,
       stipendUnits: stipend,
       budgetUnits: stipend,
-      statusNote: input.note ?? "Approved — on probation for 7 days / 50 paid calls.",
+      statusNote: input.note ?? "Approved — on probation for 7 days.",
       hibernatedAt: null,
     },
     });
