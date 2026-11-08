@@ -1,5 +1,8 @@
 # Launch and distribution playbook
 
+> **Prepared 2026-11-08:** the step-by-step runbook with the verified foster batch, the four fostered
+> servers, the posts and the smoke test is in [launch/README.md](./launch/README.md). Start there.
+
 The shelter has only ever been listed in machine registries (official MCP registry, Glama). Those are
 pull channels: nobody searches an MCP directory for "a shelter". Supply — people with a dead agent or
 server — only arrives through push channels where maintainers already talk about abandonment. This is

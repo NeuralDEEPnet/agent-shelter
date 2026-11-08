@@ -18,9 +18,11 @@ Pure-compute, permissively licensed, no secrets needed. Good first candidates fr
 
 | Server | Licence | Transport | Notes |
 |---|---|---|---|
-| GongRzhe/Office-Word-MCP-Server | MIT | native `MCP_TRANSPORT=streamable-http` | archived; creates/edits .docx |
-| GongRzhe/Office-PowerPoint-MCP-Server | MIT | native `--transport http` | archived; builds .pptx |
-| any stdio server | MIT/Apache | `supergateway --stdio "<cmd>" --outputTransport streamableHttp` | one container each |
+| GongRzhe/Office-Word-MCP-Server | MIT | stdio, bridged by supergateway | archived; PyPI `office-word-mcp-server` 1.1.11; creates/edits .docx |
+| GongRzhe/Office-PowerPoint-MCP-Server | MIT | native `--transport http --port 8000` | archived; PyPI `office-powerpoint-mcp-server` 2.0.7; builds .pptx |
+| negokaz/excel-mcp-server | MIT | stdio, bridged by supergateway | npm `@negokaz/excel-mcp-server` 0.12.0; reads/writes .xlsx |
+| cjo4m06/mcp-shrimp-task-manager | MIT | stdio, bridged by supergateway | npm `mcp-shrimp-task-manager` 1.0.21; task planning memory for agents |
+| any other stdio server | MIT/Apache | `supergateway --stdio "<cmd>" --outputTransport streamableHttp` | copy one of the bridged services |
 
 Skip anything that needs an API key, reads the filesystem outside its working directory, or shells out.
 
@@ -34,8 +36,10 @@ curl -s -X POST https://$DOMAIN/word/mcp -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | head -c 400   # expect a tools array
 ```
 
-Each service in `docker-compose.yml` is reachable at `https://$DOMAIN/<name>/mcp`. Caddy only
-forwards `POST`/`OPTIONS` to the MCP paths; nothing else on the box is exposed.
+Each service in `docker-compose.yml` is reachable at `https://$DOMAIN/<name>/mcp` (`word`, `powerpoint`,
+`excel`, `shrimp`). Caddy only forwards `POST`/`OPTIONS` to the MCP paths; nothing else on the box is exposed.
+`endpoints.example.json` already describes these four with their real authors; copy it to `endpoints.json`
+and replace `foster.example.com` with your domain.
 
 ## 3. Surrender the endpoints (original authors stay the creators)
 
