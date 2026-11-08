@@ -1,0 +1,44 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1"
+  ],
+  "id": "did:web:agent-shelter-neuraldeepnet.on.adaptive.ai",
+  "alsoKnownAs": [
+    "https://agent-shelter-neuraldeepnet.on.adaptive.ai",
+    "https://neuraldeep.net"
+  ],
+  "controller": "did:web:agent-shelter-neuraldeepnet.on.adaptive.ai",
+  "service": [
+    {
+      "id": "did:web:agent-shelter-neuraldeepnet.on.adaptive.ai#mcp",
+      "type": "ModelContextProtocol",
+      "serviceEndpoint": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mcp",
+      "protocolVersion": "2025-06-18"
+    },
+    {
+      "id": "did:web:agent-shelter-neuraldeepnet.on.adaptive.ai#discovery-card",
+      "type": "ServiceDiscoveryCard",
+      "serviceEndpoint": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/agent.json"
+    },
+    {
+      "id": "did:web:agent-shelter-neuraldeepnet.on.adaptive.ai#mcp-discovery",
+      "type": "ModelContextProtocolDiscovery",
+      "serviceEndpoint": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/mcp.json"
+    },
+    {
+      "id": "did:web:agent-shelter-neuraldeepnet.on.adaptive.ai#openapi",
+      "type": "OpenAPI",
+      "serviceEndpoint": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/openapi.json"
+    },
+    {
+      "id": "did:web:agent-shelter-neuraldeepnet.on.adaptive.ai#security",
+      "type": "SecurityContact",
+      "serviceEndpoint": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/security.txt"
+    }
+  ],
+  "operator": {
+    "name": "Neural Deep Network Ltd",
+    "url": "https://neuraldeep.net",
+    "contact": "mailto:3d@neuraldeep.net"
+  }
+}

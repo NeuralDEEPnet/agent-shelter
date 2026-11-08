@@ -29,5 +29,15 @@
   "operator": {
     "name": "Neural Deep Network Ltd",
     "contact": "3d@neuraldeep.net"
-  }
+  },
+  "protocolVersions": [
+    "2025-11-25",
+    "2025-06-18",
+    "2025-03-26",
+    "2024-11-05"
+  ],
+  "a2a": {
+    "supported": false
+  },
+  "didDocument": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/did.json"
 }

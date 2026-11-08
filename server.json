@@ -74,7 +74,8 @@
         "machine_service_card": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/agent.json",
         "free_ask": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/ask/{slug}",
         "catalog": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/catalog",
-        "openapi": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/openapi.json"
+        "openapi": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/openapi.json",
+        "did_document": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/did.json"
       },
       "keywords": [
         "MCP server",

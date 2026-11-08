@@ -22,6 +22,7 @@
     "dev": "node scripts/dev.mjs",
     "check": "run-s check:types check:config",
     "indexnow": "tsx scripts/indexnow-submit.ts",
+    "probe:connection": "tsx scripts/connection-test.ts",
     "check:types": "tsc --noEmit",
     "check:config": "tsx app.config.ts",
     "test": "node scripts/test.mjs",

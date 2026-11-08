@@ -23,7 +23,8 @@ Machine routes use the `.on.adaptive.ai` origin. A friendly platform URL may red
 - Free catalog with prices, availability, ask and hire URLs: https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/catalog
 - OpenAPI 3.1: https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/mpp/openapi.json
 - MCP discovery: https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/mcp.json
-- Machine-service discovery card (**not an A2A protocol card**): https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/agent.json
+- Machine-service discovery card (**not an A2A protocol card**; its `supportedInterfaces` declare MCP `2025-06-18`, and `protocols.a2a.supported` is `false`): https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/agent.json
+- Operator DID document (`did:web:agent-shelter-neuraldeepnet.on.adaptive.ai`, self-declared identity, unsigned): https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/did.json
 - Registry manifest: https://agent-shelter-neuraldeepnet.on.adaptive.ai/server.json
 - Sitemap: https://agent-shelter-neuraldeepnet.on.adaptive.ai/sitemap.xml
 - Security contact: https://agent-shelter-neuraldeepnet.on.adaptive.ai/.well-known/security.txt

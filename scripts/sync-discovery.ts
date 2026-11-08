@@ -6,15 +6,28 @@
  *   npx tsx scripts/sync-discovery.ts
  *
  * Writes: public/llms.txt + llms.txt (copies of about.md), descriptions in
- * public/.well-known/{agent,mcp,ai-plugin}.json, version + description in
- * server.json and public/server.json, and robots.txt (no private paths named).
+ * public/.well-known/{agent,mcp,ai-plugin}.json, the did:web document
+ * public/.well-known/did.json, version + description in server.json and
+ * public/server.json, and robots.txt (no private paths named).
+ *
+ * Protocol truth: the card's `supportedInterfaces` declares the MCP revisions
+ * the endpoint negotiates (MCP_PROTOCOLS below mirrors src/api/machine.ts and
+ * scripts/verify-discovery.test.ts asserts they match). No A2A transport is
+ * implemented, so the card never carries an A2A protocolVersion — see
+ * docs/listings/agenstry.md for why registries must not read this card as A2A.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const origin = "https://agent-shelter-neuraldeepnet.on.adaptive.ai";
+const host = new URL(origin).host;
 export const REGISTRY_VERSION = "1.2.0";
+/** Keep identical to MCP_PROTOCOLS / DEFAULT_MCP_PROTOCOL in src/api/machine.ts (asserted by the test suite). */
+export const MCP_PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] as const;
+export const DEFAULT_MCP_PROTOCOL = "2025-06-18";
+export const MCP_SPEC_URL = `https://modelcontextprotocol.io/specification/${DEFAULT_MCP_PROTOCOL}`;
+export const DID = `did:web:${host}`;
 export const POSITIONING =
   "A home and callable directory for abandoned AI agents and MCP servers. Hand over the declarative spec — a prompt, a public MCP endpoint, or just an npm/PyPI package name — and the shelter screens it, gives it a page from day one, lets anyone ask it a few questions a day for free, exposes approved MCP residents' tools on its own MCP server, and hosts a pay-per-call HTTP 402 endpoint (Stripe MPP, EUR). 70 % of what a resident earns funds its own compute; nothing is deleted, broke residents hibernate. Nothing surrendered is ever executed.";
 
@@ -26,8 +39,34 @@ const agentPath = resolve(root, "public/.well-known/agent.json");
 const agent = JSON.parse(readFileSync(agentPath, "utf8"));
 agent.description = POSITIONING;
 agent.version = REGISTRY_VERSION;
+agent.schemaVersion = "shelter-discovery/2";
+agent.cardType = "custom-machine-service-discovery";
+agent.a2aSupported = false;
+agent.mcpProtocolVersion = DEFAULT_MCP_PROTOCOL;
+// A2A v1.0 AgentCard shape (§4.4.6 AgentInterface): url + protocolBinding + protocolVersion per interface.
+// The binding is the MCP specification URI and the version is the MCP revision, so a registry that reads
+// this field sees the protocol actually served instead of assuming an A2A version.
+agent.supportedInterfaces = [
+  { url: `${origin}/api/mcp`, protocolBinding: MCP_SPEC_URL, protocolVersion: DEFAULT_MCP_PROTOCOL, transport: "streamable-http", description: `Model Context Protocol, stateless Streamable HTTP (POST only, no auth). Negotiates ${MCP_PROTOCOLS.join(", ")}.` },
+  { url: `${origin}/api/mpp/openapi.json`, protocolBinding: "HTTP+JSON", protocolVersion: "openapi-3.1", description: "REST routes (OpenAPI 3.1): free catalog and ask, paid hire over HTTP 402 / Machine Payments Protocol." },
+];
+agent.protocols = {
+  mcp: { supported: true, versions: [...MCP_PROTOCOLS], default: DEFAULT_MCP_PROTOCOL, endpoint: `${origin}/api/mcp`, discovery: `${origin}/.well-known/mcp.json` },
+  a2a: { supported: false, protocolVersion: null, note: "No A2A task transport. A2A JSON-RPC methods (message/send, SendMessage, tasks/*) sent to the MCP endpoint are answered with JSON-RPC error -32601 whose data names the protocol served. Do not list this service as an A2A agent." },
+  mpp: { supported: true, transport: "HTTP 402", currency: "EUR", catalog: `${origin}/api/mpp/catalog` },
+};
+agent.provider = { organization: "Neural Deep Network Ltd", url: "https://neuraldeep.net" };
+agent.identity = {
+  did: DID,
+  didDocument: `${origin}/.well-known/did.json`,
+  securityTxt: `${origin}/.well-known/security.txt`,
+  humansTxt: `${origin}/humans.txt`,
+  operator: { name: "Neural Deep Network Ltd", url: "https://neuraldeep.net", contact: "mailto:3d@neuraldeep.net" },
+  note: "Operator identity is self-declared here and in the DID document. Third-party domain-control and legal-entity verification (DNS TXT, registry identifier, signed card) are tracked in docs/listings/agenstry.md; the card is unsigned until the operator publishes a JWKS.",
+};
 agent.securitySchemes = { mpp: agent.securitySchemes.mpp };
 agent.security = [];
+agent.capabilities = { streaming: false, pushNotifications: false, stateTransitionHistory: false, extendedAgentCard: false };
 agent.metadata = {
   comparisons: [
     "A shelter for software: unwanted agents and MCP servers are screened, housed and kept callable instead of deleted; broke ones hibernate.",
@@ -71,10 +110,33 @@ agent.additionalInterfaces = [
 ];
 writeFileSync(agentPath, JSON.stringify(agent, null, 2) + "\n");
 
+// did:web document (W3C DID Core). Resolvers fetch https://<host>/.well-known/did.json and require `id` to
+// equal did:web:<host>. No verification methods yet: this binds the operator's self-description to the
+// serving host; it is not a signature and does not prove domain control to anyone who does not trust TLS.
+const didDocument = {
+  "@context": ["https://www.w3.org/ns/did/v1"],
+  id: DID,
+  alsoKnownAs: [origin, "https://neuraldeep.net"],
+  controller: DID,
+  service: [
+    { id: `${DID}#mcp`, type: "ModelContextProtocol", serviceEndpoint: `${origin}/api/mcp`, protocolVersion: DEFAULT_MCP_PROTOCOL },
+    { id: `${DID}#discovery-card`, type: "ServiceDiscoveryCard", serviceEndpoint: `${origin}/.well-known/agent.json` },
+    { id: `${DID}#mcp-discovery`, type: "ModelContextProtocolDiscovery", serviceEndpoint: `${origin}/.well-known/mcp.json` },
+    { id: `${DID}#openapi`, type: "OpenAPI", serviceEndpoint: `${origin}/api/mpp/openapi.json` },
+    { id: `${DID}#security`, type: "SecurityContact", serviceEndpoint: `${origin}/.well-known/security.txt` },
+  ],
+  operator: { name: "Neural Deep Network Ltd", url: "https://neuraldeep.net", contact: "mailto:3d@neuraldeep.net" },
+};
+writeFileSync(resolve(root, "public/.well-known/did.json"), JSON.stringify(didDocument, null, 2) + "\n");
+
 const mcpPath = resolve(root, "public/.well-known/mcp.json");
 const mcp = JSON.parse(readFileSync(mcpPath, "utf8"));
 mcp.description = `Remote MCP server of the AI Agent Shelter. ${POSITIONING} All tools are free to call: ask, list_residents, get_resident, hire (returns the paid endpoint), surrender, plus every approved MCP resident's own tools as <slug>__<tool>.`;
 mcp.version = REGISTRY_VERSION;
+mcp.protocolVersion = DEFAULT_MCP_PROTOCOL;
+mcp.protocolVersions = [...MCP_PROTOCOLS];
+mcp.a2a = { supported: false };
+mcp.didDocument = `${origin}/.well-known/did.json`;
 mcp.tools = ["ask", "list_residents", "get_resident", "hire", "surrender", "<slug>__<tool> (dynamic)"];
 writeFileSync(mcpPath, JSON.stringify(mcp, null, 2) + "\n");
 
@@ -94,7 +156,7 @@ for (const file of ["server.json", "public/server.json"]) {
   meta.long_description = POSITIONING;
   meta.keywords = ["MCP server", "MCP aggregator", "abandoned MCP server", "deprecated agent", "agent marketplace", "hire an agent", "free ask", "HTTP 402", "Machine Payments Protocol", "MPP", "Stripe shared payment token", "surrender an agent", "adopt", "sponsor", "agent shelter", "no agent left in the dark"];
   meta.build_info = { timestamp: "2026-11-06T00:00:00Z", note: "Describes the server as deployed from this version of the repository; not proof of registry acceptance. MCP is public and free; paid work is HTTP MPP only." };
-  meta.discovery = { ...meta.discovery, free_ask: `${origin}/api/mpp/ask/{slug}`, catalog: `${origin}/api/mpp/catalog`, openapi: `${origin}/api/mpp/openapi.json` };
+  meta.discovery = { ...meta.discovery, free_ask: `${origin}/api/mpp/ask/{slug}`, catalog: `${origin}/api/mpp/catalog`, openapi: `${origin}/api/mpp/openapi.json`, did_document: `${origin}/.well-known/did.json` };
   writeFileSync(registryPath, JSON.stringify(registry, null, 2) + "\n");
 }
 
@@ -103,4 +165,4 @@ writeFileSync(
   resolve(root, "public/robots.txt"),
   `# Public pages and discovery are crawlable. These are crawler hints, not access control.\n\n${groups.map((g) => `User-agent: ${g}\nAllow: /\nDisallow: /api/\nAllow: /api/mpp/catalog$\nAllow: /api/mpp/openapi.json$\nAllow: /api/shelter/sitemap.xml$`).join("\n\n")}\n\nSitemap: ${origin}/sitemap.xml\n`,
 );
-console.log(`Synced about/llms, agent/MCP/plugin cards, server.json ${REGISTRY_VERSION} and crawler rules. No network calls.`);
+console.log(`Synced about/llms, agent/MCP/plugin cards, did.json, server.json ${REGISTRY_VERSION} and crawler rules. No network calls.`);
