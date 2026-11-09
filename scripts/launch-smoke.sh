@@ -46,7 +46,7 @@ for s in $(grep -ohE 'api/mpp/(ask|hire)/[a-z0-9-]+' README.md public/about.md |
 done
 
 echo "— registry"
-reg=$(curl -s --max-time 20 "https://registry.modelcontextprotocol.io/v0/servers?search=agent-shelter" | json 'j.servers[0].server.version')
+reg=$(curl -s --max-time 20 "https://registry.modelcontextprotocol.io/v0/servers?search=agent-shelter" | json '(j.servers.find(s=>s._meta&&s._meta["io.modelcontextprotocol.registry/official"]&&s._meta["io.modelcontextprotocol.registry/official"].isLatest)||j.servers[j.servers.length-1]).server.version')
 echo "  info official registry lists version $reg (repo server.json: $(node -e 'console.log(require("./server.json").version)'))"
 
 echo
