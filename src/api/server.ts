@@ -20,6 +20,7 @@ initializeServerEnvironment({
 // Import these after initializing the environment
 const { procedures, jobs } = await import("@/api");
 const { queue } = await import("@/api/queue");
+const { fosterRoutes } = await import("@/api/foster");
 const { machineRoutes } = await import("@/api/machine");
 const { machinePayments } = await import("@/api/mppClient");
 
@@ -34,6 +35,8 @@ app.all("/api/*", async (c, next) => {
   if (SCANNER_PATHS.has(pathname)) return c.text("Not found", 404);
   await next();
 });
+
+app.route("/", fosterRoutes());
 
 /**
  * Machine door (MPP hire, MCP server, surrender API, discovery) — mounted ABOVE

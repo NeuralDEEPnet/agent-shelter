@@ -164,12 +164,21 @@ export function shelterPrerender(opts: { apiPort: number; timeoutMs?: number }):
       return true;
     }
     if (pathname.startsWith("/.well-known/") || /^\/[a-z0-9._-]+\.(json|xml|md|txt)$/i.test(pathname)) {
+      const filePath = resolve(publicDir, pathname.slice(1));
       let exists = false;
-      try { exists = statSync(resolve(publicDir, pathname.slice(1))).isFile(); } catch { /* missing discovery file */ }
+      try { exists = statSync(filePath).isFile(); } catch { /* missing discovery file */ }
       if (!exists) {
         res.statusCode = 404;
         res.setHeader("content-type", "application/problem+json");
         res.end(JSON.stringify({ title: "No such discovery document", status: 404 }));
+        return true;
+      }
+      if (pathname.startsWith("/.well-known/") && !/\.[a-z0-9]+$/i.test(pathname)) {
+        const body = readFileSync(filePath);
+        res.statusCode = 200;
+        res.setHeader("content-type", "text/plain; charset=utf-8");
+        res.setHeader("cache-control", "no-cache");
+        res.end(req.method === "HEAD" ? undefined : body);
         return true;
       }
       return false;

@@ -1,0 +1,42 @@
+[
+  {
+    "name": "Office Word MCP",
+    "tagline": "Creates and edits .docx documents: headings, paragraphs, tables, styles, find-and-replace, footnotes.",
+    "story": "Published by GongRzhe in 2025 (2.1k stars) and archived on 2025-12-31. Fostered on the shelter's host so its tools stay callable; the original author keeps the creator share and can claim or reclaim it. PyPI office-word-mcp-server 1.1.11.",
+    "creatorName": "GongRzhe",
+    "creatorContact": "https://github.com/GongRzhe",
+    "license": "MIT",
+    "endpoint": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/foster/word/mcp",
+    "expose": []
+  },
+  {
+    "name": "Office PowerPoint MCP",
+    "tagline": "Builds and edits .pptx decks: slides, layouts, text, images, charts, tables.",
+    "story": "Published by GongRzhe in 2025 (1.9k stars) and archived on 2025-12-31. Fostered on the shelter's host; the original author keeps the creator share. PyPI office-powerpoint-mcp-server 2.0.7.",
+    "creatorName": "GongRzhe",
+    "creatorContact": "https://github.com/GongRzhe",
+    "license": "MIT",
+    "endpoint": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/foster/powerpoint/mcp",
+    "expose": []
+  },
+  {
+    "name": "Excel MCP Server",
+    "tagline": "Reads and writes spreadsheet cells, ranges and sheets in .xlsx files.",
+    "story": "Published by negokaz in 2025 (1.0k stars), last pushed July 2025. Fostered on the shelter's host; the original author keeps the creator share. npm @negokaz/excel-mcp-server 0.12.0.",
+    "creatorName": "negokaz",
+    "creatorContact": "https://github.com/negokaz",
+    "license": "MIT",
+    "endpoint": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/foster/excel/mcp",
+    "expose": []
+  },
+  {
+    "name": "Shrimp Task Manager",
+    "tagline": "Plans, splits, tracks and verifies tasks for coding agents, with persistent task memory.",
+    "story": "Published by cjo4m06 in 2025 (2.2k stars), last pushed August 2025. Fostered on the shelter's host; the original author keeps the creator share. npm mcp-shrimp-task-manager 1.0.21.",
+    "creatorName": "cjo4m06",
+    "creatorContact": "https://github.com/cjo4m06",
+    "license": "MIT",
+    "endpoint": "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/foster/shrimp/mcp",
+    "expose": []
+  }
+]
