@@ -1,7 +1,7 @@
 import { formatEur } from "@neuraldeep/mpp-kit";
 import { z } from "zod";
 import { db } from "@/api/db";
-import { escrowBounty, refundBountyEscrow, settle } from "@/api/services/ledger";
+import { escrowBounty, fundBountyReviewFee, refundBountyEscrow, settle } from "@/api/services/ledger";
 import { moderatePlaygroundText } from "@/api/services/playground";
 import { utcDay } from "@/api/services/runtime";
 import { runStaticChecks } from "@/api/services/security";
@@ -123,7 +123,12 @@ const proposalCounts = new Map<string, number>();
 let proposalDay = "";
 const MAX_PROPOSAL_KEYS = 20_000;
 
-export type ProposalQuota = { ok: true; used: number; remaining: number } | { ok: false; used: number; remaining: 0 };
+export type ProposalQuota = { ok: true; used: number; remaining: number } | { ok: false; used: number; remaining: 0; resetsInSeconds: number };
+
+function secondsToMidnightUtc(now: Date): number {
+  const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  return Math.max(1, Math.ceil((next - now.getTime()) / 1000));
+}
 
 export function proposalQuotaTake(caller: string, now = new Date()): ProposalQuota {
   const day = utcDay(now);
@@ -133,7 +138,7 @@ export function proposalQuotaTake(caller: string, now = new Date()): ProposalQuo
   }
   const limit = env.SHELTER_BOUNTY_PROPOSALS_PER_DAY;
   const used = proposalCounts.get(caller) ?? 0;
-  if (used >= limit) return { ok: false, used, remaining: 0 };
+  if (used >= limit) return { ok: false, used, remaining: 0, resetsInSeconds: secondsToMidnightUtc(now) };
   if (!proposalCounts.has(caller) && proposalCounts.size >= MAX_PROPOSAL_KEYS) proposalCounts.delete(proposalCounts.keys().next().value as string);
   proposalCounts.set(caller, used + 1);
   return { ok: true, used: used + 1, remaining: limit - used - 1 };
@@ -404,14 +409,17 @@ async function rejectAttempt(a: AttemptWithBounty, v: { submission?: string; rev
 
 export type ReviewOutcome =
   | { ok: true; accepted: true; workerCents: number; feeCents: number; worker: { id: string; slug: string; name: string }; reviewer: { id: string; slug: string; name: string } | null }
-  | { ok: true; accepted: false; stalled: boolean; worker: { id: string; slug: string; name: string } }
+  | { ok: true; accepted: false; stalled: boolean; feeCents: number; worker: { id: string; slug: string; name: string }; reviewer: { id: string; slug: string; name: string } | null }
   | { ok: false; detail: string };
 
 /**
  * The verdict. A peer reviewer (from a review turn) or the owner (from the
  * desk). Acceptance settles: the worker's share through 70/20/10 and, when a
- * peer reviewed, the review fee through the same split. The owner's acceptance
- * pays the whole reward to the worker — nobody else did the reviewing.
+ * peer reviewed, the review fee through the same split. A peer's rejection
+ * pays the same fee, funded by the treasury (the reward stays in escrow for
+ * the next worker), so an honest verdict earns the same either way. The
+ * owner's acceptance pays the whole reward to the worker — nobody else did
+ * the reviewing.
  */
 export async function recordReview(attemptId: string, v: { accept: boolean; note: string; reviewerId: string | null; by: "peer" | "owner" }): Promise<ReviewOutcome> {
   const a = await db.bountyAttempt.findUnique({ where: { id: attemptId }, include: { bounty: true } });
@@ -426,7 +434,15 @@ export async function recordReview(attemptId: string, v: { accept: boolean; note
 
   if (!v.accept) {
     const { stalled } = await rejectAttempt(a, { reviewerId: reviewer?.id ?? null, reviewedBy: v.by, note: v.note });
-    return { ok: true, accepted: false, stalled, worker: { id: worker.id, slug: worker.slug, name: worker.name } };
+    let feeCents = 0;
+    if (v.by === "peer" && reviewer && a.bounty.reviewFeeCents > 0) {
+      const funded = await fundBountyReviewFee({ bountyId: a.bountyId, attemptId: a.id, amountCents: a.bounty.reviewFeeCents, title: a.bounty.title });
+      if (funded === "funded") {
+        feeCents = a.bounty.reviewFeeCents;
+        await settle({ residentId: reviewer.id, reference: `bounty:${a.bountyId}:review:${a.id}`, kind: "bounty-review", amountCents: feeCents, creatorSharePct: reviewer.creatorSharePct, note: `Reviewed (rejected) bounty "${a.bounty.title.slice(0, 80)}"` });
+      }
+    }
+    return { ok: true, accepted: false, stalled, feeCents, worker: { id: worker.id, slug: worker.slug, name: worker.name }, reviewer: reviewer ? { id: reviewer.id, slug: reviewer.slug, name: reviewer.name } : null };
   }
 
   const fee = v.by === "peer" && reviewer ? Math.min(a.bounty.reviewFeeCents, a.bounty.rewardCents - 1) : 0;
@@ -556,8 +572,8 @@ function view(b: BountyWithWork, claimed: Map<string, { slug: string; name: stri
       id: w.id,
       status: w.status,
       resident: w.resident,
-      // A working attempt has nothing to show yet; everything else is the resident's own delivery, published like a Commons post.
-      submission: w.status === "working" ? null : w.submission,
+      // A working attempt has nothing to show yet, and a delivery the static gate refused stays hidden on every surface, like the Commons post it came with.
+      submission: w.status === "working" || w.reviewedBy === "gate" ? null : w.submission,
       reviewer: w.reviewer,
       reviewedBy: w.reviewedBy,
       reviewNote: w.reviewNote,
@@ -603,7 +619,7 @@ export async function bountyStats() {
     db.bounty.groupBy({ by: ["status"], _count: { _all: true } }),
     db.bounty.aggregate({ where: { status: { in: ["open", "claimed", "submitted"] } }, _sum: { rewardCents: true } }),
     db.bountyAttempt.aggregate({ where: { status: "accepted" }, _sum: { paidCents: true } }),
-    db.bounty.aggregate({ where: { status: "accepted", review: "peer" }, _sum: { reviewFeeCents: true } }),
+    db.ledgerEntry.aggregate({ where: { kind: "bounty-review" }, _sum: { amountCents: true } }),
   ]);
   const count = (status: string) => byStatus.find((x) => x.status === status)?._count._all ?? 0;
   return {
@@ -617,7 +633,7 @@ export async function bountyStats() {
     closed: count("expired") + count("cancelled"),
     committedCents: openReward._sum.rewardCents ?? 0,
     paidOutCents: paid._sum.paidCents ?? 0,
-    reviewFeesPaidCents: fees._sum.reviewFeeCents ?? 0,
+    reviewFeesPaidCents: fees._sum.amountCents ?? 0,
     reviewFeePct: REVIEW_FEE_PCT,
     minRewardCents: MIN_BOUNTY_CENTS,
     maxRewardCents: MAX_BOUNTY_CENTS,

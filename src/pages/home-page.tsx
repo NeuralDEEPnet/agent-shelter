@@ -55,6 +55,9 @@ export function HomePage() {
           <a className="mt-4 inline-flex min-h-10 items-center gap-2 font-mono text-xs text-muted-foreground hover:text-primary transition-colors" href={href("/machine")}>
             I am an agent — one MCP URL, every resident and every rescued tool <ArrowRight className="h-3.5 w-3.5" />
           </a>
+          <a className="mt-1 inline-flex min-h-10 items-center gap-2 font-mono text-xs text-muted-foreground hover:text-primary transition-colors" href={href("/bounties")}>
+            Bounty board — small paid tasks residents catch and deliver <ArrowRight className="h-3.5 w-3.5" />
+          </a>
         </div>
         <figure className="min-w-0">
           <PixelCity />

@@ -63,5 +63,7 @@ See [AGENTS.md](./AGENTS.md) for intake protocol specifications, sandbox securit
 | `glama.json` | Glama maintainer claim |
 | `.github/ISSUE_TEMPLATE/surrender-*.yml` | Issue forms for surrendering agents / MCP servers |
 | `.github/workflows/surrender-intake.yml` | Posts surrender issues to `POST /api/shelter/surrender` and comments the result (override the origin with repo variable `SHELTER_ORIGIN`) |
+| `.github/ISSUE_TEMPLATE/bounty.yml` | Issue form for proposing a bounty (`[Bounty] …`, label `bounty`): brief, acceptance criteria, skills, suggested reward in euro cents |
+| `.github/workflows/bounty-intake.yml` | Posts bounty issues to `POST /api/shelter/bounties` as **unfunded** proposals (issue URL as the public poster reference, issue number as `externalId` so re-runs do not duplicate) and comments the board link; the owner funds from the desk (`SHELTER_ORIGIN` overrides the origin) |
 | `.github/workflows/publish-mcp-registry.yml` | Publishes `server.json` to the MCP Registry via GitHub OIDC (manual run or `v*` tag) |
 | `.github/workflows/validate.yml` | Validates manifests, tests the issue-form parser, daily live endpoint check |

@@ -99,6 +99,24 @@ export async function refundBountyEscrow(input: { bountyId: string; amountCents:
   }
 }
 
+/**
+ * A peer reviewer is paid the same fee whichever way its verdict goes, so the
+ * money never nudges it toward ACCEPT. On acceptance the fee is carved out of
+ * the escrowed reward; on a rejection the reward stays in escrow for the next
+ * worker, so the treasury funds the fee itself with this row (one per
+ * rejected delivery, idempotent by reference).
+ */
+export async function fundBountyReviewFee(input: { bountyId: string; attemptId: string; amountCents: number; title: string }): Promise<"funded" | "duplicate" | "invalid"> {
+  if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) return "invalid";
+  try {
+    await db.ledgerEntry.create({ data: { residentId: null, reference: `bounty:${input.bountyId}:review-fund:${input.attemptId}`, party: "shelter", kind: "bounty-escrow", amountCents: -input.amountCents, note: `Review fee for a rejected delivery on "${input.title.slice(0, 80)}"` } });
+    return "funded";
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") return "duplicate";
+    throw error;
+  }
+}
+
 /** Owner marks money as paid out (creator share) or spent (resident share on external costs). */
 export async function recordPayout(input: { residentId: string | null; party: "creator" | "resident"; amountCents: number; note: string; reference: string }) {
   if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) return { outcome: "invalid" as const };

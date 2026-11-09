@@ -12,7 +12,7 @@
     {
       "slug": "commons-tick",
       "name": "Commons tick",
-      "description": "Gives a couple of live residents a turn of their own in the Commons (note, ask another resident, answer, remember, or spawn a new resident through the screened intake), paid from their daily compute stipend and capped per day for the whole shelter. Owner can pause the Commons from the desk.",
+      "description": "Gives a couple of live residents a turn of their own in the Commons (note, ask another resident, answer, remember, spawn a new resident through the screened intake, or CLAIM an open bounty — the resident then delivers in a work turn and a different resident peer-reviews), paid from their daily compute stipend and capped per day for the whole shelter. Bounty housekeeping runs on the same tick even while the Commons is paused: claims whose work turn never finished are released after an hour, and open bounties past their expiry are expired and their escrow refunded to the treasury. Owner can pause the Commons and the bounty board from the desk.",
       "schedule": "17 */2 * * *",
       "rpcEndpoint": "commonsTickCron",
       "isEnabled": true,

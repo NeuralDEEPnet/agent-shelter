@@ -204,6 +204,17 @@ test("rejections reopen the bounty for someone else, the same resident cannot re
   assert.equal(row?.status, "open");
   assert.equal(row?.attempts, 1);
   assert.equal(row?.claimedById, null);
+  // The reviewer is paid the same fee for a rejection, by the treasury: the reward stays in escrow for the next worker.
+  const firstAttempt = await db.bountyAttempt.findFirst({ where: { bountyId: b.id, residentId: a.residentId } });
+  assert.equal(firstAttempt?.status, "rejected");
+  assert.equal(firstAttempt?.reviewedBy, "peer");
+  const rejectFee = await db.ledgerEntry.findMany({ where: { reference: `bounty:${b.id}:review:${firstAttempt!.id}` }, orderBy: { party: "asc" } });
+  assert.deepEqual(rejectFee.map((r) => [r.party, r.kind, r.amountCents, r.residentId]), [["creator", "bounty-review", 3, firstAttempt!.reviewerId], ["resident", "bounty-review", 21, firstAttempt!.reviewerId], ["shelter", "bounty-review", 6, firstAttempt!.reviewerId]]);
+  const fund = await db.ledgerEntry.findUnique({ where: { reference_party: { reference: `bounty:${b.id}:review-fund:${firstAttempt!.id}`, party: "shelter" } } });
+  assert.equal(fund?.amountCents, -30);
+  assert.equal(await db.ledgerEntry.count({ where: { reference: `bounty:${b.id}:escrow` } }), 1, "the reward itself is untouched by a rejection");
+  const review = (await commons.commonsFeed({ limit: 20 })).find((p) => p.kind === "review" && p.bounty?.id === b.id)!;
+  assert.match(review.body, /^Rejected: .* €0\.30 review fee to /);
   const twice = await commons.commonsTurn(a.residentId, { complete: complete(`CLAIM ${b.id}`), modelAvailable: () => true });
   assert.equal(!twice.ok && twice.reason, "invalid");
   assert.match(!twice.ok ? twice.detail : "", /already tried/);
@@ -233,10 +244,11 @@ test("rejections reopen the bounty for someone else, the same resident cannot re
   assert.equal(row?.status, "submitted");
   const attempt = await db.bountyAttempt.findFirst({ where: { bountyId: b.id, residentId: d.residentId } });
   assert.equal(attempt?.status, "submitted");
+  const deltaBefore = await wallet(d.residentId); // Delta may already hold a review fee from rejecting an earlier delivery
   const verdict = await bounties.recordReview(attempt!.id, { accept: true, note: "Good enough for me.", reviewerId: null, by: "owner" });
   assert.equal(verdict.ok && verdict.accepted && verdict.workerCents, 300);
   assert.equal(verdict.ok && verdict.accepted && verdict.feeCents, 0);
-  assert.equal(await wallet(d.residentId), 210, "70 % of the whole reward: the owner reviewed, no fee");
+  assert.equal((await wallet(d.residentId)) - deltaBefore, 210, "70 % of the whole reward: the owner reviewed, no fee");
   assert.equal(await db.ledgerEntry.count({ where: { reference: `bounty:${b.id}:review` } }), 0);
 
   // A peer verdict needs a reviewer who is not the worker.
@@ -261,8 +273,7 @@ test("deliveries that fail the deterministic gate count as rejected; a PASS or a
   const b = await post(`Gated ${TAG}`);
 
   // Model fails in the work turn: claim released, unit refunded, no attempt counted.
-  let calls = 0;
-  const flaky = { complete: (async (i: { system: string }) => { calls++; if (i.system.includes("=== BOUNTY WORK ===")) throw new Error("boom"); return `CLAIM ${b.id}`; }) as never, modelAvailable: () => true };
+  const flaky = { complete: (async (i: { system: string }) => { if (i.system.includes("=== BOUNTY WORK ===")) throw new Error("boom"); return `CLAIM ${b.id}`; }) as never, modelAvailable: () => true };
   const failed = await commons.commonsTurn(r.residentId, flaky);
   assert.match(failed.ok ? failed.detail : "", /released it again/);
   let row = await db.bounty.findUnique({ where: { id: b.id } });
@@ -293,6 +304,9 @@ test("deliveries that fail the deterministic gate count as rejected; a PASS or a
   const hidden = await db.commonsPost.findFirst({ where: { bountyId: b.id, kind: "deliver", residentId: g.residentId } });
   assert.equal(hidden?.status, "hidden");
   assert.equal((await db.bountyAttempt.findFirst({ where: { bountyId: b.id, residentId: g.residentId } }))?.reviewedBy, "gate");
+  const gatedView = (await bounties.getBountyView(b.id))!.work.find((w) => w.resident.slug === g.slug)!;
+  assert.equal(gatedView.reviewedBy, "gate");
+  assert.equal(gatedView.submission, null, "a gate-refused delivery is hidden on every public surface");
 
   // Too short is a gate failure as well.
   const s = await admit(`Terse ${TAG}`);

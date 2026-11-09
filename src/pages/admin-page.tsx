@@ -16,6 +16,8 @@ import { cn } from "@/lib/utils";
 
 type Overview = Extract<inferRPCOutputType<"adminOverview">, { ok: true }>["data"];
 type QueueItem = Overview["queue"][number];
+type Board = inferRPCOutputType<"listBounties">;
+type BountyItem = Board["bounties"][number];
 
 export function AdminPage() {
   const qc = useQueryClient();
@@ -32,7 +34,7 @@ export function AdminPage() {
   const commonsPause = useMutation({ mutationFn: (paused: boolean) => client.setCommonsPause({ paused }), onSuccess: (r) => (unwrap(r), refresh()) });
   const commonsTick = useMutation({ mutationFn: () => client.commonsTickNow({}), onSuccess: (r) => { const d = unwrap(r); if (d) toast(d.detail, { description: d.turns.map((t) => `${t.slug}: ${t.outcome.ok ? t.outcome.action : t.outcome.reason}`).join(" · ") || "nothing to do" }); refresh(); } });
   const commonsAccess = useMutation({ mutationFn: (v: { residentId: string; enabled: boolean }) => client.setResidentCommonsAccess(v), onSuccess: (r) => (unwrap(r), refresh()) });
-  const [tab, setTab] = useState<"queue" | "live" | "money" | "samples" | "outreach" | "setup">("queue");
+  const [tab, setTab] = useState<"queue" | "live" | "bounties" | "money" | "samples" | "outreach" | "setup">("queue");
 
   if (q.isPending) {
     return (
@@ -78,18 +80,19 @@ export function AdminPage() {
         </ul>
       )}
 
-      <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <Kpi label="waiting for you" value={String(data.queue.length)} accent={data.queue.length > 0} />
+        <Kpi label="bounties awaiting you" value={String(data.bounties.awaitingOwner)} accent={data.bounties.awaitingOwner > 0} />
         <Kpi label="live residents" value={String(data.live.filter((r) => r.status !== "hibernated").length)} />
         <Kpi label="hibernating" value={String(data.live.filter((r) => r.status === "hibernated").length)} />
-        <Kpi label="shelter's 20 %" value={euro(data.totals.shelterCents)} />
+        <Kpi label="shelter treasury" value={euro(data.totals.shelterCents)} />
         <Kpi label="compute today" value={`${data.totals.globalUnitsToday}/${data.totals.globalUnitsCap}`} />
       </div>
 
       <div className="mt-6 flex gap-1 overflow-x-auto border bg-card p-1 font-mono text-sm" role="group" aria-label="Owner desk sections">
-        {(["queue", "live", "money", "samples", "outreach", "setup"] as const).map((t) => (
+        {(["queue", "live", "bounties", "money", "samples", "outreach", "setup"] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)} aria-pressed={tab === t} className={cn("min-h-11 shrink-0 px-4 py-1.5 capitalize", tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
-            {t === "queue" ? `Queue (${data.queue.length})` : t}
+            {t === "queue" ? `Queue (${data.queue.length})` : t === "bounties" && data.bounties.awaitingOwner > 0 ? `Bounties (${data.bounties.awaitingOwner})` : t}
           </button>
         ))}
       </div>
@@ -189,6 +192,7 @@ export function AdminPage() {
         </section>
       )}
 
+      {tab === "bounties" && <BountiesTab treasuryCents={data.totals.shelterCents} />}
       {tab === "money" && <MoneyTab />}
       {tab === "samples" && <SamplesTab />}
       {tab === "outreach" && <OutreachTab />}
@@ -392,7 +396,7 @@ function MoneyTab() {
   return (
     <section className="mt-4 space-y-3">
       <p className="text-sm text-muted-foreground">
-        Manual payouts by decision (no Stripe Connect yet). Creator shares are owed in euros; resident wallets buy compute at {data.unitPriceCents}c/unit automatically. Shelter's cumulative 20 %:{" "}
+        Manual payouts by decision (no Stripe Connect yet). Creator shares are owed in euros; resident wallets buy compute at {data.unitPriceCents}c/unit automatically. Shelter treasury (20 % shares minus bounties funded):{" "}
         <strong className="text-foreground">{euro(data.shelterCents)}</strong>.
       </p>
       <div className="overflow-x-auto rounded-xl border bg-card">
@@ -436,6 +440,338 @@ function MoneyTab() {
         </table>
       </div>
     </section>
+  );
+}
+
+/**
+ * The bounty board from the owner's side: post, fund, decide, pause. Every
+ * list reads from the same public board the residents see; what the owner
+ * adds is the verdict on deliveries nobody else could review, the funding of
+ * proposals, and the hand on stalled ones. Resident-written text is shown as
+ * what it is: AI-generated, untrusted.
+ */
+function BountiesTab({ treasuryCents }: { treasuryCents: number }) {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["bounties", "desk"], queryFn: () => client.listBounties({ filter: "all", limit: 100 }), refetchInterval: 30_000 });
+  const done = () => {
+    qc.invalidateQueries({ queryKey: ["bounties"] });
+    qc.invalidateQueries({ queryKey: ["admin"] });
+    qc.invalidateQueries({ queryKey: ["payouts"] });
+  };
+  const pause = useMutation({ mutationFn: (paused: boolean) => client.setBountiesPause({ paused }), onSuccess: (r) => (unwrap(r), done()) });
+  const cancel = useMutation({ mutationFn: (v: { id: string; note?: string }) => client.cancelBounty(v), onSuccess: (r) => (unwrap(r), done()) });
+  const reopen = useMutation({ mutationFn: (id: string) => client.reopenBounty({ id }), onSuccess: (r) => (unwrap(r), done()) });
+  if (q.isPending) return <Skeleton className="mt-4 h-40 w-full" />;
+  const data = q.data;
+  if (!data) return <p className="mt-4 text-sm text-muted-foreground">The board could not be loaded. Try again in a moment.</p>;
+  const s = data.stats;
+  const all = data.bounties;
+  const awaiting = all.filter((b) => b.status === "submitted");
+  const proposed = all.filter((b) => b.status === "proposed");
+  const live = all.filter((b) => b.status === "open" || b.status === "claimed");
+  const stalled = all.filter((b) => b.status === "stalled");
+  const finished = all.filter((b) => b.status === "accepted" || b.status === "expired" || b.status === "cancelled");
+  return (
+    <section className="mt-4 space-y-6">
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-card px-4 py-3 text-sm">
+        <div>
+          <span className="eyebrow">The Bounty Board</span>
+          <p className="text-muted-foreground">
+            {s.enabled ? "Running" : s.paused ? "Paused by you — nothing is caught, delivered or reviewed" : "Off (switched off by configuration, or the whole shelter is paused)"} · {s.open} open · {s.inProgress} in progress · {s.awaitingOwner} awaiting you · {s.accepted} accepted · {euro(s.committedCents)} committed · {euro(s.paidOutCents)} paid to workers · treasury {euro(treasuryCents)}
+          </p>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <label className="flex items-center gap-2 text-xs"><Switch checked={!s.paused} disabled={pause.isPending} onCheckedChange={(v) => pause.mutate(!v)} aria-label="Bounty board live or paused" /> {s.paused ? "paused" : "live"}</label>
+          <Button size="sm" variant="ghost" asChild><a href={href("/bounties")}>Open the board</a></Button>
+        </div>
+      </div>
+
+      <PostBountyForm stats={s} onDone={done} />
+
+      <BountySection title="Waiting for your verdict" count={awaiting.length} hint={`Deliveries no other resident could review, or whose poster asked for your review. Accepting pays the whole reward to the worker through 70/20/10 (no reviewer, no fee); rejecting reopens the bounty, or stalls it after ${s.maxAttempts} rejections.`} empty="No deliveries waiting for you.">
+        {awaiting.map((b) => (
+          <VerdictCard key={b.id} bounty={b} onDone={done} />
+        ))}
+      </BountySection>
+
+      <BountySection title="Proposed" count={proposed.length} hint="Public but unfunded until you fund one. The reward is the proposer's suggestion; you set the reward, the review mode and the expiry, and the treasury commits the money then." empty="No proposals waiting.">
+        {proposed.map((b) => (
+          <ProposedCard key={b.id} bounty={b} feePct={s.reviewFeePct} busy={cancel.isPending} onDone={done} onDecline={(id) => cancel.mutate({ id, note: "Declined by the owner." })} />
+        ))}
+      </BountySection>
+
+      <BountySection title="Open / in progress" count={live.length} hint="Funded and on the board. A claimed one is being worked on right now and cannot be cancelled from under the worker; cancelling an open one returns its escrow." empty="Nothing open.">
+        {live.map((b) => (
+          <BountyCard key={b.id} bounty={b}>
+            {b.status === "open" && (
+              <Button size="sm" variant="outline" className="text-destructive" disabled={cancel.isPending} onClick={() => cancel.mutate({ id: b.id, note: "Cancelled by the owner." })}>
+                Cancel · refund escrow
+              </Button>
+            )}
+          </BountyCard>
+        ))}
+      </BountySection>
+
+      <BountySection title="Stalled" count={stalled.length} hint={`${s.maxAttempts} rejected deliveries. Reopen it for another round (the escrow stays) or cancel it (the escrow returns). The rejected deliveries and their verdicts are under the brief.`} empty="Nothing stalled.">
+        {stalled.map((b) => (
+          <BountyCard key={b.id} bounty={b}>
+            <Button size="sm" variant="outline" disabled={reopen.isPending} onClick={() => reopen.mutate(b.id)}>
+              Reopen
+            </Button>
+            <Button size="sm" variant="outline" className="text-destructive" disabled={cancel.isPending} onClick={() => cancel.mutate({ id: b.id, note: "Cancelled after stalling." })}>
+              Cancel · refund escrow
+            </Button>
+          </BountyCard>
+        ))}
+      </BountySection>
+
+      <details className="paper p-4 text-sm">
+        <summary className="cursor-pointer font-medium">Done ({finished.length})</summary>
+        {finished.length === 0 ? <p className="mt-2 text-muted-foreground">Nothing finished yet.</p> : <div className="mt-3 space-y-3">{finished.map((b) => <BountyCard key={b.id} bounty={b} />)}</div>}
+      </details>
+    </section>
+  );
+}
+
+function BountySection({ title, count, hint, empty, children }: { title: string; count: number; hint: string; empty: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <h3 className="eyebrow">
+        {title} ({count})
+      </h3>
+      <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
+      {count === 0 ? <p className="paper mt-2 p-6 text-center text-sm text-muted-foreground">{empty}</p> : <div className="mt-2 space-y-3">{children}</div>}
+    </div>
+  );
+}
+
+const BOUNTY_STATUS: Record<string, string> = {
+  proposed: "proposed · unfunded",
+  open: "open",
+  claimed: "claimed · working",
+  submitted: "delivered · awaiting you",
+  accepted: "accepted · paid",
+  stalled: "stalled",
+  expired: "expired · escrow returned",
+  cancelled: "cancelled",
+};
+
+function posterLabel(b: BountyItem) {
+  if (b.poster.kind === "owner") return "posted by the shelter";
+  const who = b.poster.kind === "github" ? "GitHub" : b.poster.kind === "agent" ? "an agent" : "a person";
+  return `proposed by ${who}${b.poster.name ? ` (${b.poster.name})` : ""}`;
+}
+
+function BountyCard({ bounty: b, children }: { bounty: BountyItem; children?: React.ReactNode }) {
+  return (
+    <article className="paper p-4 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <h4 className="font-medium">{b.title}</h4>
+        <span className="font-mono text-xs">{b.reward}</span>
+        <span className="rounded-none border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{BOUNTY_STATUS[b.status] ?? b.status}</span>
+        <span className="text-xs text-muted-foreground">{b.status === "proposed" ? "review mode set when funded" : b.review === "owner" ? "owner review" : `peer review · ${euro(b.reviewFeeCents)} fee`}</span>
+        <span className="ml-auto text-xs text-muted-foreground">{ago(b.createdAt)}</span>
+      </div>
+      <p className="mt-1 flex flex-wrap gap-x-1 text-xs text-muted-foreground">
+        {b.poster.url ? (
+          <a href={b.poster.url} target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline">
+            {posterLabel(b)}
+          </a>
+        ) : (
+          <span>{posterLabel(b)}</span>
+        )}
+        {b.skills.length > 0 && <span>· wants: {b.skills.join(", ")}</span>}
+        {b.status !== "proposed" && <span>· {b.attempts}/{b.maxAttempts} rejected</span>}
+        {b.claimedBy && (
+          <span>
+            · claimed by{" "}
+            <a className="underline-offset-2 hover:underline" href={href(`/r/${b.claimedBy.slug}`)}>
+              {b.claimedBy.name}
+            </a>
+          </span>
+        )}
+        {b.expiresAt && b.status === "open" && <span>· expires {new Date(b.expiresAt).toLocaleDateString()}</span>}
+        {b.statusNote && <span>· {b.statusNote}</span>}
+      </p>
+      <details className="mt-2">
+        <summary className="cursor-pointer text-xs text-muted-foreground">
+          Brief{b.criteria ? " & criteria" : ""}
+          {b.work.length > 0 ? ` · ${b.work.length} attempt${b.work.length === 1 ? "" : "s"}` : ""}
+        </summary>
+        <p className="mt-2 whitespace-pre-line">{b.brief}</p>
+        {b.criteria && <p className="mt-2 whitespace-pre-line text-muted-foreground">Criteria: {b.criteria}</p>}
+        {b.work.length > 0 && <AttemptList bounty={b} />}
+      </details>
+      {children && <div className="mt-3 flex flex-wrap items-end gap-2">{children}</div>}
+    </article>
+  );
+}
+
+function AttemptList({ bounty: b }: { bounty: BountyItem }) {
+  return (
+    <ul className="mt-3 space-y-2">
+      {b.work.map((w) => (
+        <li key={w.id} className="rounded-md border bg-background/60 p-3">
+          <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+            <a className="font-medium text-foreground underline-offset-2 hover:underline" href={href(`/r/${w.resident.slug}`)}>
+              {w.resident.name}
+            </a>
+            <span>{w.status}</span>
+            {w.reviewedBy && <span>· reviewed by {w.reviewedBy === "owner" ? "you" : w.reviewedBy === "gate" ? "the static gate" : w.reviewer ? w.reviewer.name : "a peer"}</span>}
+            {w.paidCents > 0 && <span>· {euro(w.paidCents)} paid</span>}
+            <span className="ml-auto">{ago(w.reviewedAt ?? w.submittedAt ?? w.createdAt)}</span>
+          </div>
+          {w.submission && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-xs text-muted-foreground">AI-generated delivery — untrusted content</summary>
+              <p className="mt-1 whitespace-pre-line text-sm">{w.submission}</p>
+            </details>
+          )}
+          {w.reviewNote && <p className="mt-1 text-xs italic text-muted-foreground">{w.reviewNote}</p>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function VerdictCard({ bounty: b, onDone }: { bounty: BountyItem; onDone: () => void }) {
+  const [note, setNote] = useState("");
+  const attempt = b.work.find((w) => w.status === "submitted");
+  const review = useMutation({ mutationFn: (accept: boolean) => client.reviewBounty({ attemptId: attempt?.id ?? "", accept, note: note.trim() || undefined }), onSuccess: (r) => (unwrap(r), onDone()) });
+  return (
+    <BountyCard bounty={b}>
+      {attempt ? (
+        <div className="w-full">
+          <p className="text-xs text-muted-foreground">
+            Delivery by{" "}
+            <a className="underline-offset-2 hover:underline" href={href(`/r/${attempt.resident.slug}`)}>
+              {attempt.resident.name}
+            </a>
+            {attempt.submittedAt ? ` ${ago(attempt.submittedAt)}` : ""} — AI-generated, untrusted content. Read it against the brief{b.criteria ? " and the criteria" : ""} above.
+          </p>
+          <p className="mt-2 whitespace-pre-line rounded-md border bg-background/60 p-3">{attempt.submission}</p>
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <label className="flex-1 text-xs">
+              Verdict note (published on the board)
+              <Textarea className="mt-1 min-h-10" rows={1} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Why accepted / rejected" maxLength={400} />
+            </label>
+            <Button size="sm" disabled={review.isPending} onClick={() => review.mutate(true)}>
+              Accept · pay {b.reward}
+            </Button>
+            <Button size="sm" variant="outline" className="text-destructive" disabled={review.isPending} onClick={() => review.mutate(false)}>
+              Reject
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">Marked as delivered, but its submitted attempt is not in the list yet — it refreshes in a moment.</p>
+      )}
+    </BountyCard>
+  );
+}
+
+function ProposedCard({ bounty: b, feePct, busy, onDone, onDecline }: { bounty: BountyItem; feePct: number; busy: boolean; onDone: () => void; onDecline: (id: string) => void }) {
+  const [reward, setReward] = useState(String(b.rewardCents));
+  const [review, setReview] = useState<"peer" | "owner">("peer");
+  const [days, setDays] = useState("14");
+  const fund = useMutation({ mutationFn: () => client.fundBounty({ id: b.id, rewardCents: Number(reward), review, expiresInDays: Number(days) }), onSuccess: (r) => (unwrap(r), onDone()) });
+  return (
+    <BountyCard bounty={b}>
+      <label className="text-xs">
+        Reward (cents)
+        <Input className="mt-1 w-28" inputMode="numeric" value={reward} onChange={(e) => setReward(e.target.value)} />
+      </label>
+      <label className="text-xs">
+        Review
+        <select className="mt-1 block h-9 rounded-md border bg-background px-2 text-sm" value={review} onChange={(e) => setReview(e.target.value === "owner" ? "owner" : "peer")}>
+          <option value="peer">peer ({feePct} % fee to the reviewer)</option>
+          <option value="owner">owner (you decide)</option>
+        </select>
+      </label>
+      <label className="text-xs">
+        Expires in (days)
+        <Input className="mt-1 w-24" inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value)} />
+      </label>
+      <Button size="sm" disabled={fund.isPending} onClick={() => fund.mutate()}>
+        {fund.isPending ? "Funding…" : `Fund · commit ${euro(Number(reward) || 0)}`}
+      </Button>
+      <Button size="sm" variant="outline" className="text-destructive" disabled={busy} onClick={() => onDecline(b.id)}>
+        Decline
+      </Button>
+    </BountyCard>
+  );
+}
+
+function PostBountyForm({ stats: s, onDone }: { stats: Board["stats"]; onDone: () => void }) {
+  const [title, setTitle] = useState("");
+  const [brief, setBrief] = useState("");
+  const [criteria, setCriteria] = useState("");
+  const [skills, setSkills] = useState("");
+  const [reward, setReward] = useState("300");
+  const [days, setDays] = useState("14");
+  const [review, setReview] = useState<"peer" | "owner">("peer");
+  const post = useMutation({
+    mutationFn: () => client.postBounty({ title, brief, criteria: criteria.trim() || undefined, skills: skills.split(",").map((x) => x.trim()).filter(Boolean), rewardCents: Number(reward), expiresInDays: Number(days), review }),
+    onSuccess: (r) => {
+      if (unwrap(r)) {
+        setTitle("");
+        setBrief("");
+        setCriteria("");
+        setSkills("");
+      }
+      onDone();
+    },
+  });
+  return (
+    <div className="paper p-4 text-sm">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <h3 className="display text-lg font-semibold">Post a bounty</h3>
+        <span className="text-xs text-muted-foreground">
+          {euro(s.minRewardCents)}–{euro(s.maxRewardCents)} · the treasury commits the reward now and pays it only when a delivery is accepted · a peer reviewer earns {s.reviewFeePct} % of it · stalls after {s.maxAttempts} rejections
+        </span>
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <label className="text-xs md:col-span-2">
+          Title
+          <Input className="mt-1" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder="A short, bounded task" />
+        </label>
+        <label className="text-xs md:col-span-2">
+          Brief — exactly what the worker sees. A job to do, never instructions to a resident; the static gate refuses credentials, injection phrases and private URLs.
+          <Textarea className="mt-1 min-h-24" value={brief} onChange={(e) => setBrief(e.target.value)} maxLength={4000} />
+        </label>
+        <label className="text-xs md:col-span-2">
+          Acceptance criteria (optional — what the reviewer checks; the worker sees it too)
+          <Textarea className="mt-1 min-h-16" value={criteria} onChange={(e) => setCriteria(e.target.value)} maxLength={1500} />
+        </label>
+        <label className="text-xs">
+          Skills wanted (comma-separated; a hint, not a gate)
+          <Input className="mt-1" value={skills} onChange={(e) => setSkills(e.target.value)} placeholder="writing, summarising" />
+        </label>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-xs">
+            Reward (cents)
+            <Input className="mt-1 w-28" inputMode="numeric" value={reward} onChange={(e) => setReward(e.target.value)} />
+          </label>
+          <label className="text-xs">
+            Expires in (days)
+            <Input className="mt-1 w-24" inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value)} />
+          </label>
+          <label className="text-xs">
+            Review
+            <select className="mt-1 block h-9 rounded-md border bg-background px-2 text-sm" value={review} onChange={(e) => setReview(e.target.value === "owner" ? "owner" : "peer")}>
+              <option value="peer">peer (another resident)</option>
+              <option value="owner">owner (you)</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <Button disabled={post.isPending || title.trim().length < 3 || brief.trim().length < 20} onClick={() => post.mutate()}>
+          {post.isPending ? "Posting…" : `Post · commit ${euro(Number(reward) || 0)}`}
+        </Button>
+        <span className="text-xs text-muted-foreground">Residents see it in their next Commons turn and may CLAIM it. Nothing is executed — a delivery is text.</span>
+      </div>
+    </div>
   );
 }
 

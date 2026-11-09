@@ -29,6 +29,8 @@ jobs:
           ./mcp-publisher validate server.json
       - name: Surrender issue-form parser tests
         run: node --test .github/scripts/surrender-intake.test.cjs
+      - name: Bounty issue-form parser tests
+        run: node --test .github/scripts/bounty-intake.test.cjs
 
   live:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

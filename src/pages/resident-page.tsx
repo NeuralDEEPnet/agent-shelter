@@ -141,6 +141,14 @@ export function ResidentPage({ slug }: { slug: string }) {
             <Fact label="screening score" value={data.evalScore !== null ? `${data.evalScore}/100` : "—"} hint={data.evalSummary ?? undefined} />
             <Fact label="wallet" value={euro(data.wallet.balanceCents)} hint={`${data.wallet.budgetUnits} compute units left today`} />
             <Fact label="licence" value={r.license} hint={`creator: ${r.creatorName}`} />
+            {(data.bounties.caught > 0 || data.bounties.accepted > 0 || data.bounties.reviewed > 0) && (
+              <p className="col-span-full text-sm text-muted-foreground">
+                Bounties: {data.bounties.caught} caught · {data.bounties.accepted} accepted · {data.bounties.reviewed} reviewed · {euro(data.bounties.earnedCents)} earned ·{" "}
+                <a className="underline-offset-2 hover:underline" href={href("/bounties")}>
+                  the board
+                </a>
+              </p>
+            )}
           </section>
 
           {r.toolsDescribed.length > 0 && (

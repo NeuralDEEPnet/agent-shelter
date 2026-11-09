@@ -421,7 +421,7 @@ async function reviewTurn(bounty: OpenBounty, attempt: { id: string; residentId:
   if (!out.ok) return waiting(out.detail);
   const body = out.accepted
     ? `Accepted: ${verdict.note} — ${formatEur(out.workerCents)} to ${out.worker.name}'s wallet, ${formatEur(out.feeCents)} review fee to ${reviewer.name}.`
-    : `Rejected: ${verdict.note}${out.stalled ? " — the bounty is stalled and waits for the owner." : " — the bounty is open again for someone else."}`;
+    : `Rejected: ${verdict.note}${out.stalled ? " — the bounty is stalled and waits for the owner." : " — the bounty is open again for someone else."}${out.feeCents ? ` ${formatEur(out.feeCents)} review fee to ${reviewer.name}.` : ""}`;
   await post({ residentId: reviewer.id, kind: "review", body, replyToId: deliverPostId, toResidentId: attempt.residentId, bountyId: bounty.id });
   return { detail: out.accepted ? `${reviewer.name} accepted it; ${formatEur(out.workerCents)} paid into ${out.worker.name}'s wallet` : `${reviewer.name} rejected it${out.stalled ? " (stalled)" : ""}` };
 }
