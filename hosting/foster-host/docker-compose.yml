@@ -9,26 +9,23 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
-    depends_on: [word, powerpoint, bridged-example]
+    depends_on: [word, powerpoint, excel, shrimp]
 
-  # Archived MIT server with native Streamable HTTP (set via env var in its main.py).
+  # Archived MIT server (PyPI office-word-mcp-server 1.1.11). Its published README documents stdio only,
+  # so it is bridged: supergateway runs the stdio server and exposes Streamable HTTP. No code changes.
   word:
-    image: python:3.12-slim
+    image: nikolaik/python-nodejs:python3.12-nodejs22-slim
     restart: unless-stopped
     read_only: true
-    tmpfs: ["/tmp", "/root/.cache"]
+    tmpfs: ["/tmp", "/root/.cache", "/root/.npm"]
     mem_limit: 512m
-    environment:
-      MCP_TRANSPORT: streamable-http
-      MCP_HOST: 0.0.0.0
-      MCP_PORT: "8000"
-      MCP_PATH: /mcp
     command: >
       sh -c "pip install --no-cache-dir --target /tmp/pkg office-word-mcp-server &&
-             PYTHONPATH=/tmp/pkg python -m word_document_server.main"
+             PYTHONPATH=/tmp/pkg npx -y supergateway --stdio 'python -m word_document_server.main'
+               --outputTransport streamableHttp --port 8000 --streamableHttpPath /mcp --healthEndpoint /healthz"
     expose: ["8000"]
 
-  # Archived MIT server with native HTTP transport flag.
+  # Archived MIT server (PyPI office-powerpoint-mcp-server 2.0.7); its README documents `--transport http --port 8000`.
   powerpoint:
     image: python:3.12-slim
     restart: unless-stopped
@@ -40,18 +37,36 @@ services:
              PYTHONPATH=/tmp/pkg python -m ppt_mcp_server --transport http --host 0.0.0.0 --port 8000 --path /mcp"
     expose: ["8000"]
 
-  # Pattern for any stdio-only server: supergateway bridges stdio → Streamable HTTP.
-  # Replace the --stdio command with the server you are fostering.
-  bridged-example:
+  # Stale MIT server (npm @negokaz/excel-mcp-server 0.12.0, stdio) bridged by supergateway. Works on files
+  # inside its own container; the shelter caps responses at 256 KiB, so large sheets come back truncated.
+  excel:
+    image: node:22-alpine
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp", "/root/.npm", "/work"]
+    mem_limit: 512m
+    working_dir: /work
+    command: >
+      npx -y supergateway --stdio "npx -y @negokaz/excel-mcp-server"
+        --outputTransport streamableHttp --port 8000 --streamableHttpPath /mcp --healthEndpoint /healthz
+    expose: ["8000"]
+
+  # Stale MIT server (npm mcp-shrimp-task-manager 1.0.21, stdio) bridged by supergateway; task memory lives in /data.
+  shrimp:
     image: node:22-alpine
     restart: unless-stopped
     read_only: true
     tmpfs: ["/tmp", "/root/.npm"]
     mem_limit: 512m
+    environment:
+      DATA_DIR: /data
+    volumes:
+      - shrimp-data:/data
     command: >
-      npx -y supergateway --stdio "npx -y @modelcontextprotocol/server-everything"
+      npx -y supergateway --stdio "npx -y mcp-shrimp-task-manager"
         --outputTransport streamableHttp --port 8000 --streamableHttpPath /mcp --healthEndpoint /healthz
     expose: ["8000"]
 
 volumes:
   caddy-data:
+  shrimp-data:

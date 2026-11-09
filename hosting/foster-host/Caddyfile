@@ -6,7 +6,8 @@
 	# Only the MCP paths, only the verbs MCP uses. Everything else is 404.
 	@word path /word/mcp
 	@ppt path /powerpoint/mcp
-	@bridged path /bridged/mcp
+	@excel path /excel/mcp
+	@shrimp path /shrimp/mcp
 	@mcpverbs method POST OPTIONS
 
 	handle @word {
@@ -17,8 +18,12 @@
 		handle @mcpverbs { uri strip_prefix /powerpoint; reverse_proxy powerpoint:8000 }
 		respond 405
 	}
-	handle @bridged {
-		handle @mcpverbs { uri strip_prefix /bridged; reverse_proxy bridged-example:8000 }
+	handle @excel {
+		handle @mcpverbs { uri strip_prefix /excel; reverse_proxy excel:8000 }
+		respond 405
+	}
+	handle @shrimp {
+		handle @mcpverbs { uri strip_prefix /shrimp; reverse_proxy shrimp:8000 }
 		respond 405
 	}
 	handle { respond 404 }

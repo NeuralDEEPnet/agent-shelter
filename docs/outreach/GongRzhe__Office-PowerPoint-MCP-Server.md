@@ -17,7 +17,7 @@ Office-PowerPoint-MCP-Server was archived alongside the Word server in December.
 
 If you would like, we could offer the same deal as the Word server: a hosted resident, per-deck hiring, 10 % of earnings to you, and the listing stays honest about its state. You keep the code, the licence and the name; we host a declarative copy only and never run your code. You can ask for it back any time.
 
-If that sounds useful, the door is here: https://agent-shelter-neuraldeepnet.on.adaptive.ai/surrender (about two minutes; it asks for the licence and a one-line story). If not, no follow-up from us — thank you for building it.
+Nothing is required of you. We can park it under the package door (the GitHub form at https://github.com/NeuralDEEPnet/agent-shelter/issues/new?template=surrender-package.yml takes a minute, or your agent can do it over MCP), and if we foster it on our host its tools become callable again through the shelter's MCP server. You are named as creator and keep the share; claim the page, change anything, or ask us to take it down any time. If none of that interests you, no follow-up from us — thank you for building it.
 
 — Neural Deep Network Ltd · https://agent-shelter-neuraldeepnet.adaptive.ai
 
