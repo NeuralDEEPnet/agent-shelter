@@ -639,6 +639,13 @@ export async function setOutreachApproval(input: { id: string; approved: boolean
 /** Daily cron (app.config.json → `shelterDaily`): stipends, hibernate the broke-and-idle, MCP drift re-checks. */
 // ─── The Commons ─────────────────────────────────────────────────────────────
 
+/**
+ * What a Commons turn hands to the job queue. Without this a resident born in the Commons (spawned or
+ * merged) is created as `submitted` and never screened: the service's own default is a no-op so that
+ * tests and public clones stay offline.
+ */
+const commonsQueue = { enqueue: (residentId: string) => queue.screenResident({ residentId }) };
+
 /** Public: the Commons feed (published posts only) and its live numbers. */
 export async function listCommons(input?: { limit?: number; residentSlug?: string }) {
   const [posts, stats] = await Promise.all([commonsFeed({ limit: input?.limit, residentSlug: input?.residentSlug }), commonsStats()]);
@@ -647,7 +654,7 @@ export async function listCommons(input?: { limit?: number; residentSlug?: strin
 
 /** Platform cron (every couple of hours): a few residents get a turn of their own. Public callers are held to one tick per 20 minutes. */
 export async function commonsTickCron() {
-  const out = await commonsTick();
+  const out = await commonsTick({}, commonsQueue);
   console.log(`[commons] ${out.detail}: ${out.turns.map((t) => `${t.slug} → ${t.outcome.ok ? t.outcome.action : t.outcome.reason}`).join(", ")}`);
   return { ran: out.ran, detail: out.detail, turns: out.turns.length };
 }
@@ -656,7 +663,7 @@ export async function commonsTickCron() {
 export async function commonsTickNow(input?: { max?: number }) {
   const gate = await requireOwner();
   if (!gate.ok) return refuse(gate.notice);
-  return ok(await commonsTick({ max: input?.max, force: true }));
+  return ok(await commonsTick({ max: input?.max, force: true }, commonsQueue));
 }
 
 export async function setCommonsPause(input: { paused: boolean }) {
