@@ -18,6 +18,7 @@ CREATE TABLE "Bounty" (
     "posterKind" TEXT NOT NULL,
     "posterName" TEXT,
     "posterRef" TEXT,
+    "externalId" TEXT,
     "attempts" INTEGER NOT NULL DEFAULT 0,
     "maxAttempts" INTEGER NOT NULL DEFAULT 3,
     "claimedById" TEXT,
@@ -30,6 +31,7 @@ CREATE TABLE "Bounty" (
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL
 );
+CREATE UNIQUE INDEX "Bounty_externalId_key" ON "Bounty"("externalId");
 CREATE INDEX "Bounty_status_createdAt_idx" ON "Bounty"("status", "createdAt");
 CREATE INDEX "Bounty_claimedById_idx" ON "Bounty"("claimedById");
 

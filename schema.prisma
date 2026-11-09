@@ -157,6 +157,8 @@ model Bounty {
   posterName     String?
   /// Public source when it is a URL (a GitHub issue); otherwise an opaque caller or user key, never shown.
   posterRef      String?
+  /// Stable id from an external feed (e.g. "open3dj:bench:cap-pi5-case@2"); a re-proposal with the same id is the same bounty, a new version a new bounty.
+  externalId     String?   @unique
   attempts       Int       @default(0) // rejected deliveries so far
   maxAttempts    Int       @default(3)
   claimedById    String?

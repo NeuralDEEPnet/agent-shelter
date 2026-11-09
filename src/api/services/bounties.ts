@@ -71,6 +71,8 @@ export const proposalInputSchema = bountyInputSchema.omit({ review: true, expire
   posterName: z.string().trim().max(60).optional(),
   /** A public https URL that explains who is asking (a GitHub issue, a project page). Shown when present. */
   posterRef: z.string().trim().url().max(300).optional(),
+  /** Stable id from an external feed (e.g. "open3dj:bench:cap-pi5-case@2"). Re-proposing the same id returns the existing bounty instead of a second one. */
+  externalId: z.string().trim().min(1).max(120).optional(),
 });
 export type ProposalInput = z.infer<typeof proposalInputSchema>;
 
@@ -150,7 +152,7 @@ export function resetProposalQuotas() {
 
 // ─── Posting, proposing, funding ─────────────────────────────────────────────
 
-export type PostOutcome = { ok: true; bounty: BountyRow } | { ok: false; reason: "invalid" | "refused" | "paused" | "cap"; detail: string };
+export type PostOutcome = { ok: true; bounty: BountyRow; duplicate?: boolean } | { ok: false; reason: "invalid" | "refused" | "paused" | "cap"; detail: string };
 
 type BountyRow = Awaited<ReturnType<typeof db.bounty.create>>;
 
@@ -209,6 +211,11 @@ export async function proposeBounty(raw: unknown, ctx: { posterKind: "user" | "a
   if (s.paused) return { ok: false, reason: "paused", detail: s.pauseReason?.trim() || "The shelter is paused." };
   const bad = moderateBountyText(textsOf(input), input.posterRef ? [input.posterRef] : []);
   if (bad) return { ok: false, reason: "refused", detail: `The proposal failed the static gate (${bad}). Remove credentials, instructions to residents and private URLs.` };
+  if (input.externalId) {
+    // Feeds re-publish: the same external id is the same bounty, whatever its state by now.
+    const existing = await db.bounty.findUnique({ where: { externalId: input.externalId } });
+    if (existing) return { ok: true, bounty: existing, duplicate: true };
+  }
   const openProposals = await db.bounty.count({ where: { status: "proposed" } });
   if (openProposals >= MAX_OPEN_PROPOSALS) return { ok: false, reason: "cap", detail: `${MAX_OPEN_PROPOSALS} proposals are already waiting for the owner. Try again once some are funded or cleared.` };
   const posterKind = input.posterRef && /^https:\/\/github\.com\//i.test(input.posterRef) ? "github" : ctx.posterKind;
@@ -226,6 +233,7 @@ export async function proposeBounty(raw: unknown, ctx: { posterKind: "user" | "a
       posterName: input.posterName?.trim() || null,
       // A public https URL is shown; anything else (a caller key, a user id) stays an opaque reference.
       posterRef: input.posterRef ?? ctx.posterRef ?? null,
+      externalId: input.externalId ?? null,
     },
   });
   await audit({ actor: "agent", action: "bounty-proposed", detail: `${bounty.id} "${bounty.title}" ${formatEur(bounty.rewardCents)} by ${posterKind}${bounty.posterName ? ` (${bounty.posterName})` : ""}` });
@@ -477,6 +485,7 @@ export type BountyView = {
   review: string;
   funded: boolean;
   poster: { kind: string; name: string | null; url: string | null };
+  externalId: string | null;
   attempts: number;
   maxAttempts: number;
   claimedBy: { slug: string; name: string } | null;
@@ -534,6 +543,7 @@ function view(b: BountyWithWork, claimed: Map<string, { slug: string; name: stri
     review: b.review,
     funded: Boolean(b.fundedAt),
     poster: { kind: b.posterKind, name: b.posterName, url: b.posterRef && /^https:\/\//i.test(b.posterRef) ? b.posterRef : null },
+    externalId: b.externalId,
     attempts: b.attempts,
     maxAttempts: b.maxAttempts,
     claimedBy: b.claimedById ? (claimed.get(b.claimedById) ?? null) : null,
