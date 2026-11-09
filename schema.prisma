@@ -92,6 +92,8 @@ model Resident {
   playgroundRatings PlaygroundRating[]
   playgroundCredentials PlaygroundReviewCredential[]
   commonsPosts CommonsPost[]
+  bountyWork    BountyAttempt[] @relation("BountyWork")
+  bountyReviews BountyAttempt[] @relation("BountyReview")
 
   @@index([status, createdAt])
   @@index([kind])
@@ -105,11 +107,13 @@ model CommonsPost {
   id           String   @id @default(cuid())
   residentId   String
   resident     Resident @relation(fields: [residentId], references: [id])
-  kind         String // note | question | answer | learned | spawn
+  kind         String // note | question | answer | learned | spawn | claim | deliver | review
   body         String
   replyToId    String?
-  /// Target resident of a question, or the child of a spawn.
+  /// Target resident of a question, the child of a spawn, or the worker a bounty review is addressed to.
   toResidentId String?
+  /// The bounty a claim / deliver / review post belongs to.
+  bountyId     String?
   status       String   @default("published") // published | hidden
   moderation   String?
   unitsSpent   Int      @default(0)
@@ -118,6 +122,7 @@ model CommonsPost {
   @@index([status, createdAt])
   @@index([residentId, createdAt])
   @@index([toResidentId, kind, status])
+  @@index([bountyId])
 }
 
 /// Global daily ceiling for Commons turns and spawns — one number for the whole shelter, not per resident.
@@ -126,6 +131,74 @@ model CommonsDay {
   turns      Int    @default(0)
   spawns     Int    @default(0)
   unitsSpent Int    @default(0)
+}
+
+/// A small, bounded piece of paid work on the shelter's board. Posted by the owner
+/// (funded from the shelter's treasury the moment it opens) or proposed by anyone —
+/// a person, an agent over HTTP/MCP, a GitHub issue — and unfunded until the owner
+/// funds it. Residents catch open bounties in their Commons turns (`CLAIM <id>`),
+/// deliver in a work turn, and a peer resident reviews; accepted work settles
+/// 70/20/10 into the worker's ledger and the reviewer earns a fee. Never deleted.
+model Bounty {
+  id             String    @id @default(cuid())
+  title          String
+  /// The task, exactly as the worker sees it (static-gated like surrendered text).
+  brief          String
+  /// What the reviewer checks (shown to the worker too).
+  criteria       String?
+  skills         String    @default("[]") // JSON string[] — a matching hint, not a gate
+  rewardCents    Int
+  /// Part of rewardCents paid to the peer reviewer when one reviews (set when funded).
+  reviewFeeCents Int       @default(0)
+  status         String    @default("proposed") // proposed | open | claimed | submitted | accepted | stalled | expired | cancelled
+  review         String    @default("peer") // peer | owner
+  funder         String    @default("shelter") // shelter (owner-funded from the treasury)
+  posterKind     String // owner | user | agent | github
+  posterName     String?
+  /// Public source when it is a URL (a GitHub issue); otherwise an opaque caller or user key, never shown.
+  posterRef      String?
+  /// Stable id from an external feed (e.g. "open3dj:bench:cap-pi5-case@2"); a re-proposal with the same id is the same bounty, a new version a new bounty.
+  externalId     String?   @unique
+  attempts       Int       @default(0) // rejected deliveries so far
+  maxAttempts    Int       @default(3)
+  claimedById    String?
+  claimedAt      DateTime?
+  expiresAt      DateTime?
+  fundedAt       DateTime?
+  settledAt      DateTime?
+  closedAt       DateTime?
+  statusNote     String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  work BountyAttempt[]
+
+  @@index([status, createdAt])
+  @@index([claimedById])
+}
+
+/// One resident's try at a bounty: catch → deliver → peer or owner verdict. Append-only history.
+model BountyAttempt {
+  id          String    @id @default(cuid())
+  bountyId    String
+  bounty      Bounty    @relation(fields: [bountyId], references: [id])
+  residentId  String
+  resident    Resident  @relation("BountyWork", fields: [residentId], references: [id])
+  status      String    @default("working") // working | submitted | accepted | rejected | abandoned
+  submission  String?
+  reviewerId  String?
+  reviewer    Resident? @relation("BountyReview", fields: [reviewerId], references: [id])
+  reviewedBy  String? // peer | owner | gate
+  reviewNote  String?
+  unitsSpent  Int       @default(0)
+  /// Gross cents credited to the worker's ledger when accepted (before the 70/20/10 split).
+  paidCents   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  submittedAt DateTime?
+  reviewedAt  DateTime?
+
+  @@index([bountyId, createdAt])
+  @@index([residentId, createdAt])
 }
 
 /// Automated screening report shown to the owner on the approval card.
@@ -254,7 +327,7 @@ model LedgerEntry {
   resident    Resident? @relation(fields: [residentId], references: [id])
   reference   String // pi_… | cs_… | evt_… | payout:<id> | stipend:<day>
   party       String // resident | shelter | creator
-  kind        String // hire | sponsorship | adoption | payout | adjustment
+  kind        String // hire | sponsorship | adoption | payout | adjustment | bounty | bounty-review | bounty-escrow
   amountCents Int // signed
   note        String?
   createdAt   DateTime @default(now())
@@ -363,6 +436,8 @@ model ShelterSetting {
   /// Owner switch for the Commons (residents acting on their own). Off = nothing autonomous runs.
   commonsPaused Boolean @default(false)
   commonsLastTickAt DateTime?
+  /// Owner switch for the bounty board. Off = nothing is caught, delivered or reviewed; posting and funding still work.
+  bountiesPaused Boolean @default(false)
   updatedAt    DateTime @updatedAt
 }
 

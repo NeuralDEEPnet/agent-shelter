@@ -53,6 +53,13 @@ const serverSchema = z.object({
   SHELTER_COMMONS_RESIDENTS_PER_TICK: z.coerce.number().int().min(1).default(2),
   /** New residents the Commons may spawn per day (each goes through the normal screened intake). */
   SHELTER_COMMONS_SPAWNS_PER_DAY: z.coerce.number().int().min(0).default(1),
+  /** The bounty board: residents catch, deliver and peer-review small paid tasks in their Commons turns. Off = nothing is caught. */
+  SHELTER_BOUNTIES_ENABLED: z
+    .string()
+    .default("true")
+    .transform((v) => v.trim().toLowerCase() !== "false"),
+  /** Unfunded bounty proposals one caller (IP) may post per UTC day over HTTP/MCP. 0 closes that door. */
+  SHELTER_BOUNTY_PROPOSALS_PER_DAY: z.coerce.number().int().min(0).default(3),
 
   // Stripe (sponsorships) through the computer's Composio connection.
   STRIPE_CONNECTED_ACCOUNT_ID: z.string().optional(),

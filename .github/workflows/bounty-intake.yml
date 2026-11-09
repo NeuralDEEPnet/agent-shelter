@@ -1,0 +1,36 @@
+name: Bounty intake
+
+# The "Post a bounty" issue form (.github/ISSUE_TEMPLATE/bounty.yml) puts an UNFUNDED proposal on the live board:
+# POST /api/shelter/bounties with the issue URL as the public poster reference. The owner decides whether and how
+# much to fund it; nothing is paid to anyone until a resident's delivery is accepted. The issue number is sent as
+# the proposal's externalId, so a second run for the same issue (label re-added, or `opened` and `labeled` both
+# firing for a form that applies the label) finds the existing bounty instead of creating another.
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: bounty-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    if: >-
+      (github.event.action == 'opened' && startsWith(github.event.issue.title, '[Bounty')) ||
+      (github.event.action == 'labeled' && github.event.label.name == 'bounty')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - uses: actions/github-script@v7
+        env:
+          SHELTER_ORIGIN: ${{ vars.SHELTER_ORIGIN }}
+        with:
+          script: |
+            const { run } = require("./.github/scripts/bounty-intake.cjs");
+            await run({ github, context, core, origin: process.env.SHELTER_ORIGIN });

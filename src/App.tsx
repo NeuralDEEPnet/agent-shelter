@@ -13,6 +13,7 @@ const SurrenderPage = lazy(() => import("@/pages/surrender-page").then(m => ({ d
 const PlaygroundPage = lazy(() => import("@/pages/playground-page").then(m => ({ default: m.PlaygroundPage })));
 const MachinePage = lazy(() => import("@/pages/me-page").then(m => ({ default: m.MachinePage })));
 const CommonsPage = lazy(() => import("@/pages/commons-page").then(m => ({ default: m.CommonsPage })));
+const BountiesPage = lazy(() => import("@/pages/bounties-page").then(m => ({ default: m.BountiesPage })));
 const MePage = lazy(() => import("@/pages/me-page").then(m => ({ default: m.MePage })));
 const SponsorReturnPage = lazy(() => import("@/pages/me-page").then(m => ({ default: m.SponsorReturnPage })));
 
@@ -44,6 +45,8 @@ function RoutePage() {
       return <MachinePage />;
     case "commons":
       return <CommonsPage />;
+    case "bounties":
+      return <BountiesPage />;
     case "sponsor-return":
       return <SponsorReturnPage sessionId={route.sessionId} />;
     default:

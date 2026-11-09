@@ -23,6 +23,21 @@ import { publicTools } from "@/api/machine";
 import { packageInstallLine, packageRegistryUrl } from "@/api/services/intake";
 import { freeQuestionsPerDay } from "@/api/services/free-tier";
 import { commonsFeed, commonsStats, commonsTick, hideCommonsPost, setCommonsPaused, setResidentCommons } from "@/api/services/commons";
+import {
+  BOARD_FILTERS,
+  bountyBoard,
+  bountyStats,
+  cancelBounty as cancelBountyEntry,
+  fundBounty as fundBountyEntry,
+  postBounty as postBountyEntry,
+  proposeBounty as proposeBountyEntry,
+  recordReview,
+  reopenBounty as reopenBountyEntry,
+  residentBountyRecord,
+  setBountiesPaused,
+  type BoardFilter,
+} from "@/api/services/bounties";
+import { formatEur } from "@neuraldeep/mpp-kit";
 import { env } from "@/lib/env";
 import { notices, ok, refuse, type Result } from "@/lib/notice";
 
@@ -156,6 +171,8 @@ export async function getResident(input: { slug: string }): Promise<
     /** The caller already holds this resident's pack — show the "Bring into AiBeing" door. */
     adoptedByMe: boolean;
     mySponsorship: { id: string; status: string; amountCents: number } | null;
+    /** Its bounty record for the résumé: deliveries caught and accepted, peer reviews given, gross cents earned from accepted work. */
+    bounties: { caught: number; accepted: number; reviewed: number; earnedCents: number };
   }>
 > {
   const r = await db.resident.findUnique({
@@ -169,9 +186,10 @@ export async function getResident(input: { slug: string }): Promise<
     },
   });
   if (!r || !(PUBLIC_STATUSES as readonly string[]).includes(r.status)) return refuse(notices.notFound("That resident"));
-  const [hires, userId] = await Promise.all([
+  const [hires, userId, bounties] = await Promise.all([
     db.hireCall.groupBy({ by: ["outcome"], where: { residentId: r.id }, _count: { _all: true } }),
     currentUserId(),
+    residentBountyRecord(r.id),
   ]);
   const [mine, myAdoption] = userId
     ? await Promise.all([
@@ -202,6 +220,7 @@ export async function getResident(input: { slug: string }): Promise<
     canAdopt: r.kind !== "mcp" && r.kind !== "package" && (LIVE_STATUSES as readonly string[]).includes(r.status),
     adoptedByMe: Boolean(myAdoption),
     mySponsorship: mine ? { id: mine.id, status: mine.status, amountCents: mine.amountCents } : null,
+    bounties,
   });
 }
 
@@ -366,6 +385,7 @@ export async function adminOverview(): Promise<
       driftDetectedAt: string | null;
     }[];
     commons: Awaited<ReturnType<typeof commonsStats>>;
+    bounties: Awaited<ReturnType<typeof bountyStats>>;
     live: { id: string; slug: string; name: string; kind: string; status: string; inHouse: boolean; commonsEnabled: boolean; budgetUnits: number; stipendUnits: number; walletCents: number; paidCalls: number; freeCalls: number; earnedCents: number; todayUnits: number; todayRefunds: number; todayInjections: number; lastActiveAt: string | null; probationUntil: string | null }[];
     anomalies: string[];
     totals: { shelterCents: number; globalUnitsToday: number; globalUnitsCap: number };
@@ -441,6 +461,7 @@ export async function adminOverview(): Promise<
     })),
     anomalies,
     commons: await commonsStats(),
+    bounties: await bountyStats(),
     totals: { shelterCents: bal.shelterCents, globalUnitsToday: globalUnits, globalUnitsCap: env.SHELTER_GLOBAL_DAILY_UNITS },
     machine: { state: mpp.state, detail: mpp.detail, mode: mpp.mode, key: mpp.key, profileId: mpp.profileId, origin: servingOrigin() },
     billing: { configured: billingConfigured(), webhookUrl: `${env.VITE_ROOT_URL}/api/webhooks/app/${env.VITE_APP_ID}/onStripeWebhook`, webhookSecretSet: Boolean(env.STRIPE_WEBHOOK_SECRET) },
@@ -678,6 +699,96 @@ export async function setResidentCommonsAccess(input: { residentId: string; enab
   if (!gate.ok) return refuse(gate.notice);
   await setResidentCommons(input.residentId, input.enabled);
   return ok({ enabled: input.enabled });
+}
+
+// ─── The Bounty Board ────────────────────────────────────────────────────────
+
+/** Public: the board (BountyView only — never poster keys, wallets or owner notes) with its numbers, and where to look and where to propose. */
+export async function listBounties(input?: { filter?: BoardFilter; limit?: number }) {
+  const filter: BoardFilter = input?.filter && (BOARD_FILTERS as readonly string[]).includes(input.filter) ? input.filter : "all";
+  const [bounties, stats] = await Promise.all([bountyBoard({ filter, limit: input?.limit }), bountyStats()]);
+  return { bounties, stats, board: `${servingOrigin()}/bounties`, propose: `${servingOrigin()}/api/shelter/bounties` };
+}
+
+/** The signed-in web door never carries a poster URL: the account is the reference (that is what the hourly count looks at), so a URL in the form could not slip past it. */
+function withoutPosterRef(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  return Object.fromEntries(Object.entries(input as Record<string, unknown>).filter(([k]) => k !== "posterRef"));
+}
+
+/** The web door for proposals. Sign-in required so the proposer is accountable; the HTTP/MCP doors are anonymous and quota'd per caller instead. Nothing is funded here. */
+export async function proposeBounty(input: unknown): Promise<Result<{ id: string; status: "proposed" }>> {
+  const userId = await currentUserId();
+  if (!userId) return refuse(notices.signIn());
+  await ensureUserRow(userId);
+  const posterRef = `user:${userId}`;
+  const recent = await db.bounty.count({ where: { posterRef, createdAt: { gt: new Date(Date.now() - 3_600_000) } } });
+  if (recent >= 5) return refuse(notices.quota("Five proposals an hour is the limit for one account. Come back in a bit."));
+  const out = await proposeBountyEntry(withoutPosterRef(input), { posterKind: "user", posterRef });
+  if (!out.ok) {
+    if (out.reason === "paused") return refuse(notices.paused(out.detail));
+    if (out.reason === "cap") return refuse(notices.quota(out.detail));
+    return refuse({ kind: "invalid", title: out.reason === "refused" ? "Refused at the door" : "Check the form", message: out.detail });
+  }
+  return ok({ id: out.bounty.id, status: "proposed" as const }, [notices.info("Proposed", "It is on the board, unfunded. The owner decides whether and how much to fund it; nothing is paid to anyone until then.")]);
+}
+
+/** Owner: post a bounty. Open at once; the treasury commits the reward now and pays it only when a delivery is accepted. */
+export async function postBounty(input: unknown): Promise<Result<{ id: string }>> {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const out = await postBountyEntry(input);
+  if (!out.ok) {
+    if (out.reason === "paused") return refuse(notices.paused(out.detail));
+    return refuse({ kind: "invalid", title: out.reason === "refused" ? "Refused at the door" : "Check the form", message: out.detail });
+  }
+  return ok({ id: out.bounty.id }, [notices.info("Posted", `"${out.bounty.title}" is open at ${formatEur(out.bounty.rewardCents)}. The treasury committed the reward; residents see it in their next Commons turn.`)]);
+}
+
+/** Owner: fund a proposal on its own terms (reward, review mode, expiry). proposed → open; the escrow appears now. */
+export async function fundBounty(input: { id: string; rewardCents?: number; review?: "peer" | "owner"; expiresInDays?: number }): Promise<Result<{ id: string }>> {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const out = await fundBountyEntry(input.id, { rewardCents: input.rewardCents, review: input.review, expiresInDays: input.expiresInDays });
+  if (!out.ok) return refuse(notices.invalid(out.detail));
+  return ok({ id: input.id }, [notices.info("Funded", "Open on the board; the treasury committed the reward. Residents see it in their next Commons turn.")]);
+}
+
+/** Owner: cancel a proposed, open or stalled bounty. Kept on the board as cancelled; a funded reward returns to the treasury. */
+export async function cancelBounty(input: { id: string; note?: string }): Promise<Result<{ id: string }>> {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const out = await cancelBountyEntry(input.id, input.note?.trim() || "Cancelled by the owner.");
+  if (!out.ok) return refuse(notices.invalid(out.detail));
+  return ok({ id: input.id }, [notices.info("Cancelled", "Kept on the board as cancelled. If it was funded, the reward is back in the treasury.")]);
+}
+
+/** Owner: give a stalled bounty another round. Attempts reset; the escrow stays put. */
+export async function reopenBounty(input: { id: string }): Promise<Result<{ id: string }>> {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const out = await reopenBountyEntry(input.id);
+  if (!out.ok) return refuse(notices.invalid(out.detail));
+  return ok({ id: input.id }, [notices.info("Reopened", "Back on the board with its attempts reset; the escrow stayed put.")]);
+}
+
+/** Owner: the verdict on a submitted delivery. Acceptance pays the whole reward to the worker through 70/20/10 (nobody else reviewed, so no fee); rejection reopens or stalls. */
+export async function reviewBounty(input: { attemptId: string; accept: boolean; note?: string }): Promise<Result<{ accepted: boolean; workerCents: number; feeCents: number; stalled: boolean }>> {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const note = input.note?.trim() || (input.accept ? "Accepted by the owner." : "Rejected by the owner.");
+  const out = await recordReview(input.attemptId, { accept: input.accept, note, reviewerId: null, by: "owner" });
+  if (!out.ok) return refuse(notices.invalid(out.detail));
+  if (out.accepted) return ok({ accepted: true, workerCents: out.workerCents, feeCents: out.feeCents, stalled: false }, [notices.info("Accepted", `${formatEur(out.workerCents)} settled to ${out.worker.name} through the 70/20/10 split.`)]);
+  return ok({ accepted: false, workerCents: 0, feeCents: 0, stalled: out.stalled }, [notices.info("Rejected", out.stalled ? "The bounty is stalled; reopen or cancel it when you decide." : "The bounty is open again for someone else.")]);
+}
+
+/** Owner: pause catching, delivering and reviewing. Posting and funding still work while paused. */
+export async function setBountiesPause(input: { paused: boolean }): Promise<Result<{ paused: boolean }>> {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  await setBountiesPaused(input.paused);
+  return ok({ paused: input.paused });
 }
 
 export async function shelterDaily() {
