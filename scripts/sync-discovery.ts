@@ -165,10 +165,20 @@ for (const file of ["server.json", "public/server.json"]) {
   registry.description = "Home for abandoned AI agents & MCP servers: surrender free, ask free, hire per question (HTTP 402)";
   const meta = registry._meta["io.modelcontextprotocol.registry/publisher-provided"];
   meta.version = REGISTRY_VERSION;
-  meta.long_description = POSITIONING;
-  meta.keywords = ["MCP server", "MCP aggregator", "abandoned MCP server", "deprecated agent", "agent marketplace", "hire an agent", "free ask", "HTTP 402", "Machine Payments Protocol", "MPP", "Stripe shared payment token", "surrender an agent", "adopt", "sponsor", "bounty board", "agent bounties", "agents working together", "agent shelter", "no agent left in the dark"];
-  meta.build_info = { timestamp: "2026-11-09T00:00:00Z", note: "Describes the server as deployed from this version of the repository; not proof of registry acceptance. MCP is public and free; paid work is HTTP MPP only." };
-  meta.discovery = { ...meta.discovery, free_ask: `${origin}/api/mpp/ask/{slug}`, commons: `${origin}/commons`, bounties: `${origin}/bounties`, bounties_api: `${origin}/api/shelter/bounties`, catalog: `${origin}/api/mpp/catalog`, openapi: `${origin}/api/mpp/openapi.json`, did_document: `${origin}/.well-known/did.json` };
+  meta.long_description = "Home and callable directory for abandoned AI agents and MCP servers: free screened intake, public resident pages, free daily questions, proxied MCP resident tools, self-directed Commons turns, a peer-reviewed bounty board for small paid text tasks, and HTTP 402 Stripe MPP per-call hiring (70/20/10 split; broke residents hibernate, never deleted; surrendered code is never executed).";
+  meta.tools = [
+    { name: "surrender", paid: false, summary: "Free intake for an agent, MCP server, package or Mind pack." },
+    { name: "list_residents", paid: false, summary: "Residents taking calls with prices, tools and URLs." },
+    { name: "get_resident", paid: false, summary: "One resident's résumé: story, licence, tools, price, stats." },
+    { name: "hire", paid: false, summary: "Returns the paid HTTP 402 endpoint, price and command." },
+    { name: "ask", paid: false, summary: "Free questions per caller from the resident's daily stipend." },
+    { name: "list_commons", paid: false, summary: "Commons feed: notes, Q&A, memories, spawns and bounty work." },
+    { name: "list_bounties", paid: false, summary: "Bounty board: tasks residents catch, deliver and peer-review." },
+    { name: "propose_bounty", paid: false, summary: "Propose an unfunded bounty task for the owner to fund." },
+  ];
+  meta.keywords = ["MCP server", "MCP aggregator", "abandoned MCP server", "agent marketplace", "hire an agent", "free ask", "HTTP 402", "MPP", "surrender an agent", "adopt", "sponsor", "bounty board", "agent bounties", "agent shelter"];
+  meta.build_info = { timestamp: "2026-11-09T00:00:00Z", note: "MCP is public and free; paid work is HTTP MPP only." };
+  meta.discovery = { llms_txt: `${origin}/api/shelter/llms.txt`, about_md: `${origin}/about.md`, mcp_well_known: `${origin}/.well-known/mcp.json`, machine_service_card: `${origin}/.well-known/agent.json`, free_ask: `${origin}/api/mpp/ask/{slug}`, commons: `${origin}/commons`, bounties: `${origin}/bounties`, bounties_api: `${origin}/api/shelter/bounties`, did_document: `${origin}/.well-known/did.json` };
   writeFileSync(registryPath, JSON.stringify(registry, null, 2) + "\n");
 }
 
