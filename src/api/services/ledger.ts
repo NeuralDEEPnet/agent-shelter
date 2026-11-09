@@ -32,7 +32,8 @@ export function splitCents(total: number, creatorSharePct: number = DEFAULT_CREA
 export type SettleInput = {
   residentId: string;
   reference: string;
-  kind: "hire" | "sponsorship" | "adoption";
+  /** `bounty` = a worker's accepted bounty; `bounty-review` = the peer reviewer's fee. Both split 70/20/10 like any other euro. */
+  kind: "hire" | "sponsorship" | "adoption" | "bounty" | "bounty-review";
   amountCents: number;
   creatorSharePct: number;
   note?: string;
@@ -65,6 +66,37 @@ export async function settle(input: SettleInput): Promise<SettleOutcome> {
     throw error;
   }
   return { outcome: "settled", split };
+}
+
+/**
+ * The shelter's treasury commits a bounty reward the moment the bounty opens
+ * (one negative `shelter` row) and gets it back if the bounty expires or is
+ * cancelled (one positive row). Both are idempotent by reference, so a replay
+ * reports `duplicate` and moves nothing. Settlement to the worker and the
+ * reviewer goes through `settle()` and therefore the 70/20/10 split — the
+ * shelter's 20 % flows back, so a funded bounty costs the treasury 80 % of
+ * its reward in the end.
+ */
+export async function escrowBounty(input: { bountyId: string; amountCents: number; title: string }): Promise<"escrowed" | "duplicate" | "invalid"> {
+  if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) return "invalid";
+  try {
+    await db.ledgerEntry.create({ data: { residentId: null, reference: `bounty:${input.bountyId}:escrow`, party: "shelter", kind: "bounty-escrow", amountCents: -input.amountCents, note: `Escrow for bounty "${input.title.slice(0, 80)}"` } });
+    return "escrowed";
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") return "duplicate";
+    throw error;
+  }
+}
+
+export async function refundBountyEscrow(input: { bountyId: string; amountCents: number; why: string }): Promise<"refunded" | "duplicate" | "invalid"> {
+  if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) return "invalid";
+  try {
+    await db.ledgerEntry.create({ data: { residentId: null, reference: `bounty:${input.bountyId}:refund`, party: "shelter", kind: "bounty-escrow", amountCents: input.amountCents, note: `Escrow returned: ${input.why.slice(0, 120)}` } });
+    return "refunded";
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") return "duplicate";
+    throw error;
+  }
 }
 
 /** Owner marks money as paid out (creator share) or spent (resident share on external costs). */
