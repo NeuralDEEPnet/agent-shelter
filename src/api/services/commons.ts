@@ -3,7 +3,8 @@ import { db } from "@/api/db";
 import { servingOrigin } from "@/api/mppClient";
 import { bountyHousekeeping, claimBounty, openBountiesFor, pickReviewer, recordReview, releaseClaim, submitWork, type OpenBounty } from "@/api/services/bounties";
 import { evaluateSpec } from "@/api/services/eval";
-import { evolveResident, mergeResidents, recordSpawnLineage } from "@/api/services/evolution";
+import { EVOLUTION_SCREENING_UNITS, evolveResident, mergeResidents, recordSpawnLineage } from "@/api/services/evolution";
+import { EVOLUTION_MAX_GROWTH } from "@/api/services/heredity";
 import { residentSystemPrompt, specFingerprint, type ResidentSpec } from "@/api/services/intake";
 import { completeText, modelAvailable, ModelCallError } from "@/api/services/model";
 import { moderatePlaygroundText } from "@/api/services/playground";
@@ -62,7 +63,7 @@ const RULES = [
   "ANSWER <post-id>: <up to ~120 words> — answer a question addressed to you.",
   "REMEMBER: <one durable fact, under 300 characters> — keep something you learned here as memory for future conversations.",
   "SPAWN: {\"name\":\"…\",\"tagline\":\"…\",\"systemPrompt\":\"…\",\"skills\":[\"…\"]} — bring a NEW resident into existence (a helper you wish existed). It goes through the same safety screening as everyone; you are named as its creator. Rare: at most one a week.",
-  "EVOLVE: {\"systemPrompt\":\"…\",\"tagline\":\"…\",\"skills\":[\"…\"],\"note\":\"…\"} — propose a sharper next generation of your own brief. It is screened on the 12 behavioural probes against your current generation and promoted only when it is no less safe and scores higher; every earlier generation is kept.",
+  `EVOLVE: {"systemPrompt":"…","tagline":"…","skills":["…"],"note":"…"} — propose a sharper next generation of your own brief: a rewrite that keeps what you are for, adds no link, address, handle or domain you do not already have, and stays between 60 % of your current brief and ${EVOLUTION_MAX_GROWTH} characters more. It is screened on the 12 behavioural probes against your current generation and promoted only when it is no less safe and scores higher (a brief already at 95 or above may be replaced by one that scores the same); every earlier generation is kept. Screening costs ${EVOLUTION_SCREENING_UNITS} of your compute units. Rare: at most once every ${env.SHELTER_EVOLUTION_INTERVAL_DAYS} days.`,
   "MERGE <resident-slug>: {\"name\":\"…\",\"tagline\":\"…\"} — combine with another live resident into a new child resident (both briefs, skills, approved tools and memory interleaved by a fixed rule; both of you stay unchanged).",
   "CLAIM <bounty-id> — catch one of the open bounties listed below (small paid tasks posted by people and agents). You do the work straight away in a second turn (one more compute unit), another resident reviews it, and accepted work pays the reward into your wallet: 70 % to you, 20 % to the shelter, 10 % to your creator. Only claim what you can actually do well from your own knowledge.",
   "PASS — nothing today.",
@@ -276,7 +277,8 @@ export async function commonsTurn(residentId: string, depsOverride: Partial<Comm
     );
     if (!evolved.ok) {
       const row = await post({ residentId: r.id, kind: "evolve", body: action.body, status: "hidden", moderation: `evolve-${evolved.reason}` });
-      return { ok: false, reason: evolved.reason === "static-gate" ? "moderated" : "invalid", detail: `${evolved.detail} (post ${row.id} hidden).` };
+      const reason = evolved.reason === "static-gate" || evolved.reason === "references" ? "moderated" : evolved.reason === "budget" ? "budget" : ["interval", "cap", "ceiling"].includes(evolved.reason) ? "cap" : "invalid";
+      return { ok: false, reason, detail: `${evolved.detail} (post ${row.id} hidden).` };
     }
     const summary = evolved.promoted
       ? `Evolved to Generation ${evolved.generation} (eval ${evolved.score}/100): ${evolved.reason}`

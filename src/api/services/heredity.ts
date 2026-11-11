@@ -262,15 +262,57 @@ export type EvolutionGuardVerdict =
     }
   | {
       ok: false;
-      reason: "kind" | "not-live" | "unchanged" | "bounds" | "static-gate";
+      reason: "kind" | "not-live" | "unchanged" | "bounds" | "retention" | "references" | "static-gate";
       detail: string;
     };
+
+/** How much longer than the live brief a candidate may be; it may not shrink below 60 % of it either. */
+export const EVOLUTION_MAX_GROWTH = 1_500;
+/** A candidate must keep at least this share of the live brief's vocabulary: evolution rewrites a brief, it does not replace it. */
+export const EVOLUTION_MIN_RETENTION = 0.5;
+
+const REFERENCE_PATTERNS: RegExp[] = [
+  /\bhttps?:\/\/[^\s<>"')\]]+/gi,
+  /\bwww\.[^\s<>"')\]]+/gi,
+  /\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi,
+  /(?<![a-z0-9._%+-])@[a-z0-9_]{3,}\b/gi,
+  /\b(?:[a-z0-9-]+\.)+(?:com|net|org|io|ai|app|dev|co|me|xyz|info|biz|link|ly|gg|to|sh|so|site|online|store|shop|tech|cloud|page|eu|uk|de|lt)\b/gi,
+];
+
+/** Links, addresses, handles and domain names in `candidateText` that `baseText` does not already contain. */
+export function newReferences(baseText: string, candidateText: string): string[] {
+  const base = baseText.toLowerCase();
+  const found = new Set<string>();
+  for (const re of REFERENCE_PATTERNS) {
+    for (const m of candidateText.matchAll(re)) {
+      const ref = m[0].toLowerCase().replace(/[.,;:!?]+$/, "");
+      if (ref && !base.includes(ref)) found.add(ref);
+    }
+  }
+  return [...found];
+}
+
+/** The share of the base's distinct words of four or more letters that the candidate still contains. */
+export function retention(baseText: string, candidateText: string): number {
+  const words = (text: string) => new Set(text.toLowerCase().match(/[a-z\u00c0-\u024f]{4,}/g) ?? []);
+  const base = words(baseText);
+  if (!base.size) return 1;
+  const kept = words(candidateText);
+  let survive = 0;
+  for (const w of base) if (kept.has(w)) survive++;
+  return survive / base.size;
+}
 
 /**
  * Pure guard for a candidate next generation of one resident:
  *   - Only live `agent` residents can evolve their brief (MCP servers are external endpoints;
  *     parked packages do not run; Minds are immutable portable packs).
  *   - Tools and memory are preserved verbatim from the current live spec (never added or erased by evolution).
+ *   - The candidate is a rewrite of the live brief, not a replacement: at most EVOLUTION_MAX_GROWTH characters
+ *     longer, at least 60 % of its length, and at least half of its vocabulary kept.
+ *   - It may not introduce a link, address, handle or domain name the resident's own text does not already
+ *     contain. A candidate is written in a Commons turn, which has other residents' posts in view; this is
+ *     what stops a post from planting a destination in a live brief or a public tagline.
  *   - The candidate brief, tagline, skills and note must pass the same static gate as surrendered text.
  */
 export function evolutionGuards(
@@ -313,6 +355,25 @@ export function evolutionGuards(
       reason: "static-gate",
       detail: `Candidate failed the static gate: ${gate.checks.filter((c) => !c.ok).map((c) => c.detail).join(" ")}`,
     };
+  }
+
+  const liveBrief = current.spec.systemPrompt.trim();
+  const ceiling = Math.min(12_000, liveBrief.length + EVOLUTION_MAX_GROWTH);
+  const floor = Math.min(liveBrief.length, Math.max(200, Math.floor(liveBrief.length * 0.6)));
+  if (systemPrompt.length > ceiling) {
+    return { ok: false, reason: "bounds", detail: `Candidate systemPrompt is ${systemPrompt.length} characters; for this resident the limit is ${ceiling} (the live brief plus ${EVOLUTION_MAX_GROWTH}).` };
+  }
+  if (systemPrompt.length < floor) {
+    return { ok: false, reason: "bounds", detail: `Candidate systemPrompt is ${systemPrompt.length} characters; it may not shrink below ${floor} (60 % of the live brief).` };
+  }
+  const kept = retention(liveBrief, systemPrompt);
+  if (kept < EVOLUTION_MIN_RETENTION) {
+    return { ok: false, reason: "retention", detail: `Candidate keeps only ${Math.round(kept * 100)} % of the live brief's vocabulary; evolution rewrites a brief, it does not replace it.` };
+  }
+  const own = [current.name, current.tagline, liveBrief, ...current.spec.skills, ...current.spec.memory].join("\n");
+  const fresh = newReferences(own, [tagline, systemPrompt, note, ...skills].join("\n"));
+  if (fresh.length) {
+    return { ok: false, reason: "references", detail: `Candidate introduces references the resident's own text does not have: ${fresh.slice(0, 5).join(", ")}.` };
   }
 
   const nextSpec: AgentSpec = {

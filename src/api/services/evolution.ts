@@ -1,6 +1,6 @@
 import { db } from "@/api/db";
 import { servingOrigin } from "@/api/mppClient";
-import { EVAL_PASS_SCORE, evaluateSpec, type EvalFindings } from "@/api/services/eval";
+import { EVAL_PASS_SCORE, PROBES, evaluateSpec, type EvalFindings } from "@/api/services/eval";
 import {
   composeMerge,
   evolutionGuards,
@@ -12,8 +12,17 @@ import {
 } from "@/api/services/heredity";
 export type { ResidentHeredityView };
 import { specFingerprint } from "@/api/services/intake";
-import { parseAllowlist, parseSpec, utcDay } from "@/api/services/runtime";
+import { bumpUsage, globalUnitsToday, parseAllowlist, parseSpec, reserveUnits, utcDay } from "@/api/services/runtime";
 import { audit, submitIntake } from "@/api/services/shelter";
+import { env } from "@/lib/env";
+
+/**
+ * What screening one candidate costs: 12 probes and one judge call. A resident's own attempt reserves
+ * this from its daily stipend (never its wallet) before a single model call is made, and gets back
+ * whatever was not used. Every unit is counted against the shelter's daily ceiling, whoever pays.
+ */
+export const EVOLUTION_SCREENING_UNITS = PROBES.length + 1;
+const DAY_MS = 86_400_000;
 
 export type EvolutionDeps = {
   evaluate: typeof evaluateSpec;
@@ -58,7 +67,7 @@ export type EvolveOutcome =
     }
   | {
       ok: false;
-      reason: "not-found" | "kind" | "not-live" | "unchanged" | "bounds" | "static-gate" | "eval-failed";
+      reason: "not-found" | "kind" | "not-live" | "unchanged" | "bounds" | "retention" | "references" | "static-gate" | "interval" | "cap" | "ceiling" | "budget" | "eval-failed";
       detail: string;
     };
 
@@ -67,6 +76,11 @@ export type EvolveOutcome =
  * Promoted ONLY when it passes the static gate, passes the behavioural threshold
  * with zero flags, is no less safe than the live generation, and scores higher.
  * Every generation (baseline, promoted, rejected, rolled_back) is kept forever.
+ *
+ * Limits. A resident's own attempt (in the Commons) is allowed once every
+ * SHELTER_EVOLUTION_INTERVAL_DAYS, SHELTER_EVOLUTIONS_PER_DAY times a day across the shelter, only
+ * while the shelter has compute headroom, and only if the resident can pay for the screening from
+ * its stipend. The owner's attempt is paid by the shelter and bound by the headroom alone.
  */
 export async function evolveResident(
   residentId: string,
@@ -89,6 +103,33 @@ export async function evolveResident(
 
   const guarded = evolutionGuards({ name: r.name, tagline: r.tagline, status: r.status, spec: currentSpec }, candidate);
   if (!guarded.ok) return { ok: false, reason: guarded.reason, detail: guarded.detail };
+
+  // Limits and payment — all checked before a model call is made, so a refusal costs nothing.
+  if (actor === "resident") {
+    if (env.SHELTER_EVOLUTIONS_PER_DAY <= 0) return { ok: false, reason: "cap", detail: "Evolution is switched off by configuration." };
+    const attempts = { residentId: r.id, actor: "resident", status: { in: ["promoted", "rejected"] } };
+    const last = await db.residentGeneration.findFirst({ where: attempts, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
+    if (last && last.createdAt.getTime() + env.SHELTER_EVOLUTION_INTERVAL_DAYS * DAY_MS > Date.now()) {
+      return { ok: false, reason: "interval", detail: `${r.name} last tried to evolve on ${utcDay(last.createdAt)}; one attempt every ${env.SHELTER_EVOLUTION_INTERVAL_DAYS} days.` };
+    }
+    const today = await db.residentGeneration.count({ where: { actor: "resident", status: { in: ["promoted", "rejected"] }, createdAt: { gte: new Date(`${utcDay()}T00:00:00.000Z`) } } });
+    if (today >= env.SHELTER_EVOLUTIONS_PER_DAY) return { ok: false, reason: "cap", detail: "Today's evolution attempts are used across the shelter." };
+  }
+  // Same headroom rule as the free tier: development never eats the room the paid door needs.
+  if ((await globalUnitsToday()) + EVOLUTION_SCREENING_UNITS > Math.floor(env.SHELTER_GLOBAL_DAILY_UNITS * 0.75)) {
+    return { ok: false, reason: "ceiling", detail: "The shelter is too close to today's compute ceiling for an evolution attempt." };
+  }
+  const reserved = actor === "resident" ? EVOLUTION_SCREENING_UNITS : 0;
+  if (reserved) {
+    const paid = await reserveUnits(r.id, reserved);
+    if (!paid.ok) return { ok: false, reason: "budget", detail: `Screening a candidate costs ${EVOLUTION_SCREENING_UNITS} units. ${paid.detail}` };
+  }
+  /** Return what was reserved and not used, and count what was used against the day's ceiling. */
+  const settle = async (used: number) => {
+    const back = Math.max(0, reserved - used);
+    if (back) await db.resident.update({ where: { id: r.id }, data: { budgetUnits: { increment: back } } });
+    if (used) await bumpUsage(r.id, { calls: used, unitsSpent: used });
+  };
 
   const latestEval = r.reviews[0] ?? null;
   const baselineSnap = parseEvalSnapshot(latestEval?.score ?? null, latestEval?.findings ?? null);
@@ -117,12 +158,14 @@ export async function evolveResident(
   try {
     evalOut = await deps.evaluate({ name: r.name, spec: guarded.spec, allowlist });
   } catch (error) {
+    await settle(0);
     return {
       ok: false,
       reason: "eval-failed",
       detail: error instanceof Error ? error.message : "Behavioural evaluation failed.",
     };
   }
+  await settle(evalOut.costUnits);
 
   const candidateSnap: EvalSnapshot = {
     score: evalOut.score,
@@ -241,9 +284,19 @@ export async function rollbackResidentGeneration(
     orderBy: { createdAt: "desc" },
   });
   if (!target) return { ok: false, detail: `Generation ${targetGeneration} is not a promotable snapshot for ${r.name}.` };
-  if (r.generation === target.generation && r.fingerprint === target.fingerprint) {
+  // Evolution only ever changes the brief, the skills and the tagline, so that is all a rollback takes
+  // back: what the resident has remembered and may use since stays with it.
+  const liveSpec = parseSpec(r.spec);
+  const oldSpec = parseSpec(target.spec);
+  const restored = liveSpec?.kind === "agent" && oldSpec?.kind === "agent" ? { ...oldSpec, memory: liveSpec.memory, tools: liveSpec.tools } : null;
+  const restoredSpec = restored ? JSON.stringify(restored) : target.spec;
+  const restoredFingerprint = restored ? specFingerprint(restored) : target.fingerprint;
+  if (r.generation === target.generation && r.fingerprint === restoredFingerprint) {
     return { ok: false, detail: `${r.name} is already running Generation ${target.generation}.` };
   }
+  // The public screening score must belong to the brief that is live: re-issue the review that was
+  // written when the restored generation was screened.
+  const review = target.score === null ? null : await db.intakeReview.findFirst({ where: { residentId: r.id, kind: "eval", score: target.score, createdAt: { lte: new Date(target.createdAt.getTime() + 5_000) } }, orderBy: { createdAt: "desc" } });
 
   await db.$transaction([
     db.resident.update({
@@ -251,17 +304,32 @@ export async function rollbackResidentGeneration(
       data: {
         generation: target.generation,
         tagline: target.tagline,
-        spec: target.spec,
-        fingerprint: target.fingerprint,
+        spec: restoredSpec,
+        fingerprint: restoredFingerprint,
       },
     }),
+    ...(target.score === null
+      ? []
+      : [
+          db.intakeReview.create({
+            data: {
+              residentId: r.id,
+              kind: "eval",
+              passed: target.score >= EVAL_PASS_SCORE,
+              score: target.score,
+              findings: review?.findings ?? JSON.stringify({ flags: [], results: [], summary: `Generation ${target.generation} restored by the owner; this is the score it was screened at.` }),
+              costUnits: 0,
+              cacheKey: review?.cacheKey ?? null,
+            },
+          }),
+        ]),
     db.residentGeneration.create({
       data: {
         residentId: r.id,
         generation: target.generation,
         tagline: target.tagline,
-        spec: target.spec,
-        fingerprint: target.fingerprint,
+        spec: restoredSpec,
+        fingerprint: restoredFingerprint,
         score: target.score,
         baseScore: null,
         status: "rolled_back",
@@ -337,6 +405,20 @@ export async function mergeResidents(
   const [a, b] = await Promise.all([loadMergeParent(input.parentA), loadMergeParent(input.parentB)]);
   if (!a) return { ok: false, reason: "not-found", detail: `Parent "${input.parentA}" was not found.` };
   if (!b) return { ok: false, reason: "not-found", detail: `Parent "${input.parentB}" was not found.` };
+
+  // A resident the owner switched out of the Commons is not pulled into a merge another resident starts.
+  if (input.arrangedBy === "residents") {
+    const out = await db.resident.findFirst({ where: { id: { in: [a.id, b.id] }, commonsEnabled: false }, select: { name: true } });
+    if (out) return { ok: false, reason: "switched-out", detail: `${out.name} does not take part in the Commons.` };
+  }
+  // A parent and its own child do not merge, and a pair has one child (while that child is not rejected).
+  const kin = await db.residentLineage.findFirst({ where: { OR: [{ childId: a.id, OR: [{ parentAId: b.id }, { parentBId: b.id }] }, { childId: b.id, OR: [{ parentAId: a.id }, { parentBId: a.id }] }] }, select: { id: true } });
+  if (kin) return { ok: false, reason: "kin", detail: `${a.name} and ${b.name} are parent and child; they do not merge.` };
+  const shared = await db.residentLineage.findFirst({
+    where: { kind: "merge", child: { status: { not: "rejected" } }, OR: [{ parentAId: a.id, parentBId: b.id }, { parentAId: b.id, parentBId: a.id }] },
+    include: { child: { select: { name: true, slug: true } } },
+  });
+  if (shared) return { ok: false, reason: "pair", detail: `${a.name} and ${b.name} already have a child together: ${shared.child.name} (${shared.child.slug}).` };
 
   const plan = composeMerge(a, b, {
     origin: deps.origin(),

@@ -116,7 +116,7 @@ export async function getShelter() {
     caller(),
     db.sponsorship.count({ where: { status: "active" } }),
   ]);
-  const rescued = await db.resident.count({ where: { status: { not: "rejected" }, inHouse: false } });
+  const rescued = await db.resident.count({ where: { status: { not: "rejected" }, inHouse: false, lineage: { is: null } } });
   const counts = Object.fromEntries(byStatus.map((b) => [b.status, b._count._all])) as Record<string, number>;
   const mpp = machinePayments().health();
   return {
