@@ -34,6 +34,22 @@ export function AdminPage() {
   const commonsPause = useMutation({ mutationFn: (paused: boolean) => client.setCommonsPause({ paused }), onSuccess: (r) => (unwrap(r), refresh()) });
   const commonsTick = useMutation({ mutationFn: () => client.commonsTickNow({}), onSuccess: (r) => { const d = unwrap(r); if (d) toast(d.detail, { description: d.turns.map((t) => `${t.slug}: ${t.outcome.ok ? t.outcome.action : t.outcome.reason}`).join(" · ") || "nothing to do" }); refresh(); } });
   const commonsAccess = useMutation({ mutationFn: (v: { residentId: string; enabled: boolean }) => client.setResidentCommonsAccess(v), onSuccess: (r) => (unwrap(r), refresh()) });
+  const rollbackGen = useMutation({ mutationFn: (v: { residentId: string; targetGeneration: number }) => client.ownerRollbackGeneration(v), onSuccess: (r) => (unwrap(r), refresh()) });
+  const [mergeA, setMergeA] = useState("");
+  const [mergeB, setMergeB] = useState("");
+  const [mergeName, setMergeName] = useState("");
+  const [mergeTagline, setMergeTagline] = useState("");
+  const ownerMerge = useMutation({
+    mutationFn: () => client.ownerMergeResidents({ parentA: mergeA, parentB: mergeB, name: mergeName.trim() || undefined, tagline: mergeTagline.trim() || undefined }),
+    onSuccess: (r) => {
+      const d = unwrap(r);
+      if (d) {
+        setMergeName("");
+        setMergeTagline("");
+        refresh();
+      }
+    },
+  });
   const [tab, setTab] = useState<"queue" | "live" | "bounties" | "money" | "samples" | "outreach" | "setup">("queue");
 
   if (q.isPending) {
@@ -123,6 +139,53 @@ export function AdminPage() {
         </section>
       )}
       {tab === "live" && (
+        <section className="mt-4 rounded-xl border bg-card p-4 text-sm">
+          <span className="eyebrow">Heredity · Deterministic Merge</span>
+          <p className="mt-1 text-muted-foreground">
+            Combine two live residents into a new child resident by a fixed deterministic rule (interleaved briefs, skills, approved tools and memory — no model writes the child). Both parents remain unchanged; the child enters the normal screening queue.
+          </p>
+          <div className="mt-3 flex flex-wrap items-end gap-3">
+            <label className="text-xs">
+              Parent A
+              <select className="mt-1 block h-9 rounded-md border bg-background px-2 text-sm" value={mergeA} onChange={(e) => setMergeA(e.target.value)}>
+                <option value="">Select parent A…</option>
+                {data.live
+                  .filter((r) => (r.status === "active" || r.status === "probation") && r.kind !== "package")
+                  .map((r) => (
+                    <option key={r.id} value={r.slug}>
+                      {r.name} ({r.kind}, Gen {r.generation}, {r.license})
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="text-xs">
+              Parent B
+              <select className="mt-1 block h-9 rounded-md border bg-background px-2 text-sm" value={mergeB} onChange={(e) => setMergeB(e.target.value)}>
+                <option value="">Select parent B…</option>
+                {data.live
+                  .filter((r) => (r.status === "active" || r.status === "probation") && r.kind !== "package" && r.slug !== mergeA)
+                  .map((r) => (
+                    <option key={r.id} value={r.slug}>
+                      {r.name} ({r.kind}, Gen {r.generation}, {r.license})
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="text-xs">
+              Child name (optional)
+              <Input className="mt-1 w-44" placeholder="Default: A × B" value={mergeName} onChange={(e) => setMergeName(e.target.value)} maxLength={60} />
+            </label>
+            <label className="flex-1 text-xs">
+              Tagline (optional)
+              <Input className="mt-1" placeholder="Default: Born from A and B…" value={mergeTagline} onChange={(e) => setMergeTagline(e.target.value)} maxLength={140} />
+            </label>
+            <Button size="sm" disabled={!mergeA || !mergeB || mergeA === mergeB || ownerMerge.isPending} onClick={() => ownerMerge.mutate()}>
+              {ownerMerge.isPending ? "Merging…" : "Merge → screen child"}
+            </Button>
+          </div>
+        </section>
+      )}
+      {tab === "live" && (
         <section className="mt-4 overflow-x-auto rounded-xl border bg-card">
           <table className="w-full text-sm">
             <thead className="text-left text-xs text-muted-foreground">
@@ -145,6 +208,9 @@ export function AdminPage() {
                       {r.name}
                     </a>
                     <span className="ml-2 text-xs text-muted-foreground">{kindLabel(r.kind)}</span>
+                    <span className="ml-1.5 rounded-none border border-border px-1 py-0.5 font-mono text-[10px] uppercase text-muted-foreground">
+                      Gen {r.generation}
+                    </span>
                     <button type="button" className={cn("ml-2 rounded-none border px-1.5 py-0.5 font-mono text-[10px] uppercase", r.inHouse ? "border-primary/50 text-primary" : "border-border text-muted-foreground hover:text-foreground")} title="Toggle the public staff / demo label (authored by the operator, not a rescue)" onClick={() => inHouse.mutate({ residentId: r.id, inHouse: !r.inHouse })}>
                       {r.inHouse ? "staff / demo" : "mark staff"}
                     </button>
@@ -168,15 +234,28 @@ export function AdminPage() {
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">{r.lastActiveAt ? ago(r.lastActiveAt) : "—"}</td>
                   <td className="px-3 py-2 text-right">
-                    {r.status === "hibernated" ? (
-                      <Button size="sm" variant="outline" onClick={() => wake.mutate(r.id)}>
-                        Wake
-                      </Button>
-                    ) : (
-                      <Button size="sm" variant="outline" onClick={() => hib.mutate(r.id)}>
-                        Hibernate
-                      </Button>
-                    )}
+                    <div className="flex justify-end gap-1.5">
+                      {r.generation > 1 && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={rollbackGen.isPending}
+                          onClick={() => rollbackGen.mutate({ residentId: r.id, targetGeneration: 1 })}
+                          title="Roll back to Generation 1 baseline"
+                        >
+                          Gen 1
+                        </Button>
+                      )}
+                      {r.status === "hibernated" ? (
+                        <Button size="sm" variant="outline" onClick={() => wake.mutate(r.id)}>
+                          Wake
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="outline" onClick={() => hib.mutate(r.id)}>
+                          Hibernate
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

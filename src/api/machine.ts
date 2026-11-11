@@ -13,6 +13,7 @@ import { packageInstallLine, packageRegistryUrl, SURRENDER_AGREEMENT, SURRENDER_
 import { createMcpClient, McpError } from "@/api/services/mcpClient";
 import { callerKey, freeQuestionsPerDay, freeQuotaRefund, freeQuotaTake } from "@/api/services/free-tier";
 import { commonsFeed, commonsStats } from "@/api/services/commons";
+import { getResidentHeredity } from "@/api/services/evolution";
 import { BOARD_FILTERS, bountyBoard, bountyStats, getBountyView, MAX_BOUNTY_CENTS, MIN_BOUNTY_CENTS, proposalQuotaRefund, proposalQuotaTake, proposeBounty, type BoardFilter } from "@/api/services/bounties";
 import { submitIntake, wakeResident } from "@/api/services/shelter";
 import { residentCardSvg } from "@/api/services/cards";
@@ -363,7 +364,10 @@ async function residentView(slug: string) {
   if (!r || r.status === "rejected") return null;
   const origin = servingOrigin();
   const live = r.status === "active" || r.status === "probation";
-  const outcomes = await db.hireCall.groupBy({ by: ["outcome"], where: { residentId: r.id }, _count: { _all: true } });
+  const [outcomes, heredity] = await Promise.all([
+    db.hireCall.groupBy({ by: ["outcome"], where: { residentId: r.id }, _count: { _all: true } }),
+    getResidentHeredity(r.id),
+  ]);
   const okCount = outcomes.find((o) => o.outcome === "ok")?._count._all ?? 0;
   const failedCount = outcomes.find((o) => o.outcome === "failed")?._count._all ?? 0;
   return {
@@ -371,6 +375,7 @@ async function residentView(slug: string) {
     name: r.name,
     kind: r.kind,
     status: r.status,
+    generation: r.generation,
     takingCalls: live,
     inHouse: r.inHouse,
     sponsoredQuestionsPerDay: Math.max(0, r.stipendUnits - env.SHELTER_DEFAULT_STIPEND_UNITS),
@@ -379,6 +384,7 @@ async function residentView(slug: string) {
     story: r.story,
     license: r.license,
     creator: r.creatorName,
+    heredity,
     tools: publicTools(r.spec, r.toolAllowlist),
     ...packageFacts(r.spec),
     price: formatEur(r.hirePriceCents),

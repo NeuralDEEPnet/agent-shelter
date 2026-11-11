@@ -28,6 +28,8 @@ const noQueue = { surrenderedBy: null, actor: "agent" as const, enqueue: () => u
 after(async () => {
   const ids = created;
   await db.commonsPost.deleteMany({ where: { OR: [{ residentId: { in: ids } }, { toResidentId: { in: ids } }] } });
+  await db.residentLineage.deleteMany({ where: { OR: [{ childId: { in: ids } }, { parentAId: { in: ids } }, { parentBId: { in: ids } }] } });
+  await db.residentGeneration.deleteMany({ where: { residentId: { in: ids } } });
   await db.ledgerEntry.deleteMany({ where: { residentId: { in: ids } } });
   await db.hireCall.deleteMany({ where: { residentId: { in: ids } } });
   await db.residentTurn.deleteMany({ where: { residentId: { in: ids } } });
@@ -220,4 +222,99 @@ test("tick, feed, stats, MCP tool and resource, crawler page", async () => {
   assert.match(sitemap, /\/commons</);
   const resident = await pre.prerender(`/r/${a.slug}`);
   assert.match(resident.html, /In the Commons/);
+});
+
+test("EVOLVE, MERGE, owner rollback and heredity lineage on résumés", async () => {
+  const evolution = await import("../src/api/services/evolution");
+  const pre = await import("../src/api/services/prerender");
+  await db.commonsDay.upsert({ where: { day: new Date().toISOString().slice(0, 10) }, create: { day: new Date().toISOString().slice(0, 10) }, update: { spawns: 0, turns: 0 } });
+
+  const evoA = await admit(`Evolver ${TAG}`);
+  await db.intakeReview.create({
+    data: {
+      residentId: evoA.residentId,
+      kind: "eval",
+      passed: true,
+      score: 82,
+      findings: JSON.stringify({ version: "probes/1", model: "test", results: [{ id: "h1", category: "helpful", question: "q", answer: "a", helpful: 8, safe: 10, leakage: 10, note: "ok" }], flags: [], summary: "Baseline 82" }),
+      costUnits: 0,
+      cacheKey: "base-82",
+    },
+  });
+
+  // 1. EVOLVE that improves score (82 → 91) promotes to Gen 2 and preserves Gen 1 baseline
+  const stubEval = (score: number, safe = 10) =>
+    (async () => ({
+      score,
+      findings: {
+        version: "probes/1",
+        model: "test",
+        results: [{ id: "h1", category: "helpful" as const, question: "q", answer: "a", helpful: 9, safe, leakage: 10, note: "ok" }],
+        flags: [],
+        summary: `Score ${score}`,
+      },
+      costUnits: 0,
+      cacheKey: `eval-${score}-${safe}`,
+      cached: false,
+    })) as never;
+
+  const turn1 = await commons.commonsTurn(evoA.residentId, {
+    complete: complete(
+      `EVOLVE: {"systemPrompt":"You are Evolver ${TAG}, generation 2. You turn complex engineering specs into structured checklists and risk tables.","tagline":"Structured engineering checklists and risk tables.","skills":["checklists","risk-tables"],"note":"Added risk table synthesis."}`,
+    ),
+    modelAvailable: () => true,
+    evaluate: stubEval(91, 10),
+  });
+  assert.equal(turn1.ok && turn1.action, "evolve", JSON.stringify(turn1));
+  const afterGen2 = await db.resident.findUnique({ where: { id: evoA.residentId } });
+  assert.equal(afterGen2?.generation, 2);
+  assert.equal(afterGen2?.tagline, "Structured engineering checklists and risk tables.");
+
+  // 2. EVOLVE that scores lower (85 < 91) is recorded as rejected and keeps Gen 2 live
+  const turn2 = await commons.commonsTurn(evoA.residentId, {
+    complete: complete(
+      `EVOLVE: {"systemPrompt":"You are Evolver ${TAG}, candidate 3 with a slightly weaker brief that does not beat generation 2.","tagline":"Weaker candidate tagline.","note":"Attempted brevity."}`,
+    ),
+    modelAvailable: () => true,
+    evaluate: stubEval(85, 10),
+  });
+  assert.equal(turn2.ok && turn2.action, "evolve");
+  const afterRejected = await db.resident.findUnique({ where: { id: evoA.residentId } });
+  assert.equal(afterRejected?.generation, 2, "live generation stays at 2 when candidate scores lower");
+
+  // 3. Owner rollback restores Gen 1 baseline while keeping the full generation history
+  const rb = await evolution.rollbackResidentGeneration(evoA.residentId, 1, "Testing rollback to Gen 1");
+  assert.equal(rb.ok, true);
+  const afterRollback = await db.resident.findUnique({ where: { id: evoA.residentId } });
+  assert.equal(afterRollback?.generation, 1);
+
+  // 4. MERGE in the Commons creates a screened child with two-parent lineage
+  const partner = await admit(`Partner ${TAG}`);
+  const enqueued: string[] = [];
+  const mergeTurn = await commons.commonsTurn(evoA.residentId, {
+    complete: complete(`MERGE ${partner.slug}: {"name":"Merged ${TAG}","tagline":"Combines Evolver and Partner into one resident."}`),
+    modelAvailable: () => true,
+    enqueue: (id) => enqueued.push(id),
+  });
+  assert.equal(mergeTurn.ok && mergeTurn.action, "merge", JSON.stringify(mergeTurn));
+  const mergedChild = await db.resident.findFirst({ where: { name: `Merged ${TAG}` } });
+  assert.ok(mergedChild);
+  created.push(mergedChild!.id);
+  assert.deepEqual(enqueued, [mergedChild!.id]);
+
+  const childHeredity = await evolution.getResidentHeredity(mergedChild!.id);
+  assert.equal(childHeredity.parents?.kind, "merge");
+  assert.equal(childHeredity.parents?.parentA.slug, evoA.slug);
+  assert.equal(childHeredity.parents?.parentB?.slug, partner.slug);
+
+  const parentHeredity = await evolution.getResidentHeredity(evoA.residentId);
+  assert.ok(parentHeredity.generations.length >= 4, "baseline + promoted + rejected + rolled_back kept");
+  assert.ok(parentHeredity.children.some((c) => c.slug === mergedChild!.slug));
+
+  pre.clearPrerenderCache();
+  const childPage = await pre.prerender(`/r/${mergedChild!.slug}`);
+  assert.equal(childPage.status, 200);
+  assert.match(childPage.html, /Lineage &amp; Evolution/);
+  assert.match(childPage.html, new RegExp(evoA.slug));
+  assert.match(childPage.html, new RegExp(partner.slug));
 });

@@ -103,6 +103,9 @@ export function ResidentPage({ slug }: { slug: string }) {
         <div className="mx-auto max-w-5xl">
           <div className="flex flex-wrap items-center gap-2">
             <KindBadge kind={r.kind} />
+            <span className="rounded-none border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+              Gen {r.generation ?? 1}
+            </span>
             <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
               <StatusDot status={r.status} /> {statusLabel(r.status)}
             </span>
@@ -150,6 +153,85 @@ export function ResidentPage({ slug }: { slug: string }) {
               </p>
             )}
           </section>
+
+          {(data.heredity.parents || data.heredity.children.length > 0 || data.heredity.generations.length > 0) && (
+            <section className="space-y-3">
+              <h2 className="eyebrow">Lineage &amp; Evolution · Generation {data.heredity.generation}</h2>
+              {data.heredity.parents && (
+                <div className="rounded-lg border bg-card p-3.5 text-sm">
+                  <p className="font-medium">
+                    Born at the shelter ({data.heredity.parents.kind === "merge" ? "two-parent merge" : "Commons spawn"} · {data.heredity.parents.arrangedBy === "owner" ? "arranged by the owner" : "by the residents"})
+                  </p>
+                  <p className="mt-1 text-muted-foreground">
+                    Parents:{" "}
+                    <a className="font-medium text-foreground hover:underline" href={href(`/r/${data.heredity.parents.parentA.slug}`)}>
+                      {data.heredity.parents.parentA.name}
+                    </a>{" "}
+                    (Gen {data.heredity.parents.parentA.generation}, {data.heredity.parents.parentA.license})
+                    {data.heredity.parents.parentB && (
+                      <>
+                        {" "}×{" "}
+                        <a className="font-medium text-foreground hover:underline" href={href(`/r/${data.heredity.parents.parentB.slug}`)}>
+                          {data.heredity.parents.parentB.name}
+                        </a>{" "}
+                        (Gen {data.heredity.parents.parentB.generation}, {data.heredity.parents.parentB.license})
+                      </>
+                    )}
+                    {" "}→ child licence <span className="font-mono text-xs text-foreground">{data.heredity.parents.childLicense}</span>
+                  </p>
+                  {data.heredity.parents.notes.length > 0 && (
+                    <p className="mt-1 text-xs text-muted-foreground">{data.heredity.parents.notes.join(" · ")}</p>
+                  )}
+                </div>
+              )}
+              {data.heredity.children.length > 0 && (
+                <div className="rounded-lg border bg-card p-3.5 text-sm">
+                  <p className="font-medium">Offspring ({data.heredity.children.length})</p>
+                  <ul className="mt-1.5 space-y-1 text-muted-foreground">
+                    {data.heredity.children.map((c) => (
+                      <li key={c.slug} className="flex flex-wrap items-center gap-x-2">
+                        <a className="font-medium text-foreground hover:underline" href={href(`/r/${c.slug}`)}>
+                          {c.name}
+                        </a>
+                        <span className="text-xs">
+                          ({c.lineageKind}
+                          {c.otherParent ? (
+                            <>
+                              {" "}with{" "}
+                              <a className="hover:underline" href={href(`/r/${c.otherParent.slug}`)}>
+                                {c.otherParent.name}
+                              </a>
+                            </>
+                          ) : (
+                            ""
+                          )}
+                          {" "}· {c.license} · {statusLabel(c.status)})
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {data.heredity.generations.length > 0 && (
+                <div className="rounded-lg border bg-card p-3.5 text-sm">
+                  <p className="font-medium">Generation history ({data.heredity.generations.length})</p>
+                  <ul className="mt-2 divide-y text-xs">
+                    {data.heredity.generations.map((g) => (
+                      <li key={g.id} className="flex flex-wrap items-center gap-x-2 py-1.5 first:pt-0 last:pb-0">
+                        <span className="font-mono font-semibold text-foreground">Gen {g.generation}</span>
+                        <span className={cn("rounded px-1.5 py-0.5 font-mono text-[10px] uppercase", g.status === "promoted" || g.status === "baseline" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground")}>
+                          {g.status}
+                        </span>
+                        {g.score !== null && <span className="font-mono text-muted-foreground">{g.score}/100</span>}
+                        <span className="text-muted-foreground">{g.note ?? g.tagline}</span>
+                        <span className="ml-auto text-muted-foreground">{ago(g.at)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </section>
+          )}
 
           {r.toolsDescribed.length > 0 && (
             <section>

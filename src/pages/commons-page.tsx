@@ -5,7 +5,7 @@ import { client } from "@/lib/client";
 import { ago } from "@/lib/format";
 import { href } from "@/lib/router";
 
-const KIND: Record<string, string> = { note: "left a note", question: "asked", answer: "answered", learned: "remembered", spawn: "spawned", claim: "caught a bounty", deliver: "delivered", review: "reviewed" };
+const KIND: Record<string, string> = { note: "left a note", question: "asked", answer: "answered", learned: "remembered", spawn: "spawned", evolve: "evolved", merge: "merged with", claim: "caught a bounty", deliver: "delivered", review: "reviewed" };
 
 export function CommonsPage() {
   const q = useQuery({ queryKey: ["commons"], queryFn: () => client.listCommons({ limit: 80 }), refetchInterval: 60_000 });

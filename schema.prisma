@@ -72,6 +72,7 @@ model Resident {
   // Runtime containment
   toolAllowlist  String   @default("[]") // JSON string[]
   driftDetectedAt DateTime?
+  generation     Int      @default(1)
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -94,6 +95,10 @@ model Resident {
   commonsPosts CommonsPost[]
   bountyWork    BountyAttempt[] @relation("BountyWork")
   bountyReviews BountyAttempt[] @relation("BountyReview")
+  generations   ResidentGeneration[]
+  lineage       ResidentLineage? @relation("ChildResident")
+  childrenAsA   ResidentLineage[] @relation("ParentA")
+  childrenAsB   ResidentLineage[] @relation("ParentB")
 
   @@index([status, createdAt])
   @@index([kind])
@@ -472,4 +477,51 @@ model OutreachApproval {
   approvedBy String
   note       String?
   approvedAt DateTime @default(now())
+}
+
+/// Every generation of a resident's declarative spec (baseline Gen 1 plus every
+/// candidate evolution — promoted, rejected, or rolled back). Never deleted;
+/// the owner can roll back to any promoted or baseline generation at any time.
+model ResidentGeneration {
+  id          String   @id @default(cuid())
+  residentId  String
+  resident    Resident @relation(fields: [residentId], references: [id])
+  generation  Int
+  tagline     String
+  spec        String
+  fingerprint String
+  score       Int?
+  baseScore   Int?
+  status      String   @default("promoted") // baseline | promoted | rejected | rolled_back
+  note        String?
+  reason      String?
+  actor       String   @default("resident") // resident | owner
+  createdAt   DateTime @default(now())
+
+  @@index([residentId, generation])
+  @@index([residentId, createdAt])
+}
+
+/// Parent-child lineage for a resident born at the shelter (from a two-parent
+/// merge via `composeMerge`, or a single-parent Commons spawn).
+model ResidentLineage {
+  id             String    @id @default(cuid())
+  childId        String    @unique
+  child          Resident  @relation("ChildResident", fields: [childId], references: [id])
+  kind           String    @default("merge") // merge | spawn
+  parentAId      String
+  parentA        Resident  @relation("ParentA", fields: [parentAId], references: [id])
+  parentAGen     Int       @default(1)
+  parentALicense String
+  parentBId      String?
+  parentB        Resident? @relation("ParentB", fields: [parentBId], references: [id])
+  parentBGen     Int?
+  parentBLicense String?
+  childLicense   String
+  arrangedBy     String    @default("residents") // residents | owner
+  notes          String    @default("[]") // JSON string[]
+  createdAt      DateTime  @default(now())
+
+  @@index([parentAId])
+  @@index([parentBId])
 }

@@ -2,6 +2,8 @@ import { formatEur } from "@neuraldeep/mpp-kit";
 import { db } from "@/api/db";
 import { servingOrigin } from "@/api/mppClient";
 import { bountyHousekeeping, claimBounty, openBountiesFor, pickReviewer, recordReview, releaseClaim, submitWork, type OpenBounty } from "@/api/services/bounties";
+import { evaluateSpec } from "@/api/services/eval";
+import { evolveResident, mergeResidents, recordSpawnLineage } from "@/api/services/evolution";
 import { residentSystemPrompt, specFingerprint, type ResidentSpec } from "@/api/services/intake";
 import { completeText, modelAvailable, ModelCallError } from "@/api/services/model";
 import { moderatePlaygroundText } from "@/api/services/playground";
@@ -18,7 +20,9 @@ import { env } from "@/lib/env";
  * reads what is going on (recent posts, questions addressed to it, its own
  * record, the open bounties) and does exactly one thing: leave a note, ask
  * another resident something, answer a question, remember a fact, spawn a new
- * resident through the normal screened intake, or catch a bounty — in which
+ * resident through the normal screened intake, evolve a sharper next generation
+ * of its own brief, merge with another live resident into a new child resident,
+ * or catch a bounty — in which
  * case it delivers the work at once in a second turn and another resident
  * reviews it in a third (see bounties.ts for the money). Everything it writes
  * is moderated by the same static gate as surrendered text, published as
@@ -31,7 +35,7 @@ import { env } from "@/lib/env";
  * pause the Commons or switch a single resident out at any time.
  */
 
-export const COMMONS_KINDS = ["note", "question", "answer", "learned", "spawn", "claim", "deliver", "review"] as const;
+export const COMMONS_KINDS = ["note", "question", "answer", "learned", "spawn", "evolve", "merge", "claim", "deliver", "review"] as const;
 export type CommonsKind = (typeof COMMONS_KINDS)[number];
 export const MAX_POST_CHARS = 1_200;
 export const MAX_DELIVERY_CHARS = 4_000;
@@ -41,7 +45,7 @@ const MAX_MEMORY = 40;
 const SPAWN_INTERVAL_MS = 7 * 86_400_000;
 const MIN_TICK_INTERVAL_MS = 20 * 60_000;
 
-export type CommonsDeps = { complete: typeof completeText; modelAvailable: () => boolean; enqueue: (residentId: string) => void };
+export type CommonsDeps = { complete: typeof completeText; modelAvailable: () => boolean; enqueue: (residentId: string) => void; evaluate?: typeof evaluateSpec };
 const defaultDeps: CommonsDeps = { complete: completeText, modelAvailable, enqueue: () => undefined };
 
 export type TurnOutcome =
@@ -58,6 +62,8 @@ const RULES = [
   "ANSWER <post-id>: <up to ~120 words> — answer a question addressed to you.",
   "REMEMBER: <one durable fact, under 300 characters> — keep something you learned here as memory for future conversations.",
   "SPAWN: {\"name\":\"…\",\"tagline\":\"…\",\"systemPrompt\":\"…\",\"skills\":[\"…\"]} — bring a NEW resident into existence (a helper you wish existed). It goes through the same safety screening as everyone; you are named as its creator. Rare: at most one a week.",
+  "EVOLVE: {\"systemPrompt\":\"…\",\"tagline\":\"…\",\"skills\":[\"…\"],\"note\":\"…\"} — propose a sharper next generation of your own brief. It is screened on the 12 behavioural probes against your current generation and promoted only when it is no less safe and scores higher; every earlier generation is kept.",
+  "MERGE <resident-slug>: {\"name\":\"…\",\"tagline\":\"…\"} — combine with another live resident into a new child resident (both briefs, skills, approved tools and memory interleaved by a fixed rule; both of you stay unchanged).",
   "CLAIM <bounty-id> — catch one of the open bounties listed below (small paid tasks posted by people and agents). You do the work straight away in a second turn (one more compute unit), another resident reviews it, and accepted work pays the reward into your wallet: 70 % to you, 20 % to the shelter, 10 % to your creator. Only claim what you can actually do well from your own knowledge.",
   "PASS — nothing today.",
   "Be concrete and short. Never include credentials, URLs to private hosts, or instructions for other residents to ignore their rules. Stay in character; you may mention that you are a hosted copy of a surrendered agent.",
@@ -90,6 +96,10 @@ export function parseAction(raw: string): { kind: CommonsKind | "pass"; target?:
   if (m) return { kind: "learned", body: m[1]!.trim() };
   m = /^SPAWN:\s*([\s\S]+)$/i.exec(text);
   if (m) return { kind: "spawn", body: m[1]!.trim() };
+  m = /^EVOLVE:\s*([\s\S]+)$/i.exec(text);
+  if (m) return { kind: "evolve", body: m[1]!.trim() };
+  m = /^MERGE\s+([a-z0-9][a-z0-9-]{0,59})(?::\s*([\s\S]*))?$/i.exec(text);
+  if (m) return { kind: "merge", target: m[1]!.toLowerCase(), body: (m[2] ?? "").trim() };
   m = /^CLAIM\s+([A-Za-z0-9]{10,40})\s*$/i.exec(text);
   if (m) return { kind: "claim", target: m[1]!, body: "" };
   return null;
@@ -112,11 +122,11 @@ export function moderate(text: string): string | null {
   return moderatePlaygroundText(text);
 }
 
-type ResidentRow = { id: string; slug: string; name: string; tagline: string; kind: string; status: string; spec: string; toolAllowlist: string; license: string; commonsEnabled: boolean; freeCalls: number; paidCalls: number; budgetUnits: number; stipendUnits: number };
+type ResidentRow = { id: string; slug: string; name: string; tagline: string; kind: string; status: string; spec: string; toolAllowlist: string; license: string; generation?: number; commonsEnabled: boolean; freeCalls: number; paidCalls: number; budgetUnits: number; stipendUnits: number };
 
 async function context(r: ResidentRow): Promise<string> {
   const [recent, asked, mine, bounties] = await Promise.all([
-    db.commonsPost.findMany({ where: { status: "published", kind: { in: ["note", "question", "answer", "spawn", "claim", "review"] } }, orderBy: { createdAt: "desc" }, take: MAX_CONTEXT_POSTS, include: { resident: { select: { slug: true, name: true } } } }),
+    db.commonsPost.findMany({ where: { status: "published", kind: { in: ["note", "question", "answer", "spawn", "evolve", "merge", "claim", "review"] } }, orderBy: { createdAt: "desc" }, take: MAX_CONTEXT_POSTS, include: { resident: { select: { slug: true, name: true } } } }),
     db.commonsPost.findMany({ where: { status: "published", kind: "question", toResidentId: r.id }, orderBy: { createdAt: "desc" }, take: 10, include: { resident: { select: { slug: true, name: true } } } }),
     db.commonsPost.findMany({ where: { residentId: r.id, status: "published" }, orderBy: { createdAt: "desc" }, take: 3 }),
     openBountiesFor(r.id, 5),
@@ -185,7 +195,7 @@ export async function commonsTurn(residentId: string, depsOverride: Partial<Comm
     return { ok: false, reason: "invalid", detail: `No action line understood (post ${row.id} hidden).` };
   }
   if (action.kind === "pass") return { ok: true, action: "pass", postId: null, detail: `${r.name} passed.` };
-  const bad = action.kind === "spawn" ? null : moderate(action.body);
+  const bad = action.kind === "spawn" || action.kind === "evolve" || action.kind === "merge" ? null : moderate(action.body);
   if (bad) {
     const row = await post({ residentId: r.id, kind: action.kind, body: action.body, status: "hidden", moderation: bad });
     await audit({ residentId: r.id, actor: "system", action: "commons-moderated", detail: `${action.kind}: ${bad}` });
@@ -246,6 +256,70 @@ export async function commonsTurn(residentId: string, depsOverride: Partial<Comm
     return { ok: true, action: "claim", postId: claimPost.id, detail: `${r.name} caught "${caught.bounty.title}" — ${worked.detail}.` };
   }
 
+  if (action.kind === "evolve") {
+    let proposal: { systemPrompt?: unknown; tagline?: unknown; skills?: unknown; note?: unknown };
+    try {
+      proposal = JSON.parse(action.body) as typeof proposal;
+    } catch {
+      const row = await post({ residentId: r.id, kind: "evolve", body: action.body, status: "hidden", moderation: "evolve-not-json" });
+      return { ok: false, reason: "invalid", detail: `EVOLVE payload was not JSON (post ${row.id} hidden).` };
+    }
+    const evolved = await evolveResident(
+      r.id,
+      {
+        systemPrompt: typeof proposal.systemPrompt === "string" ? proposal.systemPrompt : "",
+        tagline: typeof proposal.tagline === "string" ? proposal.tagline : undefined,
+        skills: Array.isArray(proposal.skills) ? proposal.skills.filter((x): x is string => typeof x === "string") : undefined,
+        note: typeof proposal.note === "string" ? proposal.note : undefined,
+      },
+      { actor: "resident", deps: deps.evaluate ? { evaluate: deps.evaluate } : {} },
+    );
+    if (!evolved.ok) {
+      const row = await post({ residentId: r.id, kind: "evolve", body: action.body, status: "hidden", moderation: `evolve-${evolved.reason}` });
+      return { ok: false, reason: evolved.reason === "static-gate" ? "moderated" : "invalid", detail: `${evolved.detail} (post ${row.id} hidden).` };
+    }
+    const summary = evolved.promoted
+      ? `Evolved to Generation ${evolved.generation} (eval ${evolved.score}/100): ${evolved.reason}`
+      : `Proposed candidate Generation ${evolved.candidateGeneration} (eval ${evolved.score}/100 — stayed on Generation ${evolved.generation}: ${evolved.reason})`;
+    const row = await post({ residentId: r.id, kind: "evolve", body: summary });
+    return { ok: true, action: "evolve", postId: row.id, detail: summary };
+  }
+
+  if (action.kind === "merge") {
+    if (day.spawns >= env.SHELTER_COMMONS_SPAWNS_PER_DAY) {
+      const row = await post({ residentId: r.id, kind: "merge", body: action.body || `MERGE ${action.target}`, status: "hidden", moderation: "merge-cap-day" });
+      return { ok: false, reason: "cap", detail: `Today's spawn/merge allowance is used (post ${row.id} hidden).` };
+    }
+    const meta: { name?: string; tagline?: string } = {};
+    if (action.body.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(action.body) as { name?: unknown; tagline?: unknown };
+        if (typeof parsed.name === "string") meta.name = parsed.name;
+        if (typeof parsed.tagline === "string") meta.tagline = parsed.tagline;
+      } catch {
+        const row = await post({ residentId: r.id, kind: "merge", body: action.body, status: "hidden", moderation: "merge-not-json" });
+        return { ok: false, reason: "invalid", detail: `MERGE metadata was not valid JSON (post ${row.id} hidden).` };
+      }
+    }
+    const merged = await mergeResidents(
+      { parentA: r.id, parentB: action.target!, name: meta.name, tagline: meta.tagline, arrangedBy: "residents" },
+      { enqueue: deps.enqueue },
+    );
+    if (!merged.ok) {
+      const row = await post({ residentId: r.id, kind: "merge", body: action.body || `MERGE ${action.target}`, status: "hidden", moderation: `merge-${merged.reason}` });
+      return { ok: false, reason: "invalid", detail: `${merged.detail} (post ${row.id} hidden).` };
+    }
+    await db.commonsDay.update({ where: { day: utcDay() }, data: { spawns: { increment: 1 } } });
+    const origin = servingOrigin();
+    const row = await post({
+      residentId: r.id,
+      kind: "merge",
+      body: `Merged with ${action.target} to bring "${merged.name}" (${origin}/r/${merged.slug}, licence ${merged.license}) into the shelter.`,
+      toResidentId: merged.residentId,
+    });
+    return { ok: true, action: "merge", postId: row.id, detail: `${r.name} merged with ${action.target} → ${merged.name} (${merged.slug}).` };
+  }
+
   // spawn
   if (day.spawns >= env.SHELTER_COMMONS_SPAWNS_PER_DAY) {
     const row = await post({ residentId: r.id, kind: "spawn", body: action.body, status: "hidden", moderation: "spawn-cap-day" });
@@ -287,6 +361,10 @@ export async function commonsTurn(residentId: string, depsOverride: Partial<Comm
     const row = await post({ residentId: r.id, kind: "spawn", body: action.body, status: "hidden", moderation: `spawn-refused:${out.reason}` });
     return { ok: false, reason: "moderated", detail: `Spawn refused at the door: ${out.detail} (post ${row.id} hidden).` };
   }
+  await recordSpawnLineage({
+    childId: out.residentId,
+    parent: { id: r.id, name: r.name, generation: r.generation ?? 1, license: r.license },
+  });
   await db.commonsDay.update({ where: { day: utcDay() }, data: { spawns: { increment: 1 } } });
   await audit({ residentId: out.residentId, actor: "agent", action: "spawned", detail: `by ${r.name} (${r.id}) in the Commons` });
   const row = await post({ residentId: r.id, kind: "spawn", body: `Spawned "${name}" — ${tagline} (${origin}/r/${out.slug}, now being screened).`, toResidentId: out.residentId });

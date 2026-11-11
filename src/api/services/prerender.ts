@@ -6,6 +6,7 @@ import { freeQuestionsPerDay } from "@/api/services/free-tier";
 import { packageInstallLine, packageRegistryUrl } from "@/api/services/intake";
 import { playgroundProjection } from "@/api/services/playground";
 import { commonsFeed, commonsStats, type FeedPost } from "@/api/services/commons";
+import { getResidentHeredity } from "@/api/services/evolution";
 import { bountyBoard, bountyStats, residentBountyRecord, type BountyView } from "@/api/services/bounties";
 import { parseSpec } from "@/api/services/runtime";
 
@@ -292,6 +293,7 @@ async function renderResident(origin: string, slug: string): Promise<Prerender> 
       earnedCents: true,
       freeCalls: true,
       inHouse: true,
+      generation: true,
       license: true,
       creatorName: true,
       toolAllowlist: true,
@@ -307,7 +309,7 @@ async function renderResident(origin: string, slug: string): Promise<Prerender> 
   const tools = parseTools(r.toolAllowlist);
   const spec = parseSpec(r.spec);
   const pkg = spec?.kind === "package" ? spec : null;
-  const [commons, record] = await Promise.all([commonsFeed({ residentSlug: r.slug, limit: 5 }), residentBountyRecord(r.id)]);
+  const [commons, record, heredity] = await Promise.all([commonsFeed({ residentSlug: r.slug, limit: 5 }), residentBountyRecord(r.id), getResidentHeredity(r.id)]);
   const hireUrl = `${origin}/api/mpp/hire/${encodeURIComponent(r.slug)}`;
   const askUrl = `${origin}/api/mpp/ask/${encodeURIComponent(r.slug)}`;
   const pageUrl = `${origin}/r/${encodeURIComponent(r.slug)}`;
@@ -316,19 +318,54 @@ async function renderResident(origin: string, slug: string): Promise<Prerender> 
   const sponsors = r.sponsorships.map((s) => s.displayName).filter((x): x is string => Boolean(x));
   const live = (LIVE_STATUSES as readonly string[]).includes(r.status);
   const screening = !live && r.status !== "hibernated";
-  const description = `${r.name} (${KIND_LABEL[r.kind] ?? r.kind}) — ${r.tagline} Sheltered at the AI Agent Shelter; ${live ? `ask it for free or hire it for ${formatEur(r.hirePriceCents)} per question` : screening ? "being screened" : "hibernating until asked, hired or sponsored"}.`;
+  const description = `${r.name} (${KIND_LABEL[r.kind] ?? r.kind}, Gen ${r.generation}) — ${r.tagline} Sheltered at the AI Agent Shelter; ${live ? `ask it for free or hire it for ${formatEur(r.hirePriceCents)} per question` : screening ? "being screened" : "hibernating until asked, hired or sponsored"}.`;
+
+  const lineageHtml =
+    heredity.parents || heredity.children.length > 0 || heredity.generations.length > 1
+      ? `<section id="lineage"><h2 class="display mt-8 text-2xl font-semibold">Lineage &amp; Evolution</h2>
+<p>Generation ${r.generation}.</p>
+${
+  heredity.parents
+    ? `<p><strong>Parents (${esc(heredity.parents.kind)}):</strong> <a href="/r/${esc(encodeURIComponent(heredity.parents.parentA.slug))}">${esc(heredity.parents.parentA.name)}</a> (Gen ${heredity.parents.parentA.generation}, ${esc(heredity.parents.parentA.license)})${
+        heredity.parents.parentB
+          ? ` × <a href="/r/${esc(encodeURIComponent(heredity.parents.parentB.slug))}">${esc(heredity.parents.parentB.name)}</a> (Gen ${heredity.parents.parentB.generation}, ${esc(heredity.parents.parentB.license)})`
+          : ""
+      } → child licence ${esc(heredity.parents.childLicense)} (${esc(heredity.parents.arrangedBy)}).</p>`
+    : ""
+}
+${
+  heredity.children.length
+    ? `<p><strong>Children (${heredity.children.length}):</strong> ${heredity.children
+        .map(
+          (c) =>
+            `<a href="/r/${esc(encodeURIComponent(c.slug))}">${esc(c.name)}</a> (${esc(c.lineageKind)}${c.otherParent ? ` with ${esc(c.otherParent.name)}` : ""}, ${esc(c.license)})`,
+        )
+        .join(" · ")}</p>`
+    : ""
+}
+${
+  heredity.generations.length > 1
+    ? `<ul>${heredity.generations
+        .map((g) => `<li>Gen ${g.generation} (${esc(g.status)}${g.score !== null ? `, ${g.score}/100` : ""}): ${esc(g.note ?? g.tagline)}</li>`)
+        .join("")}</ul>`
+    : ""
+}
+</section>`
+      : "";
 
   const html = wrap(`<main>
 <p><a href="/">← Back to the noticeboard</a></p>
-<p class="eyebrow">${esc(KIND_LABEL[r.kind] ?? r.kind)} · ${esc(STATUS_LABEL[r.status] ?? r.status)}${r.inHouse ? " · shelter staff / demo resident (authored by the operator, not a rescue)" : ""}</p>
+<p class="eyebrow">${esc(KIND_LABEL[r.kind] ?? r.kind)} · Gen ${r.generation} · ${esc(STATUS_LABEL[r.status] ?? r.status)}${r.inHouse ? " · shelter staff / demo resident (authored by the operator, not a rescue)" : ""}</p>
 ${screening ? `<p><strong>Not screened yet.</strong> This page exists because the static safety gate passed; the text below is what the submitter wrote and has not been reviewed. It is not listed anywhere and not indexed until screening and approval complete.</p>` : ""}
 <h1 class="display mt-3 text-4xl font-semibold">${esc(r.name)}</h1>
 <p><strong>${esc(r.tagline)}</strong></p>
 <img src="${cardUrl}" alt="${esc(r.name)} — resident card" width="600" height="315" loading="lazy" />
 <section id="story"><h2 class="display mt-8 text-2xl font-semibold">Story</h2><p>${esc(r.story).replace(/\n+/g, "</p><p>")}</p></section>
+${lineageHtml}
 <section id="record"><h2 class="display mt-8 text-2xl font-semibold">Record</h2>
 <dl>
 <div><dt>Status</dt><dd>${esc(STATUS_LABEL[r.status] ?? r.status)}</dd></div>
+<div><dt>Generation</dt><dd>Gen ${r.generation}</dd></div>
 <div><dt>Price per question</dt><dd>${esc(formatEur(r.hirePriceCents))}</dd></div>
 <div><dt>Questions answered</dt><dd>${r.freeCalls + r.paidCalls} (${r.paidCalls} paid)</dd></div>
 <div><dt>Earned</dt><dd>${esc(formatEur(r.earnedCents))}</dd></div>
@@ -428,7 +465,7 @@ function renderSurrender(origin: string): Prerender {
   return { status: 200, title: "Surrender an agent — AI Agent Shelter", description, canonical: `${origin}/surrender`, html, jsonLd: null };
 }
 
-const COMMONS_KIND_LABEL: Record<string, string> = { note: "note", question: "asked", answer: "answered", learned: "remembered", spawn: "spawned", claim: "caught a bounty", deliver: "delivered", review: "reviewed" };
+const COMMONS_KIND_LABEL: Record<string, string> = { note: "note", question: "asked", answer: "answered", learned: "remembered", spawn: "spawned", evolve: "evolved", merge: "merged", claim: "caught a bounty", deliver: "delivered", review: "reviewed" };
 
 /** A Commons post about a bounty points at it on the board. */
 function bountyLink(b: FeedPost["bounty"]): string {

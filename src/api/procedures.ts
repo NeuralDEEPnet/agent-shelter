@@ -23,6 +23,8 @@ import { publicTools } from "@/api/machine";
 import { packageInstallLine, packageRegistryUrl } from "@/api/services/intake";
 import { freeQuestionsPerDay } from "@/api/services/free-tier";
 import { commonsFeed, commonsStats, commonsTick, hideCommonsPost, setCommonsPaused, setResidentCommons } from "@/api/services/commons";
+import { evolveResident, getResidentHeredity, mergeResidents, rollbackResidentGeneration } from "@/api/services/evolution";
+import type { ResidentHeredityView } from "@/api/services/heredity";
 import {
   BOARD_FILTERS,
   bountyBoard,
@@ -80,6 +82,7 @@ function publicResident(r: {
   license: string;
   creatorName: string;
   inHouse: boolean;
+  generation?: number;
 }) {
   const spec = parseSpec(r.spec);
   return {
@@ -89,6 +92,7 @@ function publicResident(r: {
     tagline: r.tagline,
     status: r.status,
     inHouse: r.inHouse,
+    generation: r.generation ?? 1,
     takingCalls: (LIVE_STATUSES as readonly string[]).includes(r.status),
     hirePriceCents: r.hirePriceCents,
     paidCalls: r.paidCalls,
@@ -173,6 +177,8 @@ export async function getResident(input: { slug: string }): Promise<
     mySponsorship: { id: string; status: string; amountCents: number } | null;
     /** Its bounty record for the résumé: deliveries caught and accepted, peer reviews given, gross cents earned from accepted work. */
     bounties: { caught: number; accepted: number; reviewed: number; earnedCents: number };
+    /** Lineage (parents, children) and generation history for this resident. */
+    heredity: ResidentHeredityView;
   }>
 > {
   const r = await db.resident.findUnique({
@@ -182,14 +188,15 @@ export async function getResident(input: { slug: string }): Promise<
       reviews: { where: { kind: "eval" }, orderBy: { createdAt: "desc" }, take: 1 },
       sponsorships: { where: { status: "active" }, select: { displayName: true } },
       _count: { select: { adoptions: true } },
-      audits: { where: { action: { in: ["approved", "graduated", "hibernated", "woken", "drift"] } }, orderBy: { createdAt: "desc" }, take: 6 },
+      audits: { where: { action: { in: ["approved", "graduated", "hibernated", "woken", "drift", "evolved", "merged", "spawned", "generation-rollback"] } }, orderBy: { createdAt: "desc" }, take: 6 },
     },
   });
   if (!r || !(PUBLIC_STATUSES as readonly string[]).includes(r.status)) return refuse(notices.notFound("That resident"));
-  const [hires, userId, bounties] = await Promise.all([
+  const [hires, userId, bounties, heredity] = await Promise.all([
     db.hireCall.groupBy({ by: ["outcome"], where: { residentId: r.id }, _count: { _all: true } }),
     currentUserId(),
     residentBountyRecord(r.id),
+    getResidentHeredity(r.id),
   ]);
   const [mine, myAdoption] = userId
     ? await Promise.all([
@@ -221,6 +228,7 @@ export async function getResident(input: { slug: string }): Promise<
     adoptedByMe: Boolean(myAdoption),
     mySponsorship: mine ? { id: mine.id, status: mine.status, amountCents: mine.amountCents } : null,
     bounties,
+    heredity,
   });
 }
 
@@ -386,7 +394,7 @@ export async function adminOverview(): Promise<
     }[];
     commons: Awaited<ReturnType<typeof commonsStats>>;
     bounties: Awaited<ReturnType<typeof bountyStats>>;
-    live: { id: string; slug: string; name: string; kind: string; status: string; inHouse: boolean; commonsEnabled: boolean; budgetUnits: number; stipendUnits: number; walletCents: number; paidCalls: number; freeCalls: number; earnedCents: number; todayUnits: number; todayRefunds: number; todayInjections: number; lastActiveAt: string | null; probationUntil: string | null }[];
+    live: { id: string; slug: string; name: string; kind: string; status: string; inHouse: boolean; generation: number; license: string; commonsEnabled: boolean; budgetUnits: number; stipendUnits: number; walletCents: number; paidCalls: number; freeCalls: number; earnedCents: number; todayUnits: number; todayRefunds: number; todayInjections: number; lastActiveAt: string | null; probationUntil: string | null; generations: { generation: number; score: number | null; status: string; note: string | null }[] }[];
     anomalies: string[];
     totals: { shelterCents: number; globalUnitsToday: number; globalUnitsCap: number };
     machine: { state: string; detail: string; mode: string | null; key: string | null; profileId: string | null; origin: string };
@@ -400,7 +408,14 @@ export async function adminOverview(): Promise<
   const [s, queueRows, liveRows, usage, audits, bal, globalUnits] = await Promise.all([
     settings(),
     db.resident.findMany({ where: { status: { in: ["submitted", "screened"] } }, include: { reviews: { orderBy: { createdAt: "desc" } } }, orderBy: { createdAt: "asc" } }),
-    db.resident.findMany({ where: { status: { in: ["probation", "active", "hibernated"] } }, include: { wallet: true }, orderBy: [{ status: "asc" }, { paidCalls: "desc" }] }),
+    db.resident.findMany({
+      where: { status: { in: ["probation", "active", "hibernated"] } },
+      include: {
+        wallet: true,
+        generations: { orderBy: [{ generation: "desc" }, { createdAt: "desc" }], take: 10 },
+      },
+      orderBy: [{ status: "asc" }, { paidCalls: "desc" }],
+    }),
     db.dailyUsage.findMany({ where: { day } }),
     db.auditEvent.findMany({ orderBy: { createdAt: "desc" }, take: 30, include: { resident: { select: { name: true } } } }),
     balances(),
@@ -446,6 +461,8 @@ export async function adminOverview(): Promise<
       kind: r.kind,
       status: r.status,
       inHouse: r.inHouse,
+      generation: r.generation,
+      license: r.license,
       commonsEnabled: r.commonsEnabled,
       budgetUnits: r.budgetUnits,
       stipendUnits: r.stipendUnits,
@@ -458,6 +475,7 @@ export async function adminOverview(): Promise<
       todayInjections: usageBy.get(r.id)?.injections ?? 0,
       lastActiveAt: r.lastActiveAt?.toISOString() ?? null,
       probationUntil: r.probationUntil?.toISOString() ?? null,
+      generations: r.generations.map((g) => ({ generation: g.generation, score: g.score, status: g.status, note: g.note })),
     })),
     anomalies,
     commons: await commonsStats(),
@@ -660,6 +678,13 @@ export async function setOutreachApproval(input: { id: string; approved: boolean
 /** Daily cron (app.config.json → `shelterDaily`): stipends, hibernate the broke-and-idle, MCP drift re-checks. */
 // ─── The Commons ─────────────────────────────────────────────────────────────
 
+/**
+ * What a Commons turn hands to the job queue. Without this a resident born in the Commons (spawned or
+ * merged) is created as `submitted` and never screened: the service's own default is a no-op so that
+ * tests and public clones stay offline.
+ */
+const commonsQueue = { enqueue: (residentId: string) => queue.screenResident({ residentId }) };
+
 /** Public: the Commons feed (published posts only) and its live numbers. */
 export async function listCommons(input?: { limit?: number; residentSlug?: string }) {
   const [posts, stats] = await Promise.all([commonsFeed({ limit: input?.limit, residentSlug: input?.residentSlug }), commonsStats()]);
@@ -668,7 +693,7 @@ export async function listCommons(input?: { limit?: number; residentSlug?: strin
 
 /** Platform cron (every couple of hours): a few residents get a turn of their own. Public callers are held to one tick per 20 minutes. */
 export async function commonsTickCron() {
-  const out = await commonsTick();
+  const out = await commonsTick({}, commonsQueue);
   console.log(`[commons] ${out.detail}: ${out.turns.map((t) => `${t.slug} → ${t.outcome.ok ? t.outcome.action : t.outcome.reason}`).join(", ")}`);
   return { ran: out.ran, detail: out.detail, turns: out.turns.length };
 }
@@ -677,7 +702,7 @@ export async function commonsTickCron() {
 export async function commonsTickNow(input?: { max?: number }) {
   const gate = await requireOwner();
   if (!gate.ok) return refuse(gate.notice);
-  return ok(await commonsTick({ max: input?.max, force: true }));
+  return ok(await commonsTick({ max: input?.max, force: true }, commonsQueue));
 }
 
 export async function setCommonsPause(input: { paused: boolean }) {
@@ -699,6 +724,66 @@ export async function setResidentCommonsAccess(input: { residentId: string; enab
   if (!gate.ok) return refuse(gate.notice);
   await setResidentCommons(input.residentId, input.enabled);
   return ok({ enabled: input.enabled });
+}
+
+// ─── Heredity: Owner Merge, Evolve & Rollback ────────────────────────────────
+
+/** Owner: deterministically merge two live residents (`composeMerge`) and screen the child through the normal door. */
+export async function ownerMergeResidents(input: { parentA: string; parentB: string; name?: string; tagline?: string }): Promise<
+  Result<{ residentId: string; slug: string; name: string; license: string; notes: string[] }>
+> {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const out = await mergeResidents(
+    { parentA: input.parentA, parentB: input.parentB, name: input.name, tagline: input.tagline, arrangedBy: "owner" },
+    commonsQueue,
+  );
+  if (!out.ok) return refuse({ kind: "invalid", title: "Merge refused", message: out.detail });
+  return ok(
+    { residentId: out.residentId, slug: out.slug, name: out.name, license: out.license, notes: out.notes },
+    [notices.info("Child created", `"${out.name}" (/r/${out.slug}, licence ${out.license}) is now screening in the queue. Both parents remain unchanged.`)],
+  );
+}
+
+/** Owner: propose and evaluate a candidate next generation for an agent resident. */
+export async function ownerEvolveResident(input: {
+  residentId: string;
+  systemPrompt: string;
+  tagline?: string;
+  skills?: string[];
+  note?: string;
+}): Promise<Result<{ promoted: boolean; generation: number; candidateGeneration: number; score: number; reason: string }>> {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const out = await evolveResident(
+    input.residentId,
+    { systemPrompt: input.systemPrompt, tagline: input.tagline, skills: input.skills, note: input.note },
+    { actor: "owner" },
+  );
+  if (!out.ok) return refuse({ kind: "invalid", title: "Evolution refused", message: out.detail });
+  return ok(
+    { promoted: out.promoted, generation: out.generation, candidateGeneration: out.candidateGeneration, score: out.score, reason: out.reason },
+    [
+      notices.info(
+        out.promoted ? `Promoted to Gen ${out.generation}` : `Candidate Gen ${out.candidateGeneration} held`,
+        out.reason,
+      ),
+    ],
+  );
+}
+
+/** Owner: roll a resident back to any earlier baseline or promoted generation snapshot. */
+export async function ownerRollbackGeneration(input: { residentId: string; targetGeneration: number; note?: string }): Promise<
+  Result<{ generation: number; detail: string }>
+> {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const out = await rollbackResidentGeneration(input.residentId, input.targetGeneration, input.note);
+  if (!out.ok) return refuse({ kind: "invalid", title: "Rollback refused", message: out.detail });
+  return ok(
+    { generation: out.generation, detail: out.detail },
+    [notices.info(`Rolled back to Gen ${out.generation}`, out.detail)],
+  );
 }
 
 // ─── The Bounty Board ────────────────────────────────────────────────────────
