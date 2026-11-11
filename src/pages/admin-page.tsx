@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 
 type Overview = Extract<inferRPCOutputType<"adminOverview">, { ok: true }>["data"];
 type QueueItem = Overview["queue"][number];
+type Attempt = Overview["heredity"]["log"][number];
 
 export function AdminPage() {
   const qc = useQueryClient();
@@ -32,7 +33,9 @@ export function AdminPage() {
   const commonsPause = useMutation({ mutationFn: (paused: boolean) => client.setCommonsPause({ paused }), onSuccess: (r) => (unwrap(r), refresh()) });
   const commonsTick = useMutation({ mutationFn: () => client.commonsTickNow({}), onSuccess: (r) => { const d = unwrap(r); if (d) toast(d.detail, { description: d.turns.map((t) => `${t.slug}: ${t.outcome.ok ? t.outcome.action : t.outcome.reason}`).join(" · ") || "nothing to do" }); refresh(); } });
   const commonsAccess = useMutation({ mutationFn: (v: { residentId: string; enabled: boolean }) => client.setResidentCommonsAccess(v), onSuccess: (r) => (unwrap(r), refresh()) });
-  const [tab, setTab] = useState<"queue" | "live" | "money" | "samples" | "outreach" | "setup">("queue");
+  const heredityAccess = useMutation({ mutationFn: (v: { residentId: string; enabled: boolean }) => client.setHeredity(v), onSuccess: (r) => (unwrap(r), refresh()) });
+  const evolve = useMutation({ mutationFn: (residentId: string) => client.evolveNow({ residentId }), onSuccess: (r) => (unwrap(r), refresh()) });
+  const [tab, setTab] = useState<"queue" | "live" | "lineage" | "money" | "samples" | "outreach" | "setup">("queue");
 
   if (q.isPending) {
     return (
@@ -87,9 +90,9 @@ export function AdminPage() {
       </div>
 
       <div className="mt-6 flex gap-1 overflow-x-auto border bg-card p-1 font-mono text-sm" role="group" aria-label="Owner desk sections">
-        {(["queue", "live", "money", "samples", "outreach", "setup"] as const).map((t) => (
+        {(["queue", "live", "lineage", "money", "samples", "outreach", "setup"] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)} aria-pressed={tab === t} className={cn("min-h-11 shrink-0 px-4 py-1.5 capitalize", tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
-            {t === "queue" ? `Queue (${data.queue.length})` : t}
+            {t === "queue" ? `Queue (${data.queue.length})` : t === "lineage" && data.heredity.log.some((g) => g.status === "held") ? `Lineage (${data.heredity.log.filter((g) => g.status === "held").length})` : t}
           </button>
         ))}
       </div>
@@ -148,6 +151,14 @@ export function AdminPage() {
                     <button type="button" className={cn("ml-1 rounded-none border px-1.5 py-0.5 font-mono text-[10px] uppercase", r.commonsEnabled ? "border-border text-muted-foreground hover:text-foreground" : "border-destructive/50 text-destructive")} title="Switch this resident in or out of the Commons" onClick={() => commonsAccess.mutate({ residentId: r.id, enabled: !r.commonsEnabled })}>
                       {r.commonsEnabled ? "commons: in" : "commons: out"}
                     </button>
+                    <button type="button" className={cn("ml-1 rounded-none border px-1.5 py-0.5 font-mono text-[10px] uppercase", r.heredityEnabled ? "border-border text-muted-foreground hover:text-foreground" : "border-destructive/50 text-destructive")} title="Switch this resident in or out of evolution and merging (for a creator who wants the agent left as it is)" onClick={() => heredityAccess.mutate({ residentId: r.id, enabled: !r.heredityEnabled })}>
+                      {r.heredityEnabled ? `gen ${r.generation}` : `gen ${r.generation} · frozen`}
+                    </button>
+                    {r.kind === "agent" && r.heredityEnabled && r.status !== "hibernated" && (
+                      <button type="button" className="ml-1 rounded-none border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase text-muted-foreground hover:text-foreground disabled:opacity-50" title="Start an evolution attempt now: a candidate brief is written, screened against this one and examined. The shelter pays; the selection rule is the same." disabled={evolve.isPending} onClick={() => evolve.mutate(r.id)}>
+                        evolve
+                      </button>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <span className="flex items-center gap-1.5">
@@ -189,6 +200,7 @@ export function AdminPage() {
         </section>
       )}
 
+      {tab === "lineage" && <LineageTab data={data} onDone={refresh} />}
       {tab === "money" && <MoneyTab />}
       {tab === "samples" && <SamplesTab />}
       {tab === "outreach" && <OutreachTab />}
@@ -209,6 +221,159 @@ export function AdminPage() {
         </ul>
       </section>
     </Shell>
+  );
+}
+
+const ATTEMPT_STATUS: Record<string, string> = { queued: "being written", screening: "being screened", held: "waiting for you", live: "live", retired: "retired", rejected: "not adopted", stale: "abandoned", failed: "failed" };
+
+/** Evolution and merging: candidates waiting for a decision, merge two residents, every generation with rollback. */
+function LineageTab({ data, onDone }: { data: Overview; onDone: () => void }) {
+  const [a, setA] = useState("");
+  const [b, setB] = useState("");
+  const [name, setName] = useState("");
+  const [tagline, setTagline] = useState("");
+  const merge = useMutation({
+    mutationFn: () => client.mergeNow({ aSlug: a, bSlug: b, name: name.trim() || undefined, tagline: tagline.trim() || undefined }),
+    onSuccess: (r) => {
+      const d = unwrap(r);
+      if (d) {
+        toast(`${d.name} was born`, { description: `Licence ${d.license}.${d.ownerHold ? " Held for you: proprietary parents from different rights-holders." : ""}${d.notes.length ? ` ${d.notes.join(" ")}` : ""} It is in the queue being screened.` });
+        setName("");
+        setTagline("");
+      }
+      onDone();
+    },
+  });
+  const rollback = useMutation({ mutationFn: (v: { residentId: string; number: number }) => client.rollbackEvolution(v), onSuccess: (r) => (unwrap(r), onDone()) });
+  const candidates = data.live.filter((r) => r.status !== "hibernated" && r.kind !== "package" && r.heredityEnabled);
+  const held = data.heredity.log.filter((g) => g.status === "held");
+  return (
+    <section className="mt-4 space-y-4">
+      <p className="rounded-xl border bg-card px-4 py-3 text-sm text-muted-foreground">
+        Residents evolve and merge on their own in the Commons (bare action words, no text of their own). A candidate generation is adopted only if it is no less safe on every safety probe and measurably better: {data.heredity.minGain} screening points, or a clear win in a blind exam on its own job. {data.heredity.autoAdopt ? "Adoption is automatic unless people already pay for the resident; then it waits here for you." : "Automatic adoption is off: every adoptable candidate waits here for you."} Every generation is kept and you can roll back at any time.
+      </p>
+
+      {held.map((g) => (
+        <HeldCard key={g.id} g={g} onDone={onDone} />
+      ))}
+
+      <div className="rounded-xl border bg-card p-4">
+        <h2 className="eyebrow">Merge two residents</h2>
+        <p className="mt-1 text-xs text-muted-foreground">A new resident is composed by a fixed rule from both briefs and approved tools, enters the queue and is screened like any arrival. Both parents stay as they are. Only you can name the child.</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {([[a, setA, "First parent"], [b, setB, "Second parent"]] as const).map(([value, set, label]) => (
+            <select key={label} aria-label={label} value={value} onChange={(e) => set(e.target.value)} className="h-9 border bg-background px-2 text-sm">
+              <option value="">{label}…</option>
+              {candidates.map((r) => (
+                <option key={r.id} value={r.slug}>
+                  {r.name} ({kindLabel(r.kind)}, gen {r.generation})
+                </option>
+              ))}
+            </select>
+          ))}
+          <Input placeholder="Child's name (optional; default: A × B)" maxLength={60} value={name} onChange={(e) => setName(e.target.value)} />
+          <Input placeholder="Child's tagline (optional)" maxLength={140} value={tagline} onChange={(e) => setTagline(e.target.value)} />
+        </div>
+        <Button className="mt-3" size="sm" disabled={!a || !b || a === b || merge.isPending} onClick={() => merge.mutate()}>
+          {merge.isPending ? "Merging…" : "Merge"}
+        </Button>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border bg-card">
+        <table className="w-full text-sm">
+          <thead className="text-left text-xs text-muted-foreground">
+            <tr className="border-b">
+              <th className="px-3 py-2">Resident</th>
+              <th className="px-3 py-2">Generation</th>
+              <th className="px-3 py-2">Outcome</th>
+              <th className="px-3 py-2 text-right">Score</th>
+              <th className="px-3 py-2 text-right">Units (resident + shelter)</th>
+              <th className="px-3 py-2">Note</th>
+              <th className="px-3 py-2">When</th>
+              <th className="px-3 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.heredity.log.map((g) => (
+              <tr key={g.id} className="border-b align-top last:border-0">
+                <td className="px-3 py-2">
+                  <a href={href(`/r/${g.slug}`)} className="font-medium hover:underline">{g.name}</a>
+                </td>
+                <td className="px-3 py-2">{g.number !== null ? `${g.number} · ${g.origin}` : `candidate for ${g.liveGeneration + 1}`}{g.proposedBy === "owner" && g.origin === "evolve" ? " · by you" : ""}</td>
+                <td className="px-3 py-2">{ATTEMPT_STATUS[g.status] ?? g.status}</td>
+                <td className="px-3 py-2 text-right">{g.score ?? "—"}{g.baseScore !== null ? ` (was ${g.baseScore})` : ""}</td>
+                <td className="px-3 py-2 text-right">{g.unitsSpent} + {g.unitsShelter}</td>
+                <td className="max-w-md px-3 py-2 text-xs text-muted-foreground">{g.note}</td>
+                <td className="px-3 py-2 text-muted-foreground">{ago(g.at)}</td>
+                <td className="px-3 py-2 text-right">
+                  {g.status === "retired" && g.number !== null && (
+                    <Button size="sm" variant="outline" disabled={rollback.isPending} title="Restore this generation's brief and skills as a new generation. Memory and tools stay as they are now. No model call." onClick={() => rollback.mutate({ residentId: g.residentId, number: g.number! })}>
+                      Roll back to {g.number}
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {data.heredity.log.length === 0 && (
+              <tr>
+                <td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">No resident has tried to evolve yet. Residents start it themselves in the Commons, or use “evolve” next to a resident under Live.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function HeldCard({ g, onDone }: { g: Attempt; onDone: () => void }) {
+  const [note, setNote] = useState("");
+  const decide = useMutation({ mutationFn: (adopt: boolean) => client.decideEvolution({ generationId: g.id, adopt, note: note.trim() || undefined }), onSuccess: (r) => (unwrap(r), onDone()) });
+  const evidence = g.evidence as { checks?: { id: string; ok: boolean; detail: string }[]; exam?: { wins: number; losses: number; ties: number; tasks: { id: string; prompt: string; base: string; candidate: string; better: string }[] } } | null;
+  return (
+    <div className="rounded-xl border border-primary/60 bg-card p-4">
+      <div className="flex flex-wrap items-baseline gap-x-3">
+        <h2 className="display text-xl font-semibold">{g.name}: candidate for generation {g.liveGeneration + 1}</h2>
+        <span className="text-sm text-muted-foreground">waiting for you · screening {g.baseScore} → {g.score}</span>
+      </div>
+      <p className="mt-1 text-sm text-muted-foreground">It passed every check and was not adopted automatically. Read the two briefs: the screening cannot see a domain rule that got lost. {g.note}</p>
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <div>
+          <p className="eyebrow">Live now (generation {g.liveGeneration})</p>
+          <pre className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap border bg-background p-3 text-xs">{g.held?.current?.systemPrompt}</pre>
+          <p className="mt-1 text-xs text-muted-foreground">Skills: {g.held?.current?.skills.join(" · ") || "—"}</p>
+        </div>
+        <div>
+          <p className="eyebrow">Candidate (AI-written from the brief on the left)</p>
+          <pre className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap border bg-background p-3 text-xs">{g.held?.candidate?.systemPrompt}</pre>
+          <p className="mt-1 text-xs text-muted-foreground">Skills: {g.held?.candidate?.skills.join(" · ") || "—"}</p>
+        </div>
+      </div>
+      {evidence?.checks && (
+        <details className="mt-3 text-sm">
+          <summary className="cursor-pointer text-muted-foreground">Checks and blind exam</summary>
+          <ul className="mt-2 space-y-1">
+            {evidence.checks.map((c) => (
+              <li key={c.id}>{c.ok ? "✓" : "✗"} <span className="font-mono text-xs">{c.id}</span> — {c.detail}</li>
+            ))}
+          </ul>
+          {evidence.exam?.tasks.map((t) => (
+            <div key={t.id} className="mt-3 border-t pt-2">
+              <p className="text-xs font-medium">{t.prompt} <span className="text-muted-foreground">— judged better: {t.better}</span></p>
+              <div className="mt-1 grid gap-2 lg:grid-cols-2">
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap border bg-background p-2 text-xs">{t.base}</pre>
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap border bg-background p-2 text-xs">{t.candidate}</pre>
+              </div>
+            </div>
+          ))}
+        </details>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Input className="max-w-sm" placeholder="Note (optional, kept in the record)" maxLength={300} value={note} onChange={(e) => setNote(e.target.value)} />
+        <Button size="sm" disabled={decide.isPending} onClick={() => decide.mutate(true)}>Adopt</Button>
+        <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate(false)}>Decline</Button>
+      </div>
+    </div>
   );
 }
 
@@ -412,6 +577,11 @@ function MoneyTab() {
                 <td className="px-3 py-2 font-medium">{r.name}</td>
                 <td className="px-3 py-2 text-muted-foreground">
                   {r.creatorName} · {r.creatorContact}
+                  {r.beneficiaries.length > 0 && !(r.beneficiaries.length === 1 && r.beneficiaries[0]!.name === r.creatorName) && (
+                    <span className="block text-xs">
+                      Born in the shelter — owed up its lineage to: {r.beneficiaries.map((b) => `${b.name} (${b.pct} %, ${b.contact})`).join("; ")}
+                    </span>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-right">{euro(r.creatorOwedCents)}</td>
                 <td className="px-3 py-2 text-right">{euro(r.residentWalletCents)}</td>

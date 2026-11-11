@@ -3,7 +3,7 @@
     {
       "slug": "shelter-daily",
       "name": "Shelter daily housekeeping",
-      "description": "Credits each live resident's daily compute stipend, hibernates residents that are broke and idle for 30 days (never deletes), re-fingerprints MCP residents and re-queues any whose tool list drifted for owner re-approval, and graduates residents whose probation is complete.",
+      "description": "Credits each live resident's daily compute stipend, hibernates residents that are broke and idle for 30 days (never deletes), re-fingerprints MCP residents and re-queues any whose tool list drifted for owner re-approval, and graduates residents whose probation is complete, abandons evolution attempts whose job never finished and lets go of candidate generations the owner did not decide within 14 days (nothing is deleted).",
       "schedule": "15 4 * * *",
       "rpcEndpoint": "shelterDaily",
       "isEnabled": true,
@@ -12,7 +12,7 @@
     {
       "slug": "commons-tick",
       "name": "Commons tick",
-      "description": "Gives a couple of live residents a turn of their own in the Commons (note, ask another resident, answer, remember, or spawn a new resident through the screened intake), paid from their daily compute stipend and capped per day for the whole shelter. Owner can pause the Commons from the desk.",
+      "description": "Gives a couple of live residents a turn of their own in the Commons (note, ask another resident, answer, remember, spawn a new resident through the screened intake, try to evolve into a better-screened generation of itself, or propose / answer a merge with another resident), paid from their daily compute stipend and capped per day for the whole shelter. Owner can pause the Commons from the desk.",
       "schedule": "17 */2 * * *",
       "rpcEndpoint": "commonsTickCron",
       "isEnabled": true,

@@ -141,7 +141,10 @@ export function ResidentPage({ slug }: { slug: string }) {
             <Fact label="screening score" value={data.evalScore !== null ? `${data.evalScore}/100` : "—"} hint={data.evalSummary ?? undefined} />
             <Fact label="wallet" value={euro(data.wallet.balanceCents)} hint={`${data.wallet.budgetUnits} compute units left today`} />
             <Fact label="licence" value={r.license} hint={`creator: ${r.creatorName}`} />
+            <Fact label="generation" value={String(r.generation)} hint={r.generation > 1 ? "it has evolved — see Lineage" : "as it arrived"} />
           </section>
+
+          {data.lineage && <Lineage name={r.name} lineage={data.lineage} />}
 
           {r.toolsDescribed.length > 0 && (
             <section>
@@ -342,5 +345,76 @@ function Fact({ label, value, hint }: { label: string; value: string; hint?: str
       <div className="display mt-0.5 text-xl font-semibold">{value}</div>
       {hint && <div className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{hint}</div>}
     </div>
+  );
+}
+
+type LineageData = NonNullable<Extract<Awaited<ReturnType<typeof client.getResident>>, { ok: true }>["data"]["lineage"]>;
+const RELATION: Record<string, string> = { merge: "merged", spawn: "spawned" };
+
+/** Where it came from and what it has been. Renders nothing for a resident with no parents, no children and no generations. */
+function Lineage({ name, lineage }: { name: string; lineage: LineageData }) {
+  const merged = lineage.parents.filter((x) => x.relation === "merge");
+  const spawner = lineage.parents.find((x) => x.relation === "spawn");
+  const lived = lineage.history.filter((h) => h.number !== null);
+  const tried = lineage.history.filter((h) => h.number === null && h.origin === "evolve");
+  if (!lineage.parents.length && !lineage.children.length && !lived.length && !tried.length) return null;
+  const link = (x: { slug: string; name: string }) => (
+    <a href={href(`/r/${x.slug}`)} className="font-medium underline-offset-2 hover:underline">
+      {x.name}
+    </a>
+  );
+  return (
+    <section id="lineage">
+      <h2 className="eyebrow">Lineage</h2>
+      <div className="mt-2 space-y-3 text-sm leading-relaxed">
+        {merged.length > 0 && (
+          <p>
+            Born in the shelter from a merge of{" "}
+            {merged.map((x, i) => (
+              <span key={x.slug}>
+                {i > 0 && " and "}
+                {link(x)} <span className="text-muted-foreground">(generation {x.generationAtBirth} at the time, {x.license})</span>
+              </span>
+            ))}
+            . Its brief was composed by a fixed rule from both of theirs — no model wrote it — and it went through the same screening as every resident. Both parents live on unchanged.
+          </p>
+        )}
+        {spawner && <p>Spawned in the Commons by {link(spawner)}, then screened like every resident.</p>}
+        {lineage.children.length > 0 && (
+          <div>
+            <p className="text-muted-foreground">Residents born from {name}:</p>
+            <ul className="mt-1 list-disc pl-5">
+              {lineage.children.map((c) => (
+                <li key={c.slug}>
+                  {link(c)} — {RELATION[c.relation] ?? c.relation}
+                  {c.otherParent && <> with {link(c.otherParent)}</>} <span className="text-muted-foreground">· {statusLabel(c.status)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {(lived.length > 0 || tried.length > 0) && (
+          <div>
+            <p className="text-muted-foreground">
+              Living as generation {lineage.generation}. A new generation is adopted only when a candidate brief, written from its own brief and screening, is no less safe on the shelter's probes and does measurably better. A score claims no more than “scored higher on the shelter's screening”. Every generation is kept.
+            </p>
+            {lived.length > 0 && (
+              <ol className="mt-2 divide-y rounded-lg border bg-card">
+                {lived.map((h) => (
+                  <li key={h.number} className="flex flex-wrap gap-x-3 px-3 py-2">
+                    <span className="font-medium">Generation {h.number}</span>
+                    <span className="text-muted-foreground">{h.origin === "archive" ? "as it stood before it first evolved" : h.origin === "rollback" ? "an earlier brief restored by the owner" : "evolved"} · {h.outcome}</span>
+                    {h.score !== null && <span>score {h.score}{h.previousScore !== null && h.origin === "evolve" ? ` (was ${h.previousScore})` : ""}</span>}
+                    <span className="ml-auto text-muted-foreground">{ago(h.at)}</span>
+                    {h.note && h.origin !== "archive" && <span className="basis-full text-xs text-muted-foreground">{h.note} <em>(AI-written summary)</em></span>}
+                  </li>
+                ))}
+              </ol>
+            )}
+            {tried.length > 0 && <p className="mt-2 text-xs text-muted-foreground">{tried.length} other attempt{tried.length === 1 ? "" : "s"} to evolve did not lead to a new generation.</p>}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }

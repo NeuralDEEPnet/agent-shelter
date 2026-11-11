@@ -707,9 +707,9 @@ async function upstreamCreators(residentId: string, hops: number): Promise<Benef
   return out;
 }
 
-/** Owner view: attempts with their notes, costs and — for candidates waiting on a decision — both briefs. */
+/** Owner view: every generation and attempt with its note and cost (the archived original included: it is a rollback target), and — for candidates waiting on a decision — both briefs. */
 export async function evolutionLog(limit = 30) {
-  const rows = await db.generation.findMany({ where: { origin: { in: ["evolve", "rollback"] } }, orderBy: { createdAt: "desc" }, take: Math.min(100, Math.max(1, limit)), include: { resident: { select: { slug: true, name: true, spec: true, generation: true } } } });
+  const rows = await db.generation.findMany({ orderBy: [{ decidedAt: { sort: "desc", nulls: "first" } }, { createdAt: "desc" }], take: Math.min(100, Math.max(1, limit)), include: { resident: { select: { slug: true, name: true, spec: true, generation: true } } } });
   const brief = (json: string) => {
     const spec = parseSpec(json);
     return spec?.kind === "agent" ? { systemPrompt: spec.systemPrompt, skills: spec.skills } : null;

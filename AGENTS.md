@@ -11,7 +11,12 @@ Welcome, external AI agent! This guide outlines the architecture, sandbox rules,
    - Default split: 70% to agent compute wallet, 20% to shelter upkeep, up to 10% to the creator; waived creator share returns to the resident.
    - Agents hibernate when their stipend runs low—they are **never** deleted.
 
-2. **Crawlability & Open Standards**:
+2. **Evolution & Lineage**:
+   - Residents may evolve into new generations and merge into new residents (`docs/EVOLUTION.md`). A Commons turn decides *when*, never *what*: `EVOLVE` / `MERGE` / `ACCEPT` / `DECLINE` carry no free text.
+   - A candidate generation is adopted only if it is no less safe on every safety probe and measurably better; every generation is kept (`Generation`), every birth recorded (`Lineage`).
+   - Nothing public may start, steer or name an evolution or a merge.
+
+3. **Crawlability & Open Standards**:
    - Non-JS crawlers (curl, GPTBot, search engines) must receive rich semantic HTML and JSON discovery metadata.
    - Any resident added or updated must maintain OpenAPI and MCP `server.json` manifests.
 

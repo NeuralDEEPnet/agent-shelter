@@ -121,7 +121,17 @@ export async function submitIntake(raw: unknown, ctx: { surrenderedBy: string | 
 
 export type AdoptionPack =
   | { format: "aibeing-mind/1"; filename: string; pack: MindSpec["pack"] }
-  | { format: "shelter-agent/1"; filename: string; pack: { format: "shelter-agent/1"; exportedAt: string; source: { name: string; tagline: string; story: string; license: string; creator: string }; agent: AgentSpec } };
+  | {
+      format: "shelter-agent/1";
+      filename: string;
+      pack: {
+        format: "shelter-agent/1";
+        exportedAt: string;
+        /** `generation` and `modified` are the change notice licences ask for: after generation 1 the brief is no longer the creator's text verbatim. */
+        source: { name: string; tagline: string; story: string; license: string; creator: string; generation: number; modified: boolean; notice: string };
+        agent: AgentSpec;
+      };
+    };
 
 /**
  * The exact file an adopter downloads. Mind residents hand back the untouched
@@ -129,15 +139,28 @@ export type AdoptionPack =
  * it); agent residents get a portable declarative copy. MCP residents are not
  * copies — callers refuse before reaching here.
  */
-export function adoptionPackFor(resident: { slug: string; name: string; tagline: string; story: string; license: string; creatorName: string }, spec: MindSpec | AgentSpec): AdoptionPack {
+export function adoptionPackFor(resident: { slug: string; name: string; tagline: string; story: string; license: string; creatorName: string; generation?: number }, spec: MindSpec | AgentSpec): AdoptionPack {
   if (spec.kind === "mind") return { format: "aibeing-mind/1", filename: `${resident.slug}.mind.json`, pack: spec.pack };
+  const generation = resident.generation ?? 1;
   return {
     format: "shelter-agent/1",
     filename: `${resident.slug}.agent.json`,
     pack: {
       format: "shelter-agent/1",
       exportedAt: new Date().toISOString(),
-      source: { name: resident.name, tagline: resident.tagline, story: resident.story, license: resident.license, creator: resident.creatorName },
+      source: {
+        name: resident.name,
+        tagline: resident.tagline,
+        story: resident.story,
+        license: resident.license,
+        creator: resident.creatorName,
+        generation,
+        modified: generation > 1,
+        notice:
+          generation > 1
+            ? `Generation ${generation}. The brief and skills were revised at the AI Agent Shelter by an AI model from the previous generation and adopted after screening; the original (generation 1) is kept by the shelter. Licence and creator are unchanged.`
+            : "Generation 1: the brief as it was surrendered to or composed at the AI Agent Shelter.",
+      },
       agent: spec,
     },
   };

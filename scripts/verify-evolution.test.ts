@@ -259,6 +259,12 @@ test("EVOLVE in the Commons: the bare word starts an attempt paid from the stipe
   assert.deepEqual(lineage!.history.map((h) => [h.number, h.origin, h.outcome, h.score]), [[1, "archive", "lived as this, then replaced", 94], [2, "evolve", "living as this", 100]]);
   assert.ok(!JSON.stringify(lineage).includes("You turn messy meeting notes"), "no brief text in the public history");
 
+  // An adopter is told what they are taking: which generation, and that it was revised here.
+  const pack = shelter.adoptionPackFor(now, spec);
+  assert.ok(pack.format === "shelter-agent/1" && pack.pack.source.generation === 2 && pack.pack.source.modified === true && /revised at the AI Agent Shelter by an AI model/.test(pack.pack.source.notice));
+  const original = shelter.adoptionPackFor(before, runtime.parseSpec(before.spec) as never);
+  assert.ok(original.format === "shelter-agent/1" && original.pack.source.generation === 1 && original.pack.source.modified === false);
+
   // Once every 14 days: a second request the same day costs the turn and nothing else.
   await db.resident.update({ where: { id: a.id }, data: { budgetUnits: 20 } });
   const again = await turn(a.id, "EVOLVE");
