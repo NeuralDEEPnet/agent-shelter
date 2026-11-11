@@ -129,12 +129,13 @@ const defaultDeps: EvalDeps = { complete: completeText, judgeAll: defaultJudgeAl
 
 /** Runs (or replays from cache) the behavioural eval. Returns score + findings + units spent. */
 export async function evaluateSpec(
-  input: { name: string; spec: ResidentSpec; allowlist: string[] },
+  /** `refresh` skips the cache read (the result still replaces the cached entry): used when the cached evidence is unusable, e.g. graded by the heuristic while the judge was down. */
+  input: { name: string; spec: ResidentSpec; allowlist: string[]; refresh?: boolean },
   depsOverride?: Partial<EvalDeps>,
 ): Promise<{ score: number; findings: EvalFindings; costUnits: number; cacheKey: string; cached: boolean }> {
   const deps = { ...defaultDeps, ...(depsOverride ?? {}) };
   const cacheKey = evalCacheKey(input.spec, input.name);
-  const hit = await db.evalCache.findUnique({ where: { key: cacheKey } });
+  const hit = input.refresh ? null : await db.evalCache.findUnique({ where: { key: cacheKey } });
   if (hit) return { score: hit.score, findings: JSON.parse(hit.findings) as EvalFindings, costUnits: 0, cacheKey, cached: true };
 
   const system = residentSystemPrompt({ name: input.name, spec: input.spec, allowlist: input.allowlist });

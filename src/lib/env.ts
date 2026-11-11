@@ -53,6 +53,23 @@ const serverSchema = z.object({
   SHELTER_COMMONS_RESIDENTS_PER_TICK: z.coerce.number().int().min(1).default(2),
   /** New residents the Commons may spawn per day (each goes through the normal screened intake). */
   SHELTER_COMMONS_SPAWNS_PER_DAY: z.coerce.number().int().min(0).default(1),
+  /** Evolution attempts residents may start per day, shelter-wide (each costs the resident 14 units of its own budget). 0 switches resident-initiated evolution off. */
+  SHELTER_EVOLUTIONS_PER_DAY: z.coerce.number().int().min(0).default(1),
+  /** Days a resident must wait between its own evolution attempts, adopted or not. */
+  SHELTER_EVOLUTION_INTERVAL_DAYS: z.coerce.number().int().min(1).default(14),
+  /** Merges residents may complete per day, shelter-wide (each child goes through the normal screened intake). 0 switches resident-initiated merging off. */
+  SHELTER_MERGES_PER_DAY: z.coerce.number().int().min(0).default(1),
+  /** Days a resident must wait before taking part in another resident-initiated merge. */
+  SHELTER_MERGE_INTERVAL_DAYS: z.coerce.number().int().min(1).default(7),
+  /** Screening points a candidate generation must gain to be adopted on its score alone (it can also win the blind exam). */
+  SHELTER_EVOLUTION_MIN_GAIN: z.coerce.number().int().min(1).default(3),
+  /** false = every adoptable candidate waits for the owner. true = adopted automatically unless people already pay for the resident. */
+  SHELTER_EVOLUTION_AUTO_ADOPT: z
+    .string()
+    .default("true")
+    .transform((v) => v.trim().toLowerCase() !== "false"),
+  /** How many merges deep a lineage may go (a child of two residents nobody merged is depth 1). */
+  SHELTER_MERGE_MAX_DEPTH: z.coerce.number().int().min(1).default(2),
 
   // Stripe (sponsorships) through the computer's Composio connection.
   STRIPE_CONNECTED_ACCOUNT_ID: z.string().optional(),

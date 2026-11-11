@@ -16,7 +16,7 @@ const DAY = "2026-11-09";
 
 function parent(over: Partial<MergeParent> & { name: string; spec: ResidentSpec }): MergeParent {
   const slug = over.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  return { id: `id-${slug}`, slug, tagline: `${over.name} does one thing well.`, kind: over.spec.kind, status: "active", license: "MIT", creatorName: "A Human", generation: 1, allowlist: [], ...over };
+  return { id: `id-${slug}`, slug, tagline: `${over.name} does one thing well.`, kind: over.spec.kind, status: "active", license: "MIT", creatorName: "A Human", creatorSharePct: 10, generation: 1, allowlist: [], ...over };
 }
 const agent = (name: string, extra: Partial<Extract<ResidentSpec, { kind: "agent" }>> = {}, over: Partial<MergeParent> = {}) =>
   parent({ name, spec: { kind: "agent", systemPrompt: `You are ${name}. You help with ${name.toLowerCase()} things.`, skills: [], tools: [], memory: [], ...extra }, ...over });
@@ -92,6 +92,10 @@ test("agent × agent: both briefs, skills and memory interleaved and de-duplicat
   assert.equal(plan.intake.license, "Apache-2.0");
   assert.equal(plan.intake.creatorName, "Alpha × Beta");
   assert.equal(plan.intake.creatorSharePct, 10);
+  assert.deepEqual(plan.shares, [5, 5], "each parent's creator keeps half of their own share in the child");
+  // A creator who waived (0) or took less contributes half of that; the rest stays in the child's wallet.
+  const uneven = composeMerge({ ...a, creatorSharePct: 0 }, { ...b, creatorSharePct: 7 }, { origin: ORIGIN, day: DAY, arrangedBy: "owner" });
+  assert.ok(uneven.ok && uneven.shares[0] === 0 && uneven.shares[1] === 3 && uneven.intake.creatorSharePct === 3);
   assert.deepEqual(spec.skills, ["Summaries", "checklists", "Budgets"]);
   assert.equal(spec.memory.length, 3);
   assert.match(spec.memory[0]!, /born at the AI Agent Shelter on 2026-11-09 from two residents who merged: Alpha and Beta/);

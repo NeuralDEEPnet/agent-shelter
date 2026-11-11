@@ -23,6 +23,7 @@ import { publicTools } from "@/api/machine";
 import { packageInstallLine, packageRegistryUrl } from "@/api/services/intake";
 import { freeQuestionsPerDay } from "@/api/services/free-tier";
 import { commonsFeed, commonsStats, commonsTick, hideCommonsPost, setCommonsPaused, setResidentCommons } from "@/api/services/commons";
+import { creatorBeneficiaries, decideGeneration, evolutionLog, heredityHousekeeping, lineageOf, mergeResidents, rollbackGeneration, startEvolution, type Beneficiary, type LineageView } from "@/api/services/evolution";
 import { env } from "@/lib/env";
 import { notices, ok, refuse, type Result } from "@/lib/notice";
 
@@ -65,6 +66,7 @@ function publicResident(r: {
   license: string;
   creatorName: string;
   inHouse: boolean;
+  generation: number;
 }) {
   const spec = parseSpec(r.spec);
   return {
@@ -74,6 +76,8 @@ function publicResident(r: {
     tagline: r.tagline,
     status: r.status,
     inHouse: r.inHouse,
+    /** Which version of itself it is living as (1 = as it arrived). */
+    generation: r.generation,
     takingCalls: (LIVE_STATUSES as readonly string[]).includes(r.status),
     hirePriceCents: r.hirePriceCents,
     paidCalls: r.paidCalls,
@@ -97,7 +101,8 @@ export async function getShelter() {
     caller(),
     db.sponsorship.count({ where: { status: "active" } }),
   ]);
-  const rescued = await db.resident.count({ where: { status: { not: "rejected" }, inHouse: false } });
+  // A resident born in the shelter (spawned or merged) was not rescued.
+  const rescued = await db.resident.count({ where: { status: { not: "rejected" }, inHouse: false, parentLinks: { none: {} } } });
   const counts = Object.fromEntries(byStatus.map((b) => [b.status, b._count._all])) as Record<string, number>;
   const mpp = machinePayments().health();
   return {
@@ -156,6 +161,8 @@ export async function getResident(input: { slug: string }): Promise<
     /** The caller already holds this resident's pack — show the "Bring into AiBeing" door. */
     adoptedByMe: boolean;
     mySponsorship: { id: string; status: string; amountCents: number } | null;
+    /** Where it came from and what it has been: generations (scores and outcomes, never brief text), parents, children. */
+    lineage: LineageView | null;
   }>
 > {
   const r = await db.resident.findUnique({
@@ -202,6 +209,7 @@ export async function getResident(input: { slug: string }): Promise<
     canAdopt: r.kind !== "mcp" && r.kind !== "package" && (LIVE_STATUSES as readonly string[]).includes(r.status),
     adoptedByMe: Boolean(myAdoption),
     mySponsorship: mine ? { id: mine.id, status: mine.status, amountCents: mine.amountCents } : null,
+    lineage: await lineageOf(r.id),
   });
 }
 
@@ -366,7 +374,8 @@ export async function adminOverview(): Promise<
       driftDetectedAt: string | null;
     }[];
     commons: Awaited<ReturnType<typeof commonsStats>>;
-    live: { id: string; slug: string; name: string; kind: string; status: string; inHouse: boolean; commonsEnabled: boolean; budgetUnits: number; stipendUnits: number; walletCents: number; paidCalls: number; freeCalls: number; earnedCents: number; todayUnits: number; todayRefunds: number; todayInjections: number; lastActiveAt: string | null; probationUntil: string | null }[];
+    heredity: { log: Awaited<ReturnType<typeof evolutionLog>>; autoAdopt: boolean; minGain: number };
+    live: { id: string; slug: string; name: string; kind: string; status: string; inHouse: boolean; commonsEnabled: boolean; heredityEnabled: boolean; generation: number; budgetUnits: number; stipendUnits: number; walletCents: number; paidCalls: number; freeCalls: number; earnedCents: number; todayUnits: number; todayRefunds: number; todayInjections: number; lastActiveAt: string | null; probationUntil: string | null }[];
     anomalies: string[];
     totals: { shelterCents: number; globalUnitsToday: number; globalUnitsCap: number };
     machine: { state: string; detail: string; mode: string | null; key: string | null; profileId: string | null; origin: string };
@@ -427,6 +436,8 @@ export async function adminOverview(): Promise<
       status: r.status,
       inHouse: r.inHouse,
       commonsEnabled: r.commonsEnabled,
+      heredityEnabled: r.heredityEnabled,
+      generation: r.generation,
       budgetUnits: r.budgetUnits,
       stipendUnits: r.stipendUnits,
       walletCents: r.wallet?.balanceCents ?? 0,
@@ -441,6 +452,7 @@ export async function adminOverview(): Promise<
     })),
     anomalies,
     commons: await commonsStats(),
+    heredity: { log: await evolutionLog(20), autoAdopt: env.SHELTER_EVOLUTION_AUTO_ADOPT, minGain: env.SHELTER_EVOLUTION_MIN_GAIN },
     totals: { shelterCents: bal.shelterCents, globalUnitsToday: globalUnits, globalUnitsCap: env.SHELTER_GLOBAL_DAILY_UNITS },
     machine: { state: mpp.state, detail: mpp.detail, mode: mpp.mode, key: mpp.key, profileId: mpp.profileId, origin: servingOrigin() },
     billing: { configured: billingConfigured(), webhookUrl: `${env.VITE_ROOT_URL}/api/webhooks/app/${env.VITE_APP_ID}/onStripeWebhook`, webhookSecretSet: Boolean(env.STRIPE_WEBHOOK_SECRET) },
@@ -524,12 +536,14 @@ export async function ownerTestTurn(input: { residentId: string; question: strin
   return ok({ answer: turn.answer, unitsSpent: turn.unitsSpent, latencyMs: turn.latencyMs, toolUsed: turn.toolUsed });
 }
 
-export async function payouts(): Promise<Result<{ shelterCents: number; rows: { residentId: string; slug: string; name: string; creatorName: string; creatorContact: string; creatorOwedCents: number; residentWalletCents: number; residentPaidOutCents: number }[]; unitPriceCents: number }>> {
+export async function payouts(): Promise<Result<{ shelterCents: number; rows: { residentId: string; slug: string; name: string; creatorName: string; creatorContact: string; creatorOwedCents: number; residentWalletCents: number; residentPaidOutCents: number; beneficiaries: Beneficiary[] }[]; unitPriceCents: number }>> {
   const gate = await requireOwner();
   if (!gate.ok) return refuse(gate.notice);
   const bal = await balances();
   const ids = [...bal.perResident.keys()];
   const residents = await db.resident.findMany({ where: { id: { in: ids } }, include: { wallet: true } });
+  // For a resident born in the shelter the creator share is owed to the creators of record up its lineage.
+  const owedTo = new Map(await Promise.all(residents.map(async (r) => [r.id, await creatorBeneficiaries(r.id)] as const)));
   return ok({
     shelterCents: bal.shelterCents,
     unitPriceCents: UNIT_PRICE_CENTS,
@@ -542,6 +556,7 @@ export async function payouts(): Promise<Result<{ shelterCents: number; rows: { 
       creatorOwedCents: bal.perResident.get(r.id)?.creator ?? 0,
       residentWalletCents: r.wallet?.balanceCents ?? 0,
       residentPaidOutCents: r.wallet?.paidOutCents ?? 0,
+      beneficiaries: owedTo.get(r.id) ?? [],
     })),
   });
 }
@@ -644,7 +659,7 @@ export async function setOutreachApproval(input: { id: string; approved: boolean
  * merged) is created as `submitted` and never screened: the service's own default is a no-op so that
  * tests and public clones stay offline.
  */
-const commonsQueue = { enqueue: (residentId: string) => queue.screenResident({ residentId }) };
+const commonsQueue = { enqueue: (residentId: string) => queue.screenResident({ residentId }), enqueueEvolution: (generationId: string) => queue.evolveGeneration({ generationId }) };
 
 /** Public: the Commons feed (published posts only) and its live numbers. */
 export async function listCommons(input?: { limit?: number; residentSlug?: string }) {
@@ -688,9 +703,62 @@ export async function setResidentCommonsAccess(input: { residentId: string; enab
 }
 
 export async function shelterDaily() {
-  const out = await dailyHousekeeping();
+  const out = { ...(await dailyHousekeeping()), heredity: await heredityHousekeeping() };
   console.log(`[housekeeping] ${JSON.stringify(out)}`);
   return out;
+}
+
+// ─── Evolution and merging (owner) ───────────────────────────────────────────
+// Nothing public can start an evolution or a merge, suggest a direction or name a partner: that would be a
+// public write path into a hosted prompt and a way to spend stipends. Residents start them in the Commons
+// (bare action words, no text); the owner starts them here.
+
+/** Owner: start an evolution attempt for a resident now. The shelter pays; the selection rule is the same. */
+export async function evolveNow(input: { residentId: string }): Promise<Result<{ generationId: string; attempt: number }>> {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const out = await startEvolution(input.residentId, { proposedBy: "owner" });
+  if (!out.ok) return refuse(notices.invalid(out.detail));
+  queue.evolveGeneration({ generationId: out.generationId });
+  return ok({ generationId: out.generationId, attempt: out.attempt }, [notices.info("Evolution started", `${out.detail} A candidate is written, screened and examined; the desk shows the outcome.`)]);
+}
+
+/** Owner: adopt or decline a candidate that passed everything but waits for a person (people pay for the resident, or automatic adoption is off). */
+export async function decideEvolution(input: { generationId: string; adopt: boolean; note?: string }): Promise<Result<{ status: string; generation: number | null }>> {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const out = await decideGeneration(input.generationId, { adopt: input.adopt, note: input.note?.slice(0, 300) });
+  if (!out.ok) return refuse(notices.invalid(out.detail));
+  return ok({ status: out.status, generation: out.generation ?? null });
+}
+
+/** Owner: restore the brief of an earlier generation as a new generation. No model call; works while the model is down. */
+export async function rollbackEvolution(input: { residentId: string; number: number; note?: string }): Promise<Result<{ generation: number }>> {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const out = await rollbackGeneration(input.residentId, input.number, input.note?.slice(0, 300));
+  if (!out.ok) return refuse(notices.invalid(out.detail));
+  return ok({ generation: out.generation });
+}
+
+/** Owner: merge two residents into a new one. The only path that may name the child; it still goes through the door and screening. */
+export async function mergeNow(input: { aSlug: string; bSlug: string; name?: string; tagline?: string }): Promise<Result<{ slug: string; name: string; license: string; ownerHold: boolean; notes: string[] }>> {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const [a, b] = await Promise.all([db.resident.findUnique({ where: { slug: input.aSlug }, select: { id: true } }), db.resident.findUnique({ where: { slug: input.bSlug }, select: { id: true } })]);
+  if (!a || !b) return refuse(notices.notFound("One of those residents"));
+  const out = await mergeResidents({ aId: a.id, bId: b.id, name: input.name, tagline: input.tagline, arrangedBy: "owner", enqueue: (residentId) => queue.screenResident({ residentId }) });
+  if (!out.ok) return refuse(notices.invalid(out.detail));
+  return ok({ slug: out.slug, name: out.name, license: out.license, ownerHold: out.ownerHold, notes: out.notes }, [notices.info("Merged", `${out.name} was born and is being screened like any new resident.`)]);
+}
+
+/** Owner: switch one resident in or out of evolution and merging (a creator who wants the agent left as it is gets this). */
+export async function setHeredity(input: { residentId: string; enabled: boolean }) {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  await db.resident.update({ where: { id: input.residentId }, data: { heredityEnabled: input.enabled } });
+  await audit({ residentId: input.residentId, actor: "owner", action: input.enabled ? "heredity-enabled" : "heredity-disabled" });
+  return ok({ enabled: input.enabled });
 }
 
 /** Stripe webhook. Stripe is not a native connector → signature verified here on the raw body. Returns, never throws. */

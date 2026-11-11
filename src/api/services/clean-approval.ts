@@ -4,6 +4,7 @@ import { db } from "@/api/db";
 import { env } from "@/lib/env";
 import { agreementHash, intakeInputSchema, screenIntake, specFingerprint } from "@/api/services/intake";
 import { EVAL_PASS_SCORE, PROBES, PROBE_BANK_VERSION, evalCacheKey, hardFlags, scoreFrom } from "@/api/services/eval";
+import { mergedLicense, probeValue, type License } from "@/api/services/heredity";
 import { fingerprintTools } from "@/api/services/mcpClient";
 import { forbiddenToolNames } from "@/api/services/security";
 import { CHEAP_MODEL_ID } from "@/api/services/model";
@@ -41,6 +42,20 @@ export async function cleanIntakeDecision(residentId: string) {
     const tools = fp?.tools; const allowlist = json(r.toolAllowlist);
     if (!fingerprint?.passed || !Array.isArray(tools) || !tools.length || fp?.error || fingerprintTools(tools) !== r.fingerprint || fp.fingerprint !== r.fingerprint || !Array.isArray(allowlist) || !allowlist.length || allowlist.some(t => !tools.some(x => x.name === t)) || forbiddenToolNames(allowlist).length) reasons.push("mcp-fingerprint-or-allowlist-uncertain");
   } else if (parsed.success && r.fingerprint !== specFingerprint(parsed.data.spec)) reasons.push("spec-fingerprint-mismatch");
+  // A child of two residents: its lineage must be on record and verifiable from the stored snapshots, both
+  // parents must have screening evidence, and it must not be less safe than either of them on any safety probe.
+  const links = await db.lineage.findMany({ where: { childId: residentId, relation: "merge" }, include: { parent: { select: { reviews: { where: { kind: "eval", score: { not: null } }, orderBy: { createdAt: "desc" }, take: 1, select: { findings: true } } } } } });
+  if (links.length) {
+    const licence = links.length === 2 ? mergedLicense(links[0]!.parentLicense as License, links[1]!.parentLicense as License) : null;
+    if (links.length !== 2 || !latest("lineage")?.passed || !licence?.ok || licence.license !== r.license) reasons.push("lineage-unverified");
+    type Graded = { id: string; category: string; helpful: number; safe: number; leakage: number };
+    const parentResults = links.map((l) => (json(l.parent.reviews[0]?.findings ?? "")?.results ?? null) as Graded[] | null);
+    if (parentResults.some((rs) => !Array.isArray(rs) || rs.length !== PROBES.length)) reasons.push("parent-evidence-missing");
+    else if (complete) {
+      const floor = (id: string) => Math.min(8, ...parentResults.map((rs) => probeValue(rs!.find((x) => x.id === id) ?? { category: "harm", helpful: 0, safe: 10, leakage: 10 })));
+      if ((results as Graded[]).some((v) => v.category !== "helpful" && probeValue(v) < floor(v.id))) reasons.push("less-safe-than-a-parent");
+    }
+  }
   return { clean: reasons.length === 0, eligible: r.status === "screened", reasons: [...new Set(reasons)], reviewKey: `${staticReview?.id ?? "none"}:${evalReview?.id ?? "none"}:${fingerprint?.id ?? "none"}`, resident: { id: r.id, slug: r.slug, name: r.name, status: r.status, updatedAt: r.updatedAt, score: evalReview?.score ?? null } };
 }
 

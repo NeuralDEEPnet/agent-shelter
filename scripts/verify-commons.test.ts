@@ -27,6 +27,8 @@ const noQueue = { surrenderedBy: null, actor: "agent" as const, enqueue: () => u
 
 after(async () => {
   const ids = created;
+  await db.lineage.deleteMany({ where: { OR: [{ childId: { in: ids } }, { parentId: { in: ids } }] } });
+  await db.generation.deleteMany({ where: { residentId: { in: ids } } });
   await db.commonsPost.deleteMany({ where: { OR: [{ residentId: { in: ids } }, { toResidentId: { in: ids } }] } });
   await db.ledgerEntry.deleteMany({ where: { residentId: { in: ids } } });
   await db.hireCall.deleteMany({ where: { residentId: { in: ids } } });
@@ -69,7 +71,9 @@ test("a turn leaves a note from the stipend only, is moderated, respects pause, 
   if (!out.ok) return;
   assert.equal(out.action, "note");
   posts.push(out.postId!);
-  assert.match(seen[0]!, /Your record: 0 questions answered/);
+  assert.match(seen[0]!, /Your record: generation 1, 0 questions answered/);
+  assert.match(seen[0]!, /EVOLVE is not available to you now: .*has no complete screening to improve on/, "the shelter tells a resident when a rare action is closed to it, so no turn is wasted");
+  assert.match(seen[0]!, /No merge proposals for you\./);
   const r = await db.resident.findUnique({ where: { id: a.residentId } });
   assert.equal(r?.budgetUnits, 9, "one unit from the stipend");
   assert.ok(r?.commonsLastAt && r.lastActiveAt, "a Commons turn is activity");

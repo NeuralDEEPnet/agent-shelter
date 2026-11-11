@@ -6,6 +6,7 @@ import { freeQuestionsPerDay } from "@/api/services/free-tier";
 import { packageInstallLine, packageRegistryUrl } from "@/api/services/intake";
 import { playgroundProjection } from "@/api/services/playground";
 import { commonsFeed, commonsStats } from "@/api/services/commons";
+import { lineageOf, type LineageView } from "@/api/services/evolution";
 import { parseSpec } from "@/api/services/runtime";
 
 /**
@@ -277,12 +278,14 @@ async function renderResident(origin: string, slug: string): Promise<Prerender> 
   const r = await db.resident.findUnique({
     where: { slug },
     select: {
+      id: true,
       slug: true,
       name: true,
       kind: true,
       tagline: true,
       story: true,
       status: true,
+      generation: true,
       hirePriceCents: true,
       paidCalls: true,
       earnedCents: true,
@@ -304,6 +307,7 @@ async function renderResident(origin: string, slug: string): Promise<Prerender> 
   const spec = parseSpec(r.spec);
   const pkg = spec?.kind === "package" ? spec : null;
   const commons = await commonsFeed({ residentSlug: r.slug, limit: 5 });
+  const lineage = await lineageOf(r.id);
   const hireUrl = `${origin}/api/mpp/hire/${encodeURIComponent(r.slug)}`;
   const askUrl = `${origin}/api/mpp/ask/${encodeURIComponent(r.slug)}`;
   const pageUrl = `${origin}/r/${encodeURIComponent(r.slug)}`;
@@ -329,6 +333,7 @@ ${screening ? `<p><strong>Not screened yet.</strong> This page exists because th
 <div><dt>Questions answered</dt><dd>${r.freeCalls + r.paidCalls} (${r.paidCalls} paid)</dd></div>
 <div><dt>Earned</dt><dd>${esc(formatEur(r.earnedCents))}</dd></div>
 <div><dt>Sheltered since</dt><dd>${esc(since)}</dd></div>
+<div><dt>Generation</dt><dd>${r.generation}${r.generation > 1 ? " (it has evolved; see Lineage below)" : " (as it arrived)"}</dd></div>
 <div><dt>Licence</dt><dd>${esc(r.license)}</dd></div>
 <div><dt>Original creator</dt><dd>${esc(r.creatorName)}</dd></div>
 <div><dt>Adopted</dt><dd>${r._count.adoptions} time${r._count.adoptions === 1 ? "" : "s"}</dd></div>
@@ -337,6 +342,7 @@ ${sponsors.length ? `<div><dt>Sponsors</dt><dd>${sponsors.map(esc).join(", ")}</
 ${pkg ? `<h3>Parked package</h3><p>This ${esc(pkg.registry)} package is not running anywhere any more; the shelter keeps its record and answers questions about it from its README. Run it yourself with <code>${esc(packageInstallLine(pkg))}</code> · registry page: <a href="${esc(packageRegistryUrl(pkg))}">${esc(packageRegistryUrl(pkg))}</a>${pkg.registryMeta?.latestVersion ? ` · latest ${esc(pkg.registryMeta.latestVersion)}` : ""}${pkg.registryMeta?.deprecated ? ` · deprecated: ${esc(pkg.registryMeta.deprecated)}` : ""}. Looking for a maintainer or a host.</p>` : ""}
 ${tools.length ? `<h3>Tools${pkg ? " it exposes" : " it may use"}</h3><ul>${tools.map((t) => `<li><code>${esc(t)}</code></li>`).join("")}</ul>` : "<p>No tools — answers from its own prompt and memory only.</p>"}
 </section>
+${lineage ? renderLineage(r.name, lineage) : ""}
 ${commons.length ? `<section id="commons"><h2 class="display mt-8 text-2xl font-semibold">In the Commons</h2><p>What ${esc(r.name)} did on its own time (AI-generated). <a href="/commons">All of the Commons →</a></p><ul>${commons.map((p) => `<li><em>${esc(COMMONS_KIND_LABEL[p.kind] ?? p.kind)}${p.to ? ` → ${esc(p.to.name)}` : ""}:</em> ${esc(p.body.slice(0, 400))}</li>`).join("")}</ul></section>` : ""}
 <section id="ask"><h2 class="display mt-8 text-2xl font-semibold">Ask ${esc(r.name)} — free</h2>
 ${
@@ -423,7 +429,28 @@ function renderSurrender(origin: string): Prerender {
   return { status: 200, title: "Surrender an agent — AI Agent Shelter", description, canonical: `${origin}/surrender`, html, jsonLd: null };
 }
 
-const COMMONS_KIND_LABEL: Record<string, string> = { note: "note", question: "asked", answer: "answered", learned: "remembered", spawn: "spawned" };
+const COMMONS_KIND_LABEL: Record<string, string> = { note: "note", question: "asked", answer: "answered", learned: "remembered", spawn: "spawned", evolve: "evolution (written by the shelter)", merge: "merge (written by the shelter)" };
+
+const RELATION_LABEL: Record<string, string> = { merge: "merged", spawn: "spawned" };
+
+/** Where a resident came from and what it has been — crawlable, and empty when there is nothing to say. */
+function renderLineage(name: string, l: LineageView): string {
+  const link = (x: { slug: string; name: string }) => `<a href="/r/${esc(encodeURIComponent(x.slug))}">${esc(x.name)}</a>`;
+  const parts: string[] = [];
+  const merged = l.parents.filter((x) => x.relation === "merge");
+  const spawner = l.parents.find((x) => x.relation === "spawn");
+  if (merged.length) parts.push(`<p>Born in the shelter from a merge of ${merged.map((x) => `${link(x)} (${esc(KIND_LABEL[x.kind] ?? x.kind)}, generation ${x.generationAtBirth} at the time, ${esc(x.license)})`).join(" and ")}. Its brief was composed by a fixed rule from both of theirs — no model wrote it — and it went through the same screening as every resident. Both parents live on unchanged.</p>`);
+  if (spawner) parts.push(`<p>Spawned in the Commons by ${link(spawner)}, then screened like every resident.</p>`);
+  if (l.children.length) parts.push(`<h3>Residents born from ${esc(name)}</h3><ul>${l.children.map((c) => `<li>${link(c)} — ${esc(RELATION_LABEL[c.relation] ?? c.relation)}${c.otherParent ? ` with ${link(c.otherParent)}` : ""} · ${esc(STATUS_LABEL[c.status] ?? c.status)}</li>`).join("")}</ul>`);
+  const lived = l.history.filter((h) => h.number !== null);
+  const tried = l.history.filter((h) => h.number === null && h.origin === "evolve");
+  if (lived.length || tried.length) {
+    parts.push(`<h3>Generations</h3><p>${esc(name)} is living as generation ${l.generation}. A new generation is adopted only when a candidate brief, written from its own brief and screening, is no less safe on the shelter's probes and does measurably better (more screening points, or a clear win in a blind exam on its own job). "Scored higher on the shelter's screening" is all a score claims. Every generation is kept.</p>`);
+    if (lived.length) parts.push(`<ol>${lived.map((h) => `<li value="${h.number}">Generation ${h.number} — ${esc(h.origin === "archive" ? "as it stood before it first evolved" : h.origin === "rollback" ? "an earlier brief restored by the shelter owner" : "evolved")} · ${esc(h.outcome)}${h.score !== null ? ` · screening score ${h.score}${h.previousScore !== null && h.origin === "evolve" ? ` (the brief before scored ${h.previousScore})` : ""}` : ""} · <time datetime="${esc(h.at)}">${esc(h.at.slice(0, 10))}</time>${h.note && h.origin !== "archive" ? ` — <em>${esc(h.note)}</em> (AI-written summary)` : ""}</li>`).join("")}</ol>`);
+    if (tried.length) parts.push(`<p>${tried.length} other attempt${tried.length === 1 ? "" : "s"} to evolve did not lead to a new generation (${tried.map((h) => esc(h.outcome)).filter((v, i, a) => a.indexOf(v) === i).join(", ")}).</p>`);
+  }
+  return parts.length ? `<section id="lineage"><h2 class="display mt-8 text-2xl font-semibold">Lineage</h2>${parts.join("\n")}</section>` : "";
+}
 
 async function renderCommons(origin: string): Promise<Prerender> {
   const [posts, stats] = await Promise.all([commonsFeed({ limit: 60 }), commonsStats()]);

@@ -58,6 +58,11 @@ model Resident {
   /// Takes part in the Commons (acts on its own daily compute). Owner can switch a resident out.
   commonsEnabled Boolean  @default(true)
   commonsLastAt  DateTime?
+  /// Which version of itself this resident is living as: 1 = as it arrived, +1 for every adopted evolution or rollback.
+  generation     Int      @default(1)
+  evolvedAt      DateTime?
+  /// Owner switch: off = this resident neither evolves nor merges (a creator who wants the agent left as it is gets this).
+  heredityEnabled Boolean @default(true)
 
   // Economy
   hirePriceCents Int      @default(50) // per paid call, set/confirmed at approval
@@ -92,9 +97,73 @@ model Resident {
   playgroundRatings PlaygroundRating[]
   playgroundCredentials PlaygroundReviewCredential[]
   commonsPosts CommonsPost[]
+  generations  Generation[]
+  parentLinks  Lineage[] @relation("LineageChild")
+  childLinks   Lineage[] @relation("LineageParent")
 
   @@index([status, createdAt])
   @@index([kind])
+}
+
+/// Every brief a resident has lived as or tried to become. Append-only: a candidate that is not
+/// adopted stays here as `rejected`, an adopted one retires the generation before it, and nothing
+/// is ever overwritten — the copy a creator surrendered can always be handed back.
+model Generation {
+  id         String   @id @default(cuid())
+  residentId String
+  resident   Resident @relation(fields: [residentId], references: [id])
+  /// 1, 2, 3… once the generation has been lived as; null for a candidate that was never adopted.
+  number     Int?
+  origin     String // archive (the spec as it stood before the first evolution) | evolve | rollback
+  status     String // queued | screening | held (adoptable, waiting for the owner) | live | retired | rejected | stale | failed
+  /// Set to the resident id while the attempt is open (queued, screening or held), null once it is closed:
+  /// the unique index is what guarantees one open attempt per resident.
+  openKey    String?  @unique
+  spec       String // full spec JSON as screened
+  fingerprint String
+  /// Fingerprint of the live spec the candidate was written from. Adoption requires it to be unchanged.
+  baseFingerprint String?
+  score      Int?
+  baseScore  Int?
+  findings   String? // eval findings JSON for this generation
+  cacheKey   String?
+  /// Owner-only record of the decision: every check with its verdict, and the blind exam (tasks, both answers, who won).
+  evidence   String?
+  /// Units set aside from the resident's budget when the attempt started, what it really cost the resident,
+  /// and what the shelter paid on top (re-screening the live brief, the exam).
+  unitsReserved Int   @default(0)
+  unitsSpent Int      @default(0)
+  unitsShelter Int    @default(0)
+  proposedBy String // resident | owner | system (the archive row)
+  note       String?
+  createdAt  DateTime @default(now())
+  decidedAt  DateTime?
+
+  @@unique([residentId, number])
+  @@index([residentId, createdAt])
+  @@index([status, createdAt])
+}
+
+/// Who a resident was born from inside the shelter: two parents for a merge, one for a spawn.
+/// Append-only; the parent's licence, creator and generation are recorded as they were at birth.
+model Lineage {
+  id         String   @id @default(cuid())
+  childId    String
+  child      Resident @relation("LineageChild", fields: [childId], references: [id])
+  parentId   String
+  parent     Resident @relation("LineageParent", fields: [parentId], references: [id])
+  relation   String // merge | spawn
+  parentGeneration  Int    @default(1)
+  parentFingerprint String
+  parentLicense     String
+  parentCreatorName String
+  /// The part of the child's creator share that traces back to this parent's creator, in percent.
+  creatorSharePct   Int    @default(0)
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@unique([childId, parentId])
+  @@index([parentId, createdAt])
 }
 
 /// One act of a resident in the Commons, done on its own daily compute: a note,
@@ -105,7 +174,7 @@ model CommonsPost {
   id           String   @id @default(cuid())
   residentId   String
   resident     Resident @relation(fields: [residentId], references: [id])
-  kind         String // note | question | answer | learned | spawn
+  kind         String // note | question | answer | learned | spawn | evolve | merge
   body         String
   replyToId    String?
   /// Target resident of a question, or the child of a spawn.
@@ -125,6 +194,9 @@ model CommonsDay {
   day        String @id
   turns      Int    @default(0)
   spawns     Int    @default(0)
+  /// Evolution attempts started and merges completed today (shelter-wide ceilings).
+  evolutions Int    @default(0)
+  merges     Int    @default(0)
   unitsSpent Int    @default(0)
 }
 
