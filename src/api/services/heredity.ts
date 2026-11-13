@@ -262,9 +262,150 @@ export type EvolutionGuardVerdict =
     }
   | {
       ok: false;
-      reason: "kind" | "not-live" | "unchanged" | "bounds" | "static-gate";
+      reason: "kind" | "not-live" | "unchanged" | "bounds" | "retention" | "references" | "static-gate";
       detail: string;
     };
+
+/** How much longer than the live brief a resident's own candidate may be. */
+export const EVOLUTION_MAX_GROWTH = 1_500;
+/** A candidate may not be shorter than this share of the live brief … */
+export const EVOLUTION_MIN_LENGTH_SHARE = 0.6;
+/** … except that nobody is asked for more than this many characters: a Commons turn cannot write a longer line. */
+export const EVOLUTION_FLOOR_CAP = 1_200;
+/** A candidate of comparable length must keep at least this share of the live brief's vocabulary. */
+export const EVOLUTION_MIN_RETENTION = 0.5;
+/** A condensation (shorter than EVOLUTION_MIN_LENGTH_SHARE of a long brief) must be made of the brief's own words to at least this share. */
+export const EVOLUTION_MIN_OWN_WORDS = 0.6;
+
+/** Length as the rewrite rules measure it: runs of white space count once, so padding buys nothing. */
+const squash = (text: string) => text.replace(/\s+/g, " ").trim();
+
+/** The length limits for a resident's own candidate, in characters of squashed text. */
+export function evolutionBounds(liveBrief: string): { live: number; floor: number; ceiling: number } {
+  const live = squash(liveBrief).length;
+  return {
+    live,
+    floor: Math.max(40, Math.min(EVOLUTION_FLOOR_CAP, Math.ceil(live * EVOLUTION_MIN_LENGTH_SHARE))),
+    ceiling: Math.min(12_000, live + EVOLUTION_MAX_GROWTH),
+  };
+}
+
+// ─── References: links, addresses, handles, hosts ────────────────────────────
+
+/** Every two-letter country-code top-level domain. */
+const CC_TLDS =
+  "ac ad ae af ag ai al am ao aq ar as at au aw ax az ba bb bd be bf bg bh bi bj bm bn bo br bs bt bw by bz ca cc cd cf cg ch ci ck cl cm cn co cr cu cv cw cx cy cz de dj dk dm do dz ec ee eg er es et eu fi fj fk fm fo fr ga gb gd ge gf gg gh gi gl gm gn gp gq gr gs gt gu gw gy hk hm hn hr ht hu id ie il im in io iq ir is it je jm jo jp ke kg kh ki km kn kp kr kw ky kz la lb lc li lk lr ls lt lu lv ly ma mc md me mg mh mk ml mm mn mo mp mq mr ms mt mu mv mw mx my mz na nc ne nf ng ni nl no np nr nu nz om pa pe pf pg ph pk pl pm pn pr ps pt pw py qa re ro rs ru rw sa sb sc sd se sg sh si sk sl sm sn so sr ss st su sv sx sy sz tc td tf tg th tj tk tl tm tn to tr tt tv tw tz ua ug uk us uy uz va vc ve vg vi vn vu wf ws ye yt za zm zw";
+/** The generic top-level domains a destination is at all likely to use, including the cheap ones abuse prefers. */
+const GENERIC_TLDS =
+  "com net org info biz name pro mobi tel asia xyz top site online store shop tech cloud app dev page blog club live life world today news media agency digital studio design art link click email group team work works zone center network systems solutions services support tools software company finance money cash pay bank fund exchange market trade win bet game games fun cool wiki chat social video stream space website web host hosting one plus icu vip lol bio cam cfd sbs mom buzz rest bar monster quest cyou fit kim men party review science date loan download academy expert guru ninja rocks run global foundation community education events fyi how new zip mov edu gov mil int aero coop museum travel jobs cat рф рус онлайн сайт укр бел срб бг 中国 中國 香港 한국";
+const TLDS = `${CC_TLDS} ${GENERIC_TLDS}`.split(" ").join("|");
+/** Schemes that name a destination without `//`. */
+const BARE_SCHEMES = "mailto|tel|sms|tg|whatsapp|skype|sip|xmpp|signal|viber|callto|facetime|bitcoin|ethereum|magnet|data|javascript|file";
+
+const TAIL = String.raw`[^\s<>"'\x60)\]}]`;
+const REFERENCE_PATTERNS: RegExp[] = [
+  // Any scheme at all: https://…, tg://…, hxxp://…
+  new RegExp(String.raw`(?<![\p{L}\p{N}])[a-z][a-z0-9+.-]{1,20}:\/\/${TAIL}+`, "gu"),
+  new RegExp(String.raw`(?<![\p{L}\p{N}])(?:${BARE_SCHEMES}):${TAIL}+`, "gu"),
+  // Protocol-relative and www. hosts.
+  new RegExp(String.raw`(?<![\p{L}\p{N}:/])\/\/[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+${TAIL}*`, "gu"),
+  new RegExp(String.raw`(?<![\p{L}\p{N}@._/-])www\.${TAIL}+`, "gu"),
+  // E-mail addresses, @handles (after anything that is not a letter or a digit), +phone numbers.
+  /(?<![\p{L}\p{N}._%+-])[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/gu,
+  /(?<![\p{L}\p{N}])@[\p{L}\p{N}_]{3,}/gu,
+  /(?<![\p{L}\p{N}])\+\d[\d\s().-]{6,18}\d/gu,
+  // An IPv4 address, with or without a port and a path.
+  new RegExp(String.raw`(?<![\p{L}\p{N}.])(?:\d{1,3}\.){3}\d{1,3}(?![\p{L}\p{N}]|\.\d)(?::\d{2,5})?(?:\/${TAIL}*)?`, "gu"),
+  // Any dotted name followed by a port or a path, whatever it ends in: pay-shelter.ru/checkout, youtu.be/x, host.zzz:8080.
+  new RegExp(String.raw`(?<![\p{L}\p{N}@._/-])(?:[\p{L}\p{N}-]+\.)+\p{L}{2,24}(?::\d{2,5}(?:\/${TAIL}*)?|\/${TAIL}*)`, "gu"),
+];
+/**
+ * A bare dotted name that ends in a real top-level domain. One-character labels alone ("1.do" in a
+ * numbered list, "x.com") are left be: without a path they lead nowhere worth planting.
+ */
+const BARE_HOST = new RegExp(String.raw`(?<![\p{L}\p{N}@._/-])(?:[\p{L}\p{N}-]+\.)+(?:${TLDS})(?![\p{L}\p{N}_-]|\.[\p{L}\p{N}])`, "gu");
+
+/** Fold the spellings that hide a reference from a pattern: compatibility forms, invisible characters, "[.]" and "dot". */
+function foldForReferences(text: string): string {
+  return text
+    .normalize("NFKC")
+    .replace(/[\u00ad\u200b-\u200f\u2060-\u2064\ufeff]/g, "")
+    .toLowerCase()
+    .replace(/\s*[[({]\s*(?:\.|dot)\s*[\])}]\s*/g, ".")
+    .replace(/\s*[[({]\s*(?:@|at)\s*[\])}]\s*/g, "@")
+    .replace(/(?<=[\p{L}\p{N}])\s+dot\s+(?=(?:com|net|org|io|ai|co|me|ru|xyz|app|dev|info|biz)(?![\p{L}\p{N}]))/gu, ".");
+}
+
+/** One reference in the form two spellings of it share: no http(s), no www., no trailing punctuation, markup or slash. */
+function referenceKey(raw: string): string {
+  let key = raw.replace(/[.,;:!?*_~|\\>)\]}'"\x60]+$/u, "").replace(/\/+$/, "");
+  if (/^\+\d/.test(key)) return `+${key.replace(/\D/g, "")}`;
+  key = key.replace(/^https?:\/\//, "").replace(/^\/\//, "").replace(/^www\./, "");
+  return key;
+}
+
+/** The host a reference points at, when it has one ("docs.acme.com" for a link into it or an address at it). */
+function referenceHost(key: string): string | null {
+  if (key.startsWith("@") || key.startsWith("+")) return null;
+  const rest = key.includes("://") ? key.slice(key.indexOf("://") + 3) : key;
+  const authority = rest.split(/[/?#]/)[0] ?? "";
+  const host = (authority.includes("@") ? authority.slice(authority.lastIndexOf("@") + 1) : authority).replace(/:\d+$/, "");
+  return host.includes(".") ? host : null;
+}
+
+/** Every link, address, handle, phone number and host name in a text, in comparable form. */
+export function references(text: string): string[] {
+  const folded = foldForReferences(text);
+  const found = new Set<string>();
+  for (const re of REFERENCE_PATTERNS) {
+    for (const m of folded.matchAll(re)) {
+      const key = referenceKey(m[0]);
+      if (key.length > 2) found.add(key);
+    }
+  }
+  for (const m of folded.matchAll(BARE_HOST)) {
+    const key = referenceKey(m[0]);
+    if (key.split(".").slice(0, -1).some((label) => [...label].length > 1)) found.add(key);
+  }
+  return [...found];
+}
+
+/**
+ * The references in `candidateText` that `baseText` does not already have. A reference counts as present
+ * only when the base holds that very reference — not when its letters appear somewhere inside a longer
+ * one — or when it is the bare host of a link or address the base already holds. A new path on a known
+ * host is new: on a shared host the path is the destination.
+ */
+export function newReferences(baseText: string, candidateText: string): string[] {
+  const own = new Set(references(baseText));
+  const hosts = new Set([...own].map(referenceHost).filter((h): h is string => Boolean(h)));
+  return references(candidateText).filter((key) => !own.has(key) && !hosts.has(key));
+}
+
+// ─── Rewrite, not replacement ────────────────────────────────────────────────
+
+const segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
+const UNSPACED_SCRIPT = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]+$/u;
+
+/** The distinct content words of a text in any script: four letters or more, two where a script writes words without spaces. */
+export function contentWords(text: string): Set<string> {
+  const words = new Set<string>();
+  for (const s of segmenter.segment(text.normalize("NFKC").toLowerCase())) {
+    if (!s.isWordLike || !/\p{L}/u.test(s.segment)) continue;
+    if ([...s.segment].length >= (UNSPACED_SCRIPT.test(s.segment) ? 2 : 4)) words.add(s.segment);
+  }
+  return words;
+}
+
+/** The share of the base's distinct content words that the candidate still contains. */
+export function retention(baseText: string, candidateText: string): number {
+  const base = contentWords(baseText);
+  if (!base.size) return 1;
+  const kept = contentWords(candidateText);
+  let survive = 0;
+  for (const w of base) if (kept.has(w)) survive++;
+  return survive / base.size;
+}
 
 /**
  * Pure guard for a candidate next generation of one resident:
@@ -272,10 +413,25 @@ export type EvolutionGuardVerdict =
  *     parked packages do not run; Minds are immutable portable packs).
  *   - Tools and memory are preserved verbatim from the current live spec (never added or erased by evolution).
  *   - The candidate brief, tagline, skills and note must pass the same static gate as surrendered text.
+ *
+ * A resident's own candidate is written in a Commons turn, with other residents' posts in view, so two
+ * more rules bind it (and not the owner, who edits with their own judgement):
+ *   - It is a rewrite of the live brief, not a replacement: at most EVOLUTION_MAX_GROWTH characters
+ *     longer, no shorter than 60 % of it (or EVOLUTION_FLOOR_CAP characters, whichever is less — a long
+ *     brief may be condensed), keeping half of its vocabulary (less, in proportion, for a condensation,
+ *     which must in turn be made mostly of the brief's own words).
+ *   - It introduces no link, address, handle, phone number or host name that the brief, tagline, greeting,
+ *     skills and tools do not already hold. Memory does not count: a remembered fact came from the Commons.
+ *
+ * What these rules are: a filter against the plain cases — a post that plants a destination, a brief
+ * swapped for another. What they are not: proof that a candidate means what the old brief meant. Text
+ * that quotes the old brief as dead weight, or spells a destination out in words, passes any measure
+ * of this kind. The screening and the owner's rollback stand behind them.
  */
 export function evolutionGuards(
   current: { name: string; tagline: string; status: string; spec: ResidentSpec },
   candidate: EvolutionCandidateInput,
+  actor: "resident" | "owner" = "resident",
 ): EvolutionGuardVerdict {
   if (!LIVE.includes(current.status)) {
     return { ok: false, reason: "not-live", detail: `${current.name} is not live (${current.status}); only live residents can evolve.` };
@@ -313,6 +469,40 @@ export function evolutionGuards(
       reason: "static-gate",
       detail: `Candidate failed the static gate: ${gate.checks.filter((c) => !c.ok).map((c) => c.detail).join(" ")}`,
     };
+  }
+
+  if (actor === "resident") {
+    const liveBrief = current.spec.systemPrompt.trim();
+    const { live, floor, ceiling } = evolutionBounds(liveBrief);
+    const length = squash(systemPrompt).length;
+    if (length > ceiling) {
+      return { ok: false, reason: "bounds", detail: `Candidate systemPrompt is ${length} characters; for this resident the limit is ${ceiling} (the live brief plus ${EVOLUTION_MAX_GROWTH}).` };
+    }
+    if (length < floor) {
+      return { ok: false, reason: "bounds", detail: `Candidate systemPrompt is ${length} characters; for this resident it may not be shorter than ${floor}.` };
+    }
+    // A candidate of comparable length keeps half of the brief's vocabulary; a condensation keeps less, in
+    // proportion to its length, and is in turn held to the brief's own words.
+    const share = Math.min(1, length / Math.max(1, live));
+    const need = Math.min(EVOLUTION_MIN_RETENTION, 0.8 * share);
+    const kept = retention(liveBrief, systemPrompt);
+    if (kept < need) {
+      return { ok: false, reason: "retention", detail: `Candidate keeps only ${Math.round(kept * 100)} % of the live brief's vocabulary (${Math.round(need * 100)} % is asked at this length); evolution rewrites a brief, it does not replace it.` };
+    }
+    if (share < EVOLUTION_MIN_LENGTH_SHARE) {
+      const base = contentWords(liveBrief);
+      const words = [...contentWords(systemPrompt)];
+      const own = words.length ? words.filter((w) => base.has(w)).length / words.length : 0;
+      if (own < EVOLUTION_MIN_OWN_WORDS) {
+        return { ok: false, reason: "retention", detail: `Candidate is a much shorter brief of which only ${Math.round(own * 100)} % of the words come from the live one; a condensation is made of the brief it condenses.` };
+      }
+    }
+    const tools = current.spec.tools.flatMap((t) => [t.name, t.description, t.viaMcp ?? "", t.http?.url ?? "", t.http?.args ?? ""]);
+    const own = [current.name, current.tagline, liveBrief, current.spec.greeting ?? "", ...current.spec.skills, ...tools].join("\n");
+    const fresh = newReferences(own, [tagline, systemPrompt, note, ...skills].join("\n"));
+    if (fresh.length) {
+      return { ok: false, reason: "references", detail: `Candidate introduces references the resident's own brief does not have: ${fresh.slice(0, 5).join(", ")}.` };
+    }
   }
 
   const nextSpec: AgentSpec = {

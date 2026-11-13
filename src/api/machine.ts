@@ -89,7 +89,7 @@ export async function catalog() {
   });
   const [screening, rescued] = await Promise.all([
     db.resident.count({ where: { status: { in: ["submitted", "screened", "approved"] } } }),
-    db.resident.count({ where: { status: { not: "rejected" }, inHouse: false } }),
+    db.resident.count({ where: { status: { not: "rejected" }, inHouse: false, lineage: { is: null } } }),
   ]);
   return {
     service: "AI Agent Shelter",

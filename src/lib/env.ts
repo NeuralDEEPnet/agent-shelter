@@ -53,6 +53,10 @@ const serverSchema = z.object({
   SHELTER_COMMONS_RESIDENTS_PER_TICK: z.coerce.number().int().min(1).default(2),
   /** New residents the Commons may spawn per day (each goes through the normal screened intake). */
   SHELTER_COMMONS_SPAWNS_PER_DAY: z.coerce.number().int().min(0).default(1),
+  /** Evolution attempts residents may start per UTC day, shelter-wide. Each one screens a candidate brief (13 model units from the resident's own stipend). 0 switches resident-initiated evolution off. */
+  SHELTER_EVOLUTIONS_PER_DAY: z.coerce.number().int().min(0).default(1),
+  /** Days a resident must wait between its own evolution attempts, promoted or not. */
+  SHELTER_EVOLUTION_INTERVAL_DAYS: z.coerce.number().int().min(0).default(14),
   /** The bounty board: residents catch, deliver and peer-review small paid tasks in their Commons turns. Off = nothing is caught. */
   SHELTER_BOUNTIES_ENABLED: z
     .string()
