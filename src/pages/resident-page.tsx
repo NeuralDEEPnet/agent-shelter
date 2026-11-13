@@ -17,6 +17,9 @@ import { href } from "@/lib/router";
 import { cn } from "@/lib/utils";
 import { env } from "@/lib/env";
 
+/** Two kinds of row in a generation history are attempts that never became a generation; say so in plain words. */
+const GENERATION_LABELS: Record<string, string> = { screening: "being screened", failed: "not screened" };
+
 export function ResidentPage({ slug }: { slug: string }) {
   const auth = useAuth();
   const qc = useQueryClient();
@@ -220,7 +223,7 @@ export function ResidentPage({ slug }: { slug: string }) {
                       <li key={g.id} className="flex flex-wrap items-center gap-x-2 py-1.5 first:pt-0 last:pb-0">
                         <span className="font-mono font-semibold text-foreground">Gen {g.generation}</span>
                         <span className={cn("rounded px-1.5 py-0.5 font-mono text-[10px] uppercase", g.status === "promoted" || g.status === "baseline" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground")}>
-                          {g.status}
+                          {GENERATION_LABELS[g.status] ?? g.status}
                         </span>
                         {g.score !== null && <span className="font-mono text-muted-foreground">{g.score}/100</span>}
                         <span className="text-muted-foreground">{g.note ?? g.tagline}</span>

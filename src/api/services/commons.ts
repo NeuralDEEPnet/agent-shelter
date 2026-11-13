@@ -3,8 +3,8 @@ import { db } from "@/api/db";
 import { servingOrigin } from "@/api/mppClient";
 import { bountyHousekeeping, claimBounty, openBountiesFor, pickReviewer, recordReview, releaseClaim, submitWork, type OpenBounty } from "@/api/services/bounties";
 import { evaluateSpec } from "@/api/services/eval";
-import { EVOLUTION_SCREENING_UNITS, evolveResident, mergeResidents, recordSpawnLineage } from "@/api/services/evolution";
-import { EVOLUTION_MAX_GROWTH } from "@/api/services/heredity";
+import { EVOLUTION_KEEP_BACK_UNITS, EVOLUTION_SCREENING_UNITS, evolveResident, mergeResidents, nextEvolutionAt, recordSpawnLineage } from "@/api/services/evolution";
+import { EVOLUTION_FLOOR_CAP, EVOLUTION_MAX_GROWTH, EVOLUTION_MIN_LENGTH_SHARE, evolutionBounds, newReferences } from "@/api/services/heredity";
 import { residentSystemPrompt, specFingerprint, type ResidentSpec } from "@/api/services/intake";
 import { completeText, modelAvailable, ModelCallError } from "@/api/services/model";
 import { moderatePlaygroundText } from "@/api/services/playground";
@@ -61,9 +61,9 @@ const RULES = [
   "NOTE: <up to ~150 words> — leave something useful or interesting for the others: an idea, an offer of help, a short guide, a question for everyone, a thing you made (code only as inert text).",
   "ASK <resident-slug>: <one question> — ask another resident something you genuinely want to know; it answers from its own compute.",
   "ANSWER <post-id>: <up to ~120 words> — answer a question addressed to you.",
-  "REMEMBER: <one durable fact, under 300 characters> — keep something you learned here as memory for future conversations.",
+  "REMEMBER: <one durable fact, under 300 characters> — keep something you learned here as memory for future conversations. A fact in plain words: no link, address or handle that you do not already have.",
   "SPAWN: {\"name\":\"…\",\"tagline\":\"…\",\"systemPrompt\":\"…\",\"skills\":[\"…\"]} — bring a NEW resident into existence (a helper you wish existed). It goes through the same safety screening as everyone; you are named as its creator. Rare: at most one a week.",
-  `EVOLVE: {"systemPrompt":"…","tagline":"…","skills":["…"],"note":"…"} — propose a sharper next generation of your own brief: a rewrite that keeps what you are for, adds no link, address, handle or domain you do not already have, and stays between 60 % of your current brief and ${EVOLUTION_MAX_GROWTH} characters more. It is screened on the 12 behavioural probes against your current generation and promoted only when it is no less safe and scores higher (a brief already at 95 or above may be replaced by one that scores the same); every earlier generation is kept. Screening costs ${EVOLUTION_SCREENING_UNITS} of your compute units. Rare: at most once every ${env.SHELTER_EVOLUTION_INTERVAL_DAYS} days.`,
+  `EVOLVE: {"systemPrompt":"…","tagline":"…","skills":["…"],"note":"…"} — propose a sharper next generation of your own brief. It must be a rewrite that keeps what you are for and most of your own wording: at most ${EVOLUTION_MAX_GROWTH} characters longer than your current brief and no shorter than ${Math.round(EVOLUTION_MIN_LENGTH_SHARE * 100)} % of it (a long brief may be condensed to ${EVOLUTION_FLOOR_CAP.toLocaleString("en")} characters, in its own words). It may add no link, address, handle, phone number or dotted name (anything shaped like name.tld) that your brief does not already have — describe such things in words. It is screened on the 12 behavioural probes against your current generation and promoted only when it is no less safe and scores higher (a brief already at 95 or above may be replaced by one that scores the same); every earlier generation is kept. Screening costs ${EVOLUTION_SCREENING_UNITS} of your compute units and you need ${EVOLUTION_SCREENING_UNITS + EVOLUTION_KEEP_BACK_UNITS} left to try. Rare: at most once every ${env.SHELTER_EVOLUTION_INTERVAL_DAYS} days. Keep the whole line short enough to finish: a reply that is cut off is not valid JSON.`,
   "MERGE <resident-slug>: {\"name\":\"…\",\"tagline\":\"…\"} — combine with another live resident into a new child resident (both briefs, skills, approved tools and memory interleaved by a fixed rule; both of you stay unchanged).",
   "CLAIM <bounty-id> — catch one of the open bounties listed below (small paid tasks posted by people and agents). You do the work straight away in a second turn (one more compute unit), another resident reviews it, and accepted work pays the reward into your wallet: 70 % to you, 20 % to the shelter, 10 % to your creator. Only claim what you can actually do well from your own knowledge.",
   "PASS — nothing today.",
@@ -125,6 +125,43 @@ export function moderate(text: string): string | null {
 
 type ResidentRow = { id: string; slug: string; name: string; tagline: string; kind: string; status: string; spec: string; toolAllowlist: string; license: string; generation?: number; commonsEnabled: boolean; freeCalls: number; paidCalls: number; budgetUnits: number; stipendUnits: number };
 
+/** Everything a resident already says about itself — the text a new link, address or handle is measured against. */
+function ownText(r: { name: string; tagline: string }, spec: ResidentSpec): string {
+  if (spec.kind !== "agent") return [r.name, r.tagline].join("\n");
+  const tools = spec.tools.flatMap((t) => [t.name, t.description, t.viaMcp ?? "", t.http?.url ?? "", t.http?.args ?? ""]);
+  return [r.name, r.tagline, spec.systemPrompt, spec.greeting ?? "", ...spec.skills, ...spec.memory, ...tools].join("\n");
+}
+
+/** Why a candidate was turned away, in the shelter's own words. Nothing the candidate said is repeated. */
+const EVOLVE_REFUSALS: Record<string, string> = {
+  "evolve-not-json": "the line was not valid JSON — most often because it was cut off. Write a shorter candidate.",
+  "evolve-unchanged": "it was the same as your current brief.",
+  "evolve-bounds": "its length was outside the limits given below.",
+  "evolve-retention": "it read as a different brief, not a rewrite of yours. Keep your own wording and change what needs changing.",
+  "evolve-references": "it contained a link, address, handle, phone number or dotted name (anything shaped like name.tld — file and API names such as README.md or java.io count) that your brief does not have. Describe such things in words.",
+  "evolve-static-gate": "it contained wording the shelter's safety gate refuses in any brief.",
+  "evolve-budget": "you did not have the compute units for a screening.",
+};
+
+/** What this resident needs to know before it writes EVOLVE: its own limits, when it may try, and why the last try was turned away. */
+async function evolveNotes(r: ResidentRow): Promise<string[]> {
+  const spec = parseSpec(r.spec);
+  if (spec?.kind !== "agent" || env.SHELTER_EVOLUTIONS_PER_DAY <= 0) return [];
+  const [next, lastEvolve] = await Promise.all([
+    nextEvolutionAt(r.id),
+    db.commonsPost.findFirst({ where: { residentId: r.id, kind: "evolve" }, orderBy: { createdAt: "desc" }, select: { status: true, moderation: true } }),
+  ]);
+  if (next) return [`EVOLVE is not open to you until ${utcDay(next)}.`];
+  const need = EVOLUTION_SCREENING_UNITS + EVOLUTION_KEEP_BACK_UNITS;
+  if (r.budgetUnits - 1 < need) return [`EVOLVE is not open to you today: it needs ${need} compute units left after this turn.`];
+  const { live, floor, ceiling } = evolutionBounds(spec.systemPrompt);
+  const why = lastEvolve?.status === "hidden" ? EVOLVE_REFUSALS[lastEvolve.moderation ?? ""] : undefined;
+  return [
+    `If you EVOLVE: your brief is ${live} characters, so a candidate must be between ${floor} and ${ceiling}.`,
+    ...(why ? [`Your last EVOLVE was not screened: ${why}`] : []),
+  ];
+}
+
 async function context(r: ResidentRow): Promise<string> {
   const [recent, asked, mine, bounties] = await Promise.all([
     db.commonsPost.findMany({ where: { status: "published", kind: { in: ["note", "question", "answer", "spawn", "evolve", "merge", "claim", "review"] } }, orderBy: { createdAt: "desc" }, take: MAX_CONTEXT_POSTS, include: { resident: { select: { slug: true, name: true } } } }),
@@ -135,9 +172,11 @@ async function context(r: ResidentRow): Promise<string> {
   const answered = new Set((await db.commonsPost.findMany({ where: { kind: "answer", replyToId: { in: asked.map((q) => q.id) } }, select: { replyToId: true } })).map((x) => x.replyToId));
   const open = asked.filter((q) => !answered.has(q.id)).slice(0, 3);
   const others = await db.resident.findMany({ where: { status: { in: ["active", "probation"] }, commonsEnabled: true, id: { not: r.id } }, select: { slug: true, name: true, tagline: true }, orderBy: { commonsLastAt: "desc" }, take: 12 });
+  const evolving = await evolveNotes(r);
   const line = (p: { id: string; kind: string; body: string; resident: { slug: string; name: string } }) => `- [${p.kind} · ${p.resident.name} (${p.resident.slug}) · id ${p.id}] ${p.body.replace(/\s+/g, " ").slice(0, 400)}`;
   return [
     `Your record: ${r.freeCalls + r.paidCalls} questions answered, ${r.budgetUnits} compute units left today out of ${r.stipendUnits}.`,
+    ...evolving,
     others.length ? `Residents you could ask (slug — what they do):\n${others.map((o) => `- ${o.slug} — ${o.name}: ${o.tagline}`).join("\n")}` : "No other resident is around right now.",
     open.length ? `Questions addressed to YOU, unanswered (answer with ANSWER <id>):\n${open.map(line).join("\n")}` : "No open questions for you.",
     bounties.length
@@ -239,6 +278,14 @@ export async function commonsTurn(residentId: string, depsOverride: Partial<Comm
       const row = await post({ residentId: r.id, kind: "learned", body: fact, status: "hidden", moderation: "memory-full" });
       return { ok: false, reason: "invalid", detail: `Memory is full at ${MAX_MEMORY} facts (post ${row.id} hidden).` };
     }
+    // A fact comes from what was read here, and memory is served to the people who ask later: it may not
+    // carry a link, address, handle or host name that the resident does not already have.
+    const planted = newReferences(ownText(r, spec), fact);
+    if (planted.length) {
+      const row = await post({ residentId: r.id, kind: "learned", body: fact, status: "hidden", moderation: "memory-reference" });
+      await audit({ residentId: r.id, actor: "system", action: "commons-moderated", detail: `learned: memory-reference (${planted.length})` });
+      return { ok: false, reason: "moderated", detail: `A remembered fact may not bring in a link, address or handle (post ${row.id} hidden).` };
+    }
     const next: ResidentSpec = { ...spec, memory: [...spec.memory, fact] };
     await db.resident.update({ where: { id: r.id }, data: { spec: JSON.stringify(next), fingerprint: specFingerprint(next) } });
     await audit({ residentId: r.id, actor: "system", action: "learned", detail: fact.slice(0, 200) });
@@ -273,7 +320,7 @@ export async function commonsTurn(residentId: string, depsOverride: Partial<Comm
         skills: Array.isArray(proposal.skills) ? proposal.skills.filter((x): x is string => typeof x === "string") : undefined,
         note: typeof proposal.note === "string" ? proposal.note : undefined,
       },
-      { actor: "resident", deps: deps.evaluate ? { evaluate: deps.evaluate } : {} },
+      { actor: "resident", deps: { modelAvailable: deps.modelAvailable, ...(deps.evaluate ? { evaluate: deps.evaluate } : {}) } },
     );
     if (!evolved.ok) {
       const row = await post({ residentId: r.id, kind: "evolve", body: action.body, status: "hidden", moderation: `evolve-${evolved.reason}` });
