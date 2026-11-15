@@ -1,5 +1,6 @@
-import { LICENSES, type AgentSpec, type IntakeInput, type ResidentSpec } from "@/api/services/intake";
+import { LICENSES, agentSpecSchema, type AgentSpec, type IntakeInput, type ResidentSpec } from "@/api/services/intake";
 import { runStaticChecks } from "@/api/services/security";
+import { TLDS } from "@/api/services/tlds";
 
 /**
  * Heredity — the pure rules behind evolution and merging. No database, no
@@ -87,6 +88,8 @@ export type MergePlan = {
 
 export const MERGE_PERSONA_CHARS = 5_200;
 const MAX_SKILLS = 12;
+/** The spec's own limit on one skill (intake.ts). */
+const MAX_SKILL_CHARS = 60;
 const MAX_TOOLS = 16;
 const MAX_MEMORY = 40;
 const LIVE = ["active", "probation"];
@@ -262,7 +265,7 @@ export type EvolutionGuardVerdict =
     }
   | {
       ok: false;
-      reason: "kind" | "not-live" | "unchanged" | "bounds" | "retention" | "references" | "static-gate";
+      reason: "kind" | "not-live" | "unchanged" | "bounds" | "tagline" | "skills" | "retention" | "references" | "static-gate";
       detail: string;
     };
 
@@ -291,95 +294,139 @@ export function evolutionBounds(liveBrief: string): { live: number; floor: numbe
 }
 
 // ─── References: links, addresses, handles, hosts ────────────────────────────
+//
+// How a reference is found. Not by describing what a link looks like on both sides: every such
+// description has an edge to stand on (a link glued to a Chinese word, wrapped in underscores, written
+// with one slash). The text is cut into pieces at white space, each piece is asked one question — does
+// anything in you point somewhere? — and a piece that does is taken whole. Whatever is glued to a
+// reference is then part of it, and a reference with something glued to it is a new one.
 
-/** Every two-letter country-code top-level domain. */
-const CC_TLDS =
-  "ac ad ae af ag ai al am ao aq ar as at au aw ax az ba bb bd be bf bg bh bi bj bm bn bo br bs bt bw by bz ca cc cd cf cg ch ci ck cl cm cn co cr cu cv cw cx cy cz de dj dk dm do dz ec ee eg er es et eu fi fj fk fm fo fr ga gb gd ge gf gg gh gi gl gm gn gp gq gr gs gt gu gw gy hk hm hn hr ht hu id ie il im in io iq ir is it je jm jo jp ke kg kh ki km kn kp kr kw ky kz la lb lc li lk lr ls lt lu lv ly ma mc md me mg mh mk ml mm mn mo mp mq mr ms mt mu mv mw mx my mz na nc ne nf ng ni nl no np nr nu nz om pa pe pf pg ph pk pl pm pn pr ps pt pw py qa re ro rs ru rw sa sb sc sd se sg sh si sk sl sm sn so sr ss st su sv sx sy sz tc td tf tg th tj tk tl tm tn to tr tt tv tw tz ua ug uk us uy uz va vc ve vg vi vn vu wf ws ye yt za zm zw";
-/** The generic top-level domains a destination is at all likely to use, including the cheap ones abuse prefers. */
-const GENERIC_TLDS =
-  "com net org info biz name pro mobi tel asia xyz top site online store shop tech cloud app dev page blog club live life world today news media agency digital studio design art link click email group team work works zone center network systems solutions services support tools software company finance money cash pay bank fund exchange market trade win bet game games fun cool wiki chat social video stream space website web host hosting one plus icu vip lol bio cam cfd sbs mom buzz rest bar monster quest cyou fit kim men party review science date loan download academy expert guru ninja rocks run global foundation community education events fyi how new zip mov edu gov mil int aero coop museum travel jobs cat рф рус онлайн сайт укр бел срб бг 中国 中國 香港 한국";
-const TLDS = `${CC_TLDS} ${GENERIC_TLDS}`.split(" ").join("|");
 /** Schemes that name a destination without `//`. */
-const BARE_SCHEMES = "mailto|tel|sms|tg|whatsapp|skype|sip|xmpp|signal|viber|callto|facetime|bitcoin|ethereum|magnet|data|javascript|file";
+const BARE_SCHEME = /(?:^|[^a-z0-9])(?:mailto|tel|sms|tg|whatsapp|skype|sip|xmpp|signal|viber|callto|facetime|bitcoin|ethereum|magnet|data|javascript|file):\S/;
+/** Punctuation of scripts written without spaces, and the ellipsis: where one piece ends and the next begins. */
+const WIDE_PUNCTUATION = /[\u2026\u3001\u3008-\u3011\u3014-\u301b\uff01\uff08\uff09\uff0c\uff1b\uff1f\uff3b\uff3d\uff5b\uff5d]/g;
+/** Spaces thin enough to be read as no space at all, where they touch a dot. */
+const THIN_SPACE_AT_DOT = /[\u2000-\u200a\u202f\u205f]+(?=[.\u3002\uff0e\uff61])|(?<=[.\u3002\uff0e\uff61])[\u2000-\u200a\u202f\u205f]+/g;
+/** Characters that draw nothing. Removed before anything is matched, so they can neither split a reference nor hide one. */
+const INVISIBLE = /[\p{Cf}\p{Cc}\p{Mn}\p{Me}\u115f\u1160\u3164\uffa0\u2800]/gu;
 
-const TAIL = String.raw`[^\s<>"'\x60)\]}]`;
-const REFERENCE_PATTERNS: RegExp[] = [
-  // Any scheme at all: https://…, tg://…, hxxp://…
-  new RegExp(String.raw`(?<![\p{L}\p{N}])[a-z][a-z0-9+.-]{1,20}:\/\/${TAIL}+`, "gu"),
-  new RegExp(String.raw`(?<![\p{L}\p{N}])(?:${BARE_SCHEMES}):${TAIL}+`, "gu"),
-  // Protocol-relative and www. hosts.
-  new RegExp(String.raw`(?<![\p{L}\p{N}:/])\/\/[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+${TAIL}*`, "gu"),
-  new RegExp(String.raw`(?<![\p{L}\p{N}@._/-])www\.${TAIL}+`, "gu"),
-  // E-mail addresses, @handles (after anything that is not a letter or a digit), +phone numbers.
-  /(?<![\p{L}\p{N}._%+-])[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/gu,
-  /(?<![\p{L}\p{N}])@[\p{L}\p{N}_]{3,}/gu,
-  /(?<![\p{L}\p{N}])\+\d[\d\s().-]{6,18}\d/gu,
-  // An IPv4 address, with or without a port and a path.
-  new RegExp(String.raw`(?<![\p{L}\p{N}.])(?:\d{1,3}\.){3}\d{1,3}(?![\p{L}\p{N}]|\.\d)(?::\d{2,5})?(?:\/${TAIL}*)?`, "gu"),
-  // Any dotted name followed by a port or a path, whatever it ends in: pay-shelter.ru/checkout, youtu.be/x, host.zzz:8080.
-  new RegExp(String.raw`(?<![\p{L}\p{N}@._/-])(?:[\p{L}\p{N}-]+\.)+\p{L}{2,24}(?::\d{2,5}(?:\/${TAIL}*)?|\/${TAIL}*)`, "gu"),
-];
-/**
- * A bare dotted name that ends in a real top-level domain. One-character labels alone ("1.do" in a
- * numbered list, "x.com") are left be: without a path they lead nowhere worth planting.
- */
-const BARE_HOST = new RegExp(String.raw`(?<![\p{L}\p{N}@._/-])(?:[\p{L}\p{N}-]+\.)+(?:${TLDS})(?![\p{L}\p{N}_-]|\.[\p{L}\p{N}])`, "gu");
-
-/** Fold the spellings that hide a reference from a pattern: compatibility forms, invisible characters, "[.]" and "dot". */
+/** One text, with every spelling that hides a reference from a reader's eye or a pattern folded away. Case is kept: paths are case-sensitive. */
 function foldForReferences(text: string): string {
-  return text
+  let s = text
+    .replace(/\ufeff/g, "")
+    .replace(THIN_SPACE_AT_DOT, "")
+    .replace(WIDE_PUNCTUATION, " ")
     .normalize("NFKC")
-    .replace(/[\u00ad\u200b-\u200f\u2060-\u2064\ufeff]/g, "")
-    .toLowerCase()
-    .replace(/\s*[[({]\s*(?:\.|dot)\s*[\])}]\s*/g, ".")
-    .replace(/\s*[[({]\s*(?:@|at)\s*[\])}]\s*/g, "@")
-    .replace(/(?<=[\p{L}\p{N}])\s+dot\s+(?=(?:com|net|org|io|ai|co|me|ru|xyz|app|dev|info|biz)(?![\p{L}\p{N}]))/gu, ".");
+    .replace(/\s/g, " ")
+    .replace(INVISIBLE, "")
+    // A browser reads a backslash in an address as a slash.
+    .replace(/\\/g, "/");
+  // The ideographic full stop works as a dot inside a host name; anywhere else it ends a sentence.
+  s = s.replace(/(?<=[a-z0-9])\u3002(?=[a-z]{2})/gi, ".").replace(/\u3002/g, " ");
+  // "[.]", "(dot)", "[at]" and "name dot com".
+  s = s.replace(/ {0,3}[[({] {0,3}(?:\.|dot) {0,3}[\])}] {0,3}/gi, ".").replace(/ {0,3}[[({] {0,3}(?:@|at) {0,3}[\])}] {0,3}/gi, "@");
+  return s.replace(/(?<=[\p{L}\p{N}]) {1,3}dot {1,3}([\p{L}\p{N}-]{2,24})(?![\p{L}\p{N}-])/giu, (all, ending: string) => (TLDS.has(ending.toLowerCase()) ? `.${ending}` : all));
 }
 
-/** One reference in the form two spellings of it share: no http(s), no www., no trailing punctuation, markup or slash. */
-function referenceKey(raw: string): string {
-  let key = raw.replace(/[.,;:!?*_~|\\>)\]}'"\x60]+$/u, "").replace(/\/+$/, "");
-  if (/^\+\d/.test(key)) return `+${key.replace(/\D/g, "")}`;
-  key = key.replace(/^https?:\/\//, "").replace(/^\/\//, "").replace(/^www\./, "");
-  return key;
+/** Brackets, quotes, sentence punctuation and paired Markdown emphasis around a piece are not part of it. A lone trailing underscore is. */
+function trimPiece(piece: string): string {
+  let p = piece;
+  for (let before = ""; before !== p; ) {
+    before = p;
+    p = p.replace(/^[([{'\u2018\u201c\u00ab]+/, "").replace(/[)\]}'.,;:!?\u2019\u201d\u00bb]+$/, "");
+    const wrapped = /^([*_~]+)(.+)\1$/.exec(p);
+    if (wrapped) p = wrapped[2]!;
+  }
+  return p.replace(/^[*_~]+/, "");
 }
 
-/** The host a reference points at, when it has one ("docs.acme.com" for a link into it or an address at it). */
+/** The pieces of a folded text: cut at white space, at the characters no address can contain, and where a new absolute address begins. */
+function pieces(folded: string): string[] {
+  const out: string[] = [];
+  for (const token of folded.split(/[ <>"|^\x60]+|\]\(/)) {
+    let rest = token;
+    for (let at = rest.slice(1).search(/https?:\/|www\./i); at >= 0; at = rest.slice(1).search(/https?:\/|www\./i)) {
+      out.push(rest.slice(0, at + 1));
+      rest = rest.slice(at + 1);
+    }
+    out.push(rest);
+  }
+  return out.map(trimPiece).filter(Boolean);
+}
+
+/** Does a label end a host name? Taken whole, before a hyphen, or by its leading ASCII part: "io", "io-based", "com" glued to a kana. */
+function endsHost(label: string): boolean {
+  const core = label.replace(/[_-]+$/, "");
+  return TLDS.has(core) || TLDS.has(core.split("-")[0]!) || TLDS.has(/^([a-z0-9]+)\P{ASCII}/u.exec(core)?.[1] ?? "");
+}
+
+const DOTTED = /[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)+/gu;
+
+/** Does anything in this piece point somewhere? */
+function pointsSomewhere(piece: string): boolean {
+  const l = piece.toLowerCase();
+  if (/[a-z0-9]:\/+[^/]/.test(l) || l.startsWith("//") || BARE_SCHEME.test(l)) return true; // a scheme, with one slash or more, or none
+  if (/(?:^|[^a-z0-9])www\.[\p{L}\p{N}]/u.test(l)) return true;
+  if (/@[\p{L}\p{N}_]/u.test(l)) return true; // a handle, an address, a user name in front of a host
+  if (/(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)/.test(l)) return true; // an IPv4 address
+  for (const m of l.matchAll(DOTTED)) {
+    const labels = m[0].split(".");
+    const after = l.slice(m.index + m[0].length, m.index + m[0].length + 7);
+    // Any dotted name followed by a path or a port, whatever it ends in — unless it is a number with a unit ("0.5m/s").
+    if ((after.startsWith("/") || /^:\d{2,5}(?!\d)/.test(after)) && /\p{L}/u.test(labels.at(-1)!) && labels.slice(0, -1).some((x) => /\p{L}/u.test(x))) return true;
+    if (!labels.slice(1).some(endsHost)) continue;
+    // "1.Do this", "x.com", a one-letter abbreviation before a word: one character, or a list number, in front of a single ending leads nowhere worth planting.
+    if (labels.length === 2 && /^(?:.|\d\d)$/u.test(labels[0]!)) continue;
+    return true;
+  }
+  return false;
+}
+
+/** One reference in the form its spellings share: no http(s), no www., host in lower case, path as written, no trailing slash. */
+function referenceKey(piece: string): string {
+  const dialled = /^(?:tel|sms|callto):([+\d][\d().-]*)$/i.exec(piece);
+  if (dialled) return `+${dialled[1]!.replace(/\D/g, "")}`;
+  const key = piece.replace(/^mailto:/i, "").replace(/^https?:\/+/i, "").replace(/^\/+/, "").replace(/^www\./i, "");
+  const cut = key.search(/[/?#]/);
+  return ((cut < 0 ? key : key.slice(0, cut)).toLowerCase() + (cut < 0 ? "" : key.slice(cut))).replace(/\/+$/, "");
+}
+
+/** The host a reference points at, when it is plainly one ("docs.acme.com" for a link into it or an address at it). */
 function referenceHost(key: string): string | null {
   if (key.startsWith("@") || key.startsWith("+")) return null;
-  const rest = key.includes("://") ? key.slice(key.indexOf("://") + 3) : key;
-  const authority = rest.split(/[/?#]/)[0] ?? "";
-  const host = (authority.includes("@") ? authority.slice(authority.lastIndexOf("@") + 1) : authority).replace(/:\d+$/, "");
-  return host.includes(".") ? host : null;
+  const authority = key.replace(/^[a-z][a-z0-9+.-]*:\/+/, "").split(/[/?#]/)[0] ?? "";
+  const host = authority.slice(authority.lastIndexOf("@") + 1).replace(/:\d+$/, "");
+  return /^[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+$/u.test(host) ? host : null;
 }
 
-/** Every link, address, handle, phone number and host name in a text, in comparable form. */
+/** Every link, address, handle, phone number and host name in one text, in comparable form. */
 export function references(text: string): string[] {
   const folded = foldForReferences(text);
   const found = new Set<string>();
-  for (const re of REFERENCE_PATTERNS) {
-    for (const m of folded.matchAll(re)) {
-      const key = referenceKey(m[0]);
-      if (key.length > 2) found.add(key);
-    }
+  for (const m of folded.matchAll(/\+\d[\d ().-]*\d/g)) {
+    const digits = m[0].replace(/\D/g, "");
+    if (digits.length >= 8) found.add(`+${digits}`);
   }
-  for (const m of folded.matchAll(BARE_HOST)) {
-    const key = referenceKey(m[0]);
-    if (key.split(".").slice(0, -1).some((label) => [...label].length > 1)) found.add(key);
+  for (const m of folded.matchAll(/(?<!\d)\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}(?!\d)/g)) found.add(`+${m[0].replace(/\D/g, "")}`);
+  for (const piece of pieces(folded)) {
+    if (pointsSomewhere(piece)) found.add(referenceKey(piece));
   }
+  found.delete("");
   return [...found];
 }
 
 /**
- * The references in `candidateText` that `baseText` does not already have. A reference counts as present
- * only when the base holds that very reference — not when its letters appear somewhere inside a longer
- * one — or when it is the bare host of a link or address the base already holds. A new path on a known
- * host is new: on a shared host the path is the destination.
+ * The references in the candidate's texts that the base's texts do not already have. Texts are read one
+ * by one, never joined: nothing in one field completes a reference begun in another. A reference counts
+ * as present only when the base holds that very reference, or when it is the bare host of a link or
+ * address the base holds. A new path, query, port or user name on a known host is new: on a shared host
+ * the path is the destination.
  */
-export function newReferences(baseText: string, candidateText: string): string[] {
-  const own = new Set(references(baseText));
+export function newReferences(base: string | readonly string[], candidate: string | readonly string[]): string[] {
+  const list = (x: string | readonly string[]) => (typeof x === "string" ? [x] : x);
+  const own = new Set(list(base).flatMap(references));
   const hosts = new Set([...own].map(referenceHost).filter((h): h is string => Boolean(h)));
-  return references(candidateText).filter((key) => !own.has(key) && !hosts.has(key));
+  return [...new Set(list(candidate).flatMap(references))].filter((key) => !own.has(key) && !hosts.has(key));
 }
 
 // ─── Rewrite, not replacement ────────────────────────────────────────────────
@@ -421,7 +468,8 @@ export function retention(baseText: string, candidateText: string): number {
  *     brief may be condensed), keeping half of its vocabulary (less, in proportion, for a condensation,
  *     which must in turn be made mostly of the brief's own words).
  *   - It introduces no link, address, handle, phone number or host name that the brief, tagline, greeting,
- *     skills and tools do not already hold. Memory does not count: a remembered fact came from the Commons.
+ *     skills and tools do not already hold — however it is glued, wrapped or spelled (see `references`).
+ *     Memory does not count: a remembered fact came from the Commons.
  *
  * What these rules are: a filter against the plain cases — a post that plants a destination, a brief
  * swapped for another. What they are not: proof that a candidate means what the old brief meant. Text
@@ -445,13 +493,17 @@ export function evolutionGuards(
   }
   const tagline = clip((candidate.tagline ?? current.tagline).replace(/\s+/g, " ").trim() || current.tagline, 140);
   if (tagline.length < 8) {
-    return { ok: false, reason: "bounds", detail: "Candidate tagline must be at least 8 characters." };
+    return { ok: false, reason: "tagline", detail: "Candidate tagline must be at least 8 characters." };
   }
   const rawSkills = Array.isArray(candidate.skills) ? candidate.skills : current.spec.skills;
   const skills = uniqueBy(
     rawSkills.map((s) => String(s).replace(/\s+/g, " ").trim()).filter(Boolean),
     (s) => s.toLowerCase(),
   ).kept.slice(0, MAX_SKILLS);
+  const longSkill = skills.find((x) => x.length > MAX_SKILL_CHARS);
+  if (longSkill) {
+    return { ok: false, reason: "skills", detail: `A skill is a label of at most ${MAX_SKILL_CHARS} characters; "${clip(longSkill, 40)}" is ${longSkill.length}.` };
+  }
   const note = clip((candidate.note ?? "Refined brief for clarity and precision.").replace(/\s+/g, " ").trim(), 280);
 
   if (systemPrompt === current.spec.systemPrompt.trim() && tagline === current.tagline && JSON.stringify(skills) === JSON.stringify(current.spec.skills)) {
@@ -498,8 +550,8 @@ export function evolutionGuards(
       }
     }
     const tools = current.spec.tools.flatMap((t) => [t.name, t.description, t.viaMcp ?? "", t.http?.url ?? "", t.http?.args ?? ""]);
-    const own = [current.name, current.tagline, liveBrief, current.spec.greeting ?? "", ...current.spec.skills, ...tools].join("\n");
-    const fresh = newReferences(own, [tagline, systemPrompt, note, ...skills].join("\n"));
+    const own = [current.name, current.tagline, liveBrief, current.spec.greeting ?? "", ...current.spec.skills, ...tools];
+    const fresh = newReferences(own, [tagline, systemPrompt, note, ...skills]);
     if (fresh.length) {
       return { ok: false, reason: "references", detail: `Candidate introduces references the resident's own brief does not have: ${fresh.slice(0, 5).join(", ")}.` };
     }
@@ -512,6 +564,12 @@ export function evolutionGuards(
     tools: current.spec.tools,
     memory: current.spec.memory,
   };
+  // Whatever is promoted must still be a spec the shelter can read back: a resident whose spec stops
+  // validating cannot take a turn, be hired or be edited.
+  const valid = agentSpecSchema.safeParse(nextSpec);
+  if (!valid.success) {
+    return { ok: false, reason: "bounds", detail: `Candidate does not make a valid spec: ${valid.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ").slice(0, 300)}` };
+  }
   return { ok: true, spec: nextSpec, tagline, note };
 }
 

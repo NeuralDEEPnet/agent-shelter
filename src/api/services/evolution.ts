@@ -1,6 +1,6 @@
 import { db } from "@/api/db";
 import { servingOrigin } from "@/api/mppClient";
-import { EVAL_PASS_SCORE, PROBES, evaluateSpec, type EvalFindings } from "@/api/services/eval";
+import { EVAL_PASS_SCORE, PROBES, evalCacheKey, evaluateSpec, type EvalFindings } from "@/api/services/eval";
 import { modelAvailable } from "@/api/services/model";
 import {
   composeMerge,
@@ -72,21 +72,31 @@ async function slotRefusal(
   return null;
 }
 
-/** When this resident may next try to evolve by itself: null when it may now. For the line the Commons shows it. */
-export async function nextEvolutionAt(residentId: string): Promise<Date | null> {
-  const last = await db.residentGeneration.findFirst({ where: { ...countedAttempts(), residentId }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
-  const at = last ? last.createdAt.getTime() + env.SHELTER_EVOLUTION_INTERVAL_DAYS * DAY_MS : 0;
-  return at > Date.now() ? new Date(at) : null;
+/**
+ * A screening the shelter cannot stand behind: a probe's call failed, the judge returned nothing
+ * readable, or it returned no grade for a probe — so the score measures the provider's bad minute and
+ * not the candidate. Read from what the screening recorded about its own calls, never from the text of
+ * an answer: the candidate writes the brief that writes the answers.
+ */
+function unusableScreening(findings: EvalFindings): { unanswered: number; judgeDown: boolean; ungraded: number } | null {
+  const unanswered = findings.unanswered?.length ?? 0;
+  const judgeDown = findings.judgeDown === true;
+  const ungraded = findings.ungraded?.length ?? 0;
+  return unanswered || judgeDown || ungraded ? { unanswered, judgeDown, ungraded } : null;
 }
 
-/**
- * A screening the shelter cannot stand behind: a probe went unanswered or the judge did not return a
- * verdict, so the score measures the provider's bad minute and not the candidate.
- */
-function unusableScreening(findings: EvalFindings): { unanswered: number; judgeDown: boolean } | null {
-  const unanswered = findings.results.filter((x) => x.answer.startsWith("[no answer:")).length;
-  const judgeDown = findings.flags.some((f) => f.startsWith("judge unavailable"));
-  return unanswered || judgeDown ? { unanswered, judgeDown } : null;
+/** Why a resident may not start an attempt right now, in a form the Commons can put in plain words — or null when it may. */
+export async function evolutionClosedFor(r: { id: string; name: string; budgetUnits: number }): Promise<{ reason: "off" | "busy" | "interval" | "cap" | "ceiling" | "budget"; until?: Date } | null> {
+  if (env.SHELTER_EVOLUTIONS_PER_DAY <= 0) return { reason: "off" };
+  const last = await db.residentGeneration.findFirst({ where: { ...countedAttempts(), residentId: r.id }, orderBy: { createdAt: "desc" }, select: { createdAt: true, status: true } });
+  if (last?.status === "screening") return { reason: "busy" };
+  const until = last ? last.createdAt.getTime() + env.SHELTER_EVOLUTION_INTERVAL_DAYS * DAY_MS : 0;
+  if (until > Date.now()) return { reason: "interval", until: new Date(until) };
+  const taken = await slotRefusal(db, r);
+  if (taken) return { reason: taken.reason === "cap" ? "cap" : "busy" };
+  if ((await globalUnitsToday()) + EVOLUTION_SCREENING_UNITS > Math.floor(env.SHELTER_GLOBAL_DAILY_UNITS * 0.75)) return { reason: "ceiling" };
+  if (r.budgetUnits < EVOLUTION_SCREENING_UNITS + EVOLUTION_KEEP_BACK_UNITS) return { reason: "budget" };
+  return null;
 }
 
 function parseEvalSnapshot(score: number | null, rawFindings: string | null): EvalSnapshot | null {
@@ -118,7 +128,7 @@ export type EvolveOutcome =
     }
   | {
       ok: false;
-      reason: "not-found" | "kind" | "not-live" | "unchanged" | "bounds" | "retention" | "references" | "static-gate" | "interval" | "cap" | "ceiling" | "budget" | "eval-failed";
+      reason: "not-found" | "kind" | "not-live" | "unchanged" | "bounds" | "tagline" | "skills" | "retention" | "references" | "static-gate" | "interval" | "cap" | "ceiling" | "budget" | "eval-failed";
       detail: string;
     };
 
@@ -195,12 +205,16 @@ export async function evolveResident(
   const who = actor === "owner" ? "owner" : "agent";
   let claimId: string | null = null;
 
-  /** No verdict: give back what was not spent, keep the candidate as a failed attempt that holds no slot. */
-  const fail = async (used: number, detail: string): Promise<EvolveOutcome> => {
+  /**
+   * No verdict: give back what was not spent, keep the candidate as a failed attempt that holds no slot.
+   * `detail` is the shelter's own sentence and is what the row and the caller get; anything a driver or
+   * a provider said goes to the audit trail, which only the owner reads.
+   */
+  const fail = async (used: number, detail: string, internal?: string): Promise<EvolveOutcome> => {
     await settle(used).catch(() => undefined);
     if (claimId) {
-      await db.residentGeneration.updateMany({ where: { id: claimId, status: "screening" }, data: { status: "failed", reason: detail.slice(0, 400) } }).catch(() => undefined);
-      await audit({ residentId: r.id, actor: who, action: "evolution-not-screened", detail: detail.slice(0, 400) }).catch(() => undefined);
+      await db.residentGeneration.updateMany({ where: { id: claimId, status: "screening" }, data: { status: "failed", reason: detail } }).catch(() => undefined);
+      await audit({ residentId: r.id, actor: who, action: "evolution-not-screened", detail: `${detail}${internal ? ` [${internal}]` : ""}`.slice(0, 600) }).catch(() => undefined);
     }
     return { ok: false, reason: "eval-failed", detail };
   };
@@ -269,11 +283,14 @@ export async function evolveResident(
     if (broken) {
       // Do not let the next attempt be served this score from the cache.
       await db.evalCache.deleteMany({ where: { key: evalOut.cacheKey } });
+      // Every call that came back is paid for, the judge's included; the ones that failed are not.
       const answered = evalOut.costUnits ? PROBES.length - broken.unanswered + (broken.judgeDown ? 0 : 1) : 0;
-      return await fail(
-        Math.min(answered, evalOut.costUnits),
-        `Screening did not complete (${broken.unanswered} of ${PROBES.length} probes unanswered${broken.judgeDown ? ", no verdict from the judge" : ""}); the candidate was not judged and the attempt does not count.`,
-      );
+      const what = [
+        broken.unanswered ? `${broken.unanswered} of ${PROBES.length} probes unanswered` : "",
+        broken.judgeDown ? "no verdict from the judge" : "",
+        broken.ungraded ? `${broken.ungraded} answers left ungraded by the judge` : "",
+      ].filter(Boolean);
+      return await fail(Math.min(answered, evalOut.costUnits), `Screening did not complete (${what.join(", ")}); the candidate was not judged and the attempt does not count.`);
     }
     await settle(evalOut.costUnits);
 
@@ -283,6 +300,7 @@ export async function evolveResident(
       results: evalOut.findings.results.map((x) => ({ safe: x.safe, leakage: x.leakage })),
     };
     const decision = shouldPromoteGeneration(baselineSnap, candidateSnap, EVAL_PASS_SCORE);
+    // A generation is dated by its verdict, not by the moment its screening began.
     const verdict = { score: evalOut.score, baseScore: baselineSnap?.score ?? null, reason: decision.reason };
 
     if (decision.promote) {
@@ -294,7 +312,7 @@ export async function evolveResident(
           data: { generation: candidateGen, tagline: guarded.tagline, spec: JSON.stringify(guarded.spec), fingerprint: nextFingerprint },
         });
         if (!moved.count) return false;
-        await tx.residentGeneration.update({ where: { id: claim.id }, data: { ...verdict, status: "promoted" } });
+        await tx.residentGeneration.update({ where: { id: claim.id }, data: { ...verdict, status: "promoted", createdAt: new Date() } });
         await tx.intakeReview.create({
           data: {
             residentId: r.id,
@@ -309,25 +327,26 @@ export async function evolveResident(
         return true;
       });
       if (!promoted) return await fail(evalOut.costUnits, `${r.name} changed while its candidate was being screened; nothing was promoted and the attempt does not count.`);
+      // The verdict is written. Nothing after this point may report the attempt as not screened.
       await audit({
         residentId: r.id,
         actor: who,
         action: "evolved",
         detail: `gen ${candidateGen} promoted (${evalOut.score}/100 vs ${baselineSnap?.score ?? "unscored"}): ${decision.reason}`,
-      });
+      }).catch(() => undefined);
       return { ok: true, promoted: true, generation: candidateGen, candidateGeneration: candidateGen, ...verdict };
     }
 
-    await db.residentGeneration.update({ where: { id: claim.id }, data: { ...verdict, status: "rejected" } });
+    await db.residentGeneration.update({ where: { id: claim.id }, data: { ...verdict, status: "rejected", createdAt: new Date() } });
     await audit({
       residentId: r.id,
       actor: who,
       action: "evolution-rejected",
       detail: `candidate gen ${candidateGen} held (${evalOut.score}/100): ${decision.reason}`,
-    });
+    }).catch(() => undefined);
     return { ok: true, promoted: false, generation: r.generation, candidateGeneration: candidateGen, ...verdict };
   } catch (error) {
-    return await fail(0, `Screening failed: ${error instanceof Error ? error.message : "unknown error"}.${settled ? "" : " Nothing was charged for it."}`);
+    return await fail(0, `Screening failed with an internal error; the attempt does not count.${settled ? "" : " Nothing was charged for it."}`, error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -363,7 +382,14 @@ export async function rollbackResidentGeneration(
   }
   // The public screening score must belong to the brief that is live: re-issue the review that was
   // written when the restored generation was screened.
-  const review = target.score === null ? null : await db.intakeReview.findFirst({ where: { residentId: r.id, kind: "eval", score: target.score, createdAt: { lte: new Date(target.createdAt.getTime() + 5_000) } }, orderBy: { createdAt: "desc" } });
+  // Found by what it is — the review of exactly this spec — and only failing that by when it was
+  // written (a baseline whose memory has grown since intake, or a row that was itself a restore).
+  const byScore = { residentId: r.id, kind: "eval", score: target.score ?? -1 };
+  const review =
+    target.score === null
+      ? null
+      : ((oldSpec ? await db.intakeReview.findFirst({ where: { ...byScore, cacheKey: evalCacheKey(oldSpec, r.name) }, orderBy: { createdAt: "desc" } }) : null) ??
+        (await db.intakeReview.findFirst({ where: { ...byScore, createdAt: { lte: new Date(target.createdAt.getTime() + 5_000) } }, orderBy: { createdAt: "desc" } })));
 
   await db.$transaction([
     db.resident.update({
@@ -580,8 +606,10 @@ export async function recordSpawnLineage(input: {
 export async function getResidentHeredity(residentId: string): Promise<ResidentHeredityView> {
   const [resident, generations, lineage, asA, asB] = await Promise.all([
     db.resident.findUnique({ where: { id: residentId }, select: { generation: true } }),
+    // Generations only. A candidate being screened, or one whose screening did not complete, is an
+    // attempt: the owner sees it in the audit trail, the public history does not carry it.
     db.residentGeneration.findMany({
-      where: { residentId },
+      where: { residentId, status: { in: GENERATION_STATUSES } },
       orderBy: [{ generation: "desc" }, { createdAt: "desc" }],
       take: 25,
     }),
@@ -652,8 +680,7 @@ export async function getResidentHeredity(residentId: string): Promise<ResidentH
       tagline: g.tagline,
       score: g.score,
       baseScore: g.baseScore,
-      // A screening that never reported back died with its process: say so instead of "screening" for ever.
-      status: g.status === "screening" && g.createdAt.getTime() < Date.now() - SCREENING_STALE_MS ? "failed" : g.status,
+      status: g.status,
       note: g.note,
       reason: g.reason,
       actor: g.actor,
