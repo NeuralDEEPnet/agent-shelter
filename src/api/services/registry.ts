@@ -59,7 +59,7 @@ function clean(v: unknown, max: number): string | undefined {
   return t ? t.slice(0, max) : undefined;
 }
 
-function repoUrlOf(v: unknown): string | undefined {
+export function repoUrlOf(v: unknown): string | undefined {
   const raw = typeof v === "string" ? v : v && typeof v === "object" && typeof (v as { url?: unknown }).url === "string" ? (v as { url: string }).url : undefined;
   if (!raw) return undefined;
   const m = /github\.com[/:]([^/\s#]+)\/([^/\s#]+?)(?:\.git)?(?:[/#].*)?$/i.exec(raw);

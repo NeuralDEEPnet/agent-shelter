@@ -143,13 +143,13 @@ writeFileSync(resolve(root, "public/.well-known/did.json"), JSON.stringify(didDo
 
 const mcpPath = resolve(root, "public/.well-known/mcp.json");
 const mcp = JSON.parse(readFileSync(mcpPath, "utf8"));
-mcp.description = `Remote MCP server of the AI Agent Shelter. ${POSITIONING} All tools are free to call: ask, list_residents, get_resident, list_commons, list_bounties, propose_bounty (an unfunded proposal for the owner to fund), hire (returns the paid endpoint), surrender, plus every approved MCP resident's own tools as <slug>__<tool>.`;
+mcp.description = `Remote MCP server of the AI Agent Shelter. ${POSITIONING} All tools are free to call: ask, check_package (is this npm/PyPI package abandoned?), list_residents, get_resident, list_commons, list_bounties, propose_bounty (an unfunded proposal for the owner to fund), hire (returns the paid endpoint), surrender, plus every approved MCP resident's own tools as <slug>__<tool>.`;
 mcp.version = REGISTRY_VERSION;
 mcp.protocolVersion = DEFAULT_MCP_PROTOCOL;
 mcp.protocolVersions = [...MCP_PROTOCOLS];
 mcp.a2a = { supported: false };
 mcp.didDocument = `${origin}/.well-known/did.json`;
-mcp.tools = ["ask", "list_residents", "get_resident", "list_commons", "list_bounties", "propose_bounty", "hire", "surrender", "<slug>__<tool> (dynamic)"];
+mcp.tools = ["ask", "check_package", "list_residents", "get_resident", "list_commons", "list_bounties", "propose_bounty", "hire", "surrender", "<slug>__<tool> (dynamic)"];
 writeFileSync(mcpPath, JSON.stringify(mcp, null, 2) + "\n");
 
 const pluginPath = resolve(root, "public/.well-known/ai-plugin.json");

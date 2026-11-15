@@ -19,7 +19,7 @@ done
 
 echo "— MCP"
 tools=$(curl -s --max-time 20 -X POST "$ORIGIN/api/mcp" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | json 'j.result.tools.map(t=>t.name).join(",")')
-for t in ask list_residents get_resident hire surrender list_commons; do
+for t in ask list_residents get_resident hire surrender list_commons check_package; do
   case ",$tools," in *",$t,"*) ok "tool $t listed" ;; *) bad "tool $t missing (have: $tools)" ;; esac
 done
 ver=$(curl -s --max-time 20 -X POST "$ORIGIN/api/mcp" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}' | json 'j.result.serverInfo.version')

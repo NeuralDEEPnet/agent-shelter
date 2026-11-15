@@ -21,6 +21,7 @@ export type Route =
   | { name: "machine" }
   | { name: "commons" }
   | { name: "bounties" }
+  | { name: "check" }
   | { name: "not-found" };
 
 /** Parse a path (with optional query) like `/r/minute` or `/sponsor/return?session_id=…`. */
@@ -32,6 +33,7 @@ export function parsePath(pathAndQuery: string): Route {
   if (parts.length === 0) return { name: "home" };
   if (parts[0] === "commons") return { name: "commons" };
   if (parts[0] === "bounties") return { name: "bounties" };
+  if (parts[0] === "check" && parts.length === 1) return { name: "check" };
   if (["playground", "gallery"].includes(parts[0])) return { name: "playground", tab: parts[0] === "gallery" ? "gallery" : params.get("tab") === "create" ? "create" : "talk" };
   if (parts[0] === "r" && parts[1]) return { name: "resident", slug: decodeURIComponent(parts[1]) };
   if (parts[0] === "surrender") return { name: "surrender" };

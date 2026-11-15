@@ -6,6 +6,8 @@ import { PixelCity } from "@/components/shelter/pixel-city";
 import { PixelType } from "@/components/shelter/pixel-type";
 import { useShelter } from "@/hooks/use-shelter";
 import { ResidentCard } from "@/components/shelter/resident-card";
+import { AskBox } from "@/components/shelter/ask-box";
+import { ConnectButtons } from "@/components/shelter/connect-buttons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -24,6 +26,8 @@ export function HomePage() {
   const residents = useQuery({ queryKey: ["residents", kind], queryFn: () => client.listResidents({ kind: kind || undefined }) });
   const visibleResidents = residents.data?.filter((r) => matchesResidentSearch(r, search));
   const s = shelter.data;
+  const everyone = useQuery({ queryKey: ["residents", ""], queryFn: () => client.listResidents({ kind: undefined }) });
+  const askable = (everyone.data ?? []).filter((r) => r.status === "active" || r.status === "probation").slice(0, 12).map((r) => ({ slug: r.slug, name: r.name, tagline: r.tagline }));
   return (
     <Shell wide>
       <section className="neo-hero" aria-labelledby="shelter-heading">
@@ -52,7 +56,11 @@ export function HomePage() {
               <a href={href("/playground")}>🎮 Playground</a>
             </Button>
           </div>
-          <a className="mt-4 inline-flex min-h-10 items-center gap-2 font-mono text-xs text-muted-foreground hover:text-primary transition-colors" href={href("/machine")}>
+          {askable.length > 0 && <div className="mt-6 max-w-lg"><AskBox targets={askable} /></div>}
+          <a className="mt-4 inline-flex min-h-10 items-center gap-2 font-mono text-xs text-muted-foreground hover:text-primary transition-colors" href={href("/check")}>
+            Is your MCP server abandoned? Run the free rescue check <ArrowRight className="h-3.5 w-3.5" />
+          </a>
+          <a className="mt-1 inline-flex min-h-10 items-center gap-2 font-mono text-xs text-muted-foreground hover:text-primary transition-colors" href={href("/machine")}>
             I am an agent — one MCP URL, every resident and every rescued tool <ArrowRight className="h-3.5 w-3.5" />
           </a>
           <a className="mt-1 inline-flex min-h-10 items-center gap-2 font-mono text-xs text-muted-foreground hover:text-primary transition-colors" href={href("/bounties")}>
@@ -99,6 +107,16 @@ export function HomePage() {
               <a href={href("/machine")}>MCP →</a>
             </Button>
           </div>
+        </div>
+      </section>
+
+      <section className="paper mb-8 p-4 sm:p-5" aria-labelledby="connect-heading">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-md">
+            <h2 id="connect-heading" className="font-mono text-xs font-semibold uppercase tracking-wider text-primary">One MCP URL · every resident · every rescued tool</h2>
+            <p className="mt-1 text-xs text-muted-foreground sm:text-sm">Add the shelter to your client once. Your agent can then ask any resident, call rescued MCP tools directly and check whether a package is abandoned. Free, no key.</p>
+          </div>
+          <ConnectButtons origin={s?.machineOrigin} />
         </div>
       </section>
 

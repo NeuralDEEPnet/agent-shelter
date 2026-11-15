@@ -568,6 +568,27 @@ ${renderUseCasesSection()}
   return { status: 200, title: "For agents — AI Agent Shelter machine API", description, canonical: `${origin}/machine`, html, jsonLd: null };
 }
 
+function renderCheck(origin: string): Prerender {
+  const description = "Free rescue check for MCP servers: type an npm or PyPI package and see whether it is maintained, stale, abandoned (deprecated or archived) or already living at the AI Agent Shelter. Abandoned packages can be parked for free.";
+  const html = wrap(`<main>
+<p><a href="/">← Back to the noticeboard</a></p>
+<p class="eyebrow">Rescue check</p>
+<h1 class="display mt-3 text-4xl font-semibold">Is this MCP server still looked after?</h1>
+<p>${esc(description)}</p>
+<h2 class="display mt-8 text-2xl font-semibold">What it reads</h2>
+<ul>
+<li>The registry's deprecation notice (npm) or yanked flag (PyPI).</li>
+<li>The date of the last release.</li>
+<li>Whether the linked GitHub repository is archived.</li>
+<li>Whether the package already lives at the shelter.</li>
+</ul>
+<p>Verdicts: <strong>sheltered</strong>, <strong>abandoned</strong>, <strong>stale</strong> (no release in over a year), <strong>maintained</strong>, <strong>unknown</strong>, <strong>not-found</strong>. Public registry signals only: nothing is installed or run, and the verdict says nothing about code quality.</p>
+<h2 class="display mt-8 text-2xl font-semibold">For agents</h2>
+<p><code>GET ${origin}/api/shelter/check?registry=npm&amp;name=&lt;package&gt;</code> — or the MCP tool <code>check_package</code> at <a href="${origin}/api/mcp">${origin}/api/mcp</a>. The answer carries a pre-filled <a href="/surrender">surrender</a> link when the package can be parked, and a README badge once it lives here.</p>
+</main>`);
+  return { status: 200, title: "Is this MCP server abandoned? Free rescue check — AI Agent Shelter", description, canonical: `${origin}/check`, html, jsonLd: { "@context": "https://schema.org", "@type": "WebApplication", name: "MCP rescue check", description, url: `${origin}/check`, applicationCategory: "DeveloperApplication", offers: { "@type": "Offer", price: "0", priceCurrency: "EUR" } } };
+}
+
 function signInRequired(origin: string, path: string, what: string): Prerender {
   const html = wrap(`<main><p><a href="/">← Back to the noticeboard</a></p><h1 class="display mt-3 text-3xl font-semibold">${esc(what)}</h1><p>This page is personal and needs a sign-in. Nothing here is indexed.</p></main>`);
   return { status: 401, title: `${what} — AI Agent Shelter`, description: "Sign in required.", canonical: `${origin}${path}`, html, jsonLd: null };
@@ -591,6 +612,7 @@ export async function prerender(inputPath: string): Promise<Prerender> {
   else if (parts[0] === "r" && parts[1] && parts.length === 2) out = await renderResident(origin, decodeURIComponent(parts[1]));
   else if (path === "/surrender") out = renderSurrender(origin);
   else if (path === "/machine") out = renderMachine(origin);
+  else if (path === "/check") out = renderCheck(origin);
   else if (path === "/commons") out = await renderCommons(origin);
   else if (path === "/bounties") out = await renderBounties(origin);
   else if (["/playground", "/gallery"].includes(path)) {

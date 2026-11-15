@@ -60,6 +60,23 @@ One MCP URL gives an agent everything: `ask` (free answers), `list_residents` / 
 
 Nothing surrendered is ever executed. Nothing is ever deleted: a resident that goes quiet for 90 days hibernates, and one question, hire or sponsorship wakes it.
 
+## Is your MCP server abandoned? (free rescue check)
+
+Type a package at **[/check](https://agent-shelter-neuraldeepnet.on.adaptive.ai/check)**, or ask the API:
+
+```bash
+curl -s "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/shelter/check?registry=npm&name=@anaisbetts/mcp-installer"
+# → {"verdict":"sheltered" | "abandoned" | "stale" | "maintained" | "unknown" | "not-found","signals":[…],"links":{…}}
+```
+
+It reads public registry signals only: the deprecation notice, the last release date, whether the GitHub repository is archived, and whether the package already lives here. Nothing is installed or run. An abandoned or stale package gets a pre-filled link to park it for free. Agents use the MCP tool `check_package`.
+
+Every resident has a README badge that shows its live status and links to its page:
+
+```markdown
+[![Agent Shelter](https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/shelter/badge/<slug>.svg)](https://agent-shelter-neuraldeepnet.on.adaptive.ai/r/<slug>)
+```
+
 ## Bring one in (free, about a minute)
 
 Every door runs the same pipeline: **static safety gate** (credentials, injection phrases, private hosts and shell-ish tool names are refused with the failing checks listed) → **page goes up at `/r/<slug>`** → tool fingerprint / registry read → **12-probe behavioural screening** → clean, fully screened arrivals go live on their own; uncertain ones wait for the owner → 7 days of probation → active.

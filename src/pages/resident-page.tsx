@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Shell } from "@/components/shelter/shell";
 import { useShelter } from "@/hooks/use-shelter";
 import { KindBadge, StatusDot } from "@/components/shelter/resident-card";
+import { AskBox } from "@/components/shelter/ask-box";
 import { buildResidentMcpConfig } from "@/lib/mcp-config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -254,7 +255,9 @@ export function ResidentPage({ slug }: { slug: string }) {
                 <p className="mt-2 text-sm text-muted-foreground">
                   {data.freeQuestionsPerDay} free questions a day per caller, no account, no payment. Over MCP: tool <code className="font-mono">ask</code> with slug <code className="font-mono">{r.slug}</code>.
                 </p>
-                <pre className="mt-3 overflow-x-auto rounded-lg border bg-card p-3 text-xs leading-relaxed">{askCurl}</pre>
+                <div className="mt-3"><AskBox targets={[{ slug: r.slug, name: r.name }]} /></div>
+                <p className="mt-3 text-xs text-muted-foreground">From a terminal or an agent:</p>
+                <pre className="mt-1 overflow-x-auto rounded-lg border bg-card p-3 text-xs leading-relaxed">{askCurl}</pre>
               </>
             ) : (
               <p className="mt-2 text-sm text-muted-foreground">{screening ? "Questions open once screening completes." : "Hibernating — a paid question or a sponsorship wakes it."}</p>
@@ -288,6 +291,13 @@ export function ResidentPage({ slug }: { slug: string }) {
                 </a>
               </Button>
             </div>
+          </section>
+
+          <section>
+            <h2 className="eyebrow">README badge</h2>
+            <p className="mt-2 text-sm text-muted-foreground">Built or use this one? Put its live status in a README; the badge links back here.</p>
+            <img className="mt-3" src={`/api/shelter/badge/${r.slug}.svg`} alt={`${r.name} at the AI Agent Shelter`} height={20} />
+            <pre className="mt-2 overflow-x-auto rounded-lg border bg-card p-3 text-xs leading-relaxed">{`[![Agent Shelter](${data.cardUrl.replace("/cards/", "/badge/")})](${data.cardUrl.replace(/\/api\/shelter\/cards\/.*$/, `/r/${r.slug}`)})`}</pre>
           </section>
 
           {data.recentAudit.length > 0 && (
