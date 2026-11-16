@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { z } from "zod";
@@ -6,6 +7,7 @@ import { clientAddress, createChallengeLimiter, discoveryDocument, formatEur, MI
 import { db } from "@/api/db";
 import { machinePayments, servingOrigin, stripeClientForRefunds } from "@/api/mppClient";
 import { settle } from "@/api/services/ledger";
+import { scrubKey } from "@/api/services/model";
 import { globalUnitsToday, inProbation, MAX_QUESTION_CHARS, MAX_TOOL_RESULT_CHARS, parseAllowlist, parseSpec, rateHit, runTurn, type RuntimeDeps } from "@/api/services/runtime";
 import { env } from "@/lib/env";
 import { playgroundProjection, PlaygroundRefusal, rateWithPlaygroundCredential } from "@/api/services/playground";
@@ -423,37 +425,144 @@ function moreFor(resident: { slug: string; name: string; hirePriceCents: number 
 }
 
 export type AskOutcome =
-  | { ok: true; answer: string; resident: { slug: string; name: string; kind: string; toolUsed: string | null }; free: { remainingToday: number; questionsPerDay: number }; more: ReturnType<typeof moreFor> }
+  | {
+      ok: true;
+      answer: string;
+      cached?: boolean;
+      byoKeyUsed?: boolean;
+      resident: { slug: string; name: string; kind: string; toolUsed: string | null };
+      free: { remainingToday: number; questionsPerDay: number };
+      more: ReturnType<typeof moreFor>;
+    }
   | { ok: false; status: 400 | 404 | 429 | 503 | 502; code: string; detail: string; retryAfter?: number; more?: ReturnType<typeof moreFor> };
 
 /**
- * One free, stipend-funded question. Shared by the MCP `ask` tool and
- * `POST /api/mpp/ask/:slug`. Refusals never consume the caller's quota.
+ * Bounded LRU + TTL response cache for identical free-ask / Playground demo prompts.
+ * Keyed by `sha256(residentId + spec + normalizedQuestion)` so spec updates invalidate
+ * automatically and BYO-key turns never leak into or read from the shared cache.
+ */
+const ASK_CACHE_TTL_MS = 10 * 60_000;
+const ASK_CACHE_MAX = 200;
+const askResponseCache = new Map<
+  string,
+  { answer: string; toolUsed: string | null; expiresAt: number }
+>();
+
+export function clearAskResponseCache() {
+  askResponseCache.clear();
+}
+
+function askCacheKey(resident: { id: string; spec: string }, question: string): string {
+  const norm = question.trim().replace(/\s+/g, " ").toLowerCase();
+  return createHash("sha256")
+    .update(`${resident.id}\0${resident.spec}\0${norm}`)
+    .digest("hex");
+}
+
+/**
+ * One free, stipend-funded question (or 0-stipend BYO `X-Gemini-Api-Key` turn).
+ * Shared by the MCP `ask` tool and `POST /api/mpp/ask/:slug`. Refusals never
+ * consume the caller's quota, and cache hits return at 0 stipend/model units.
  */
 /** The free tier stops at 75 % of the shelter's daily compute so the paid door always has room. */
 async function freeHeadroomLeft(): Promise<boolean> {
   return (await globalUnitsToday()) + 2 <= Math.floor(env.SHELTER_GLOBAL_DAILY_UNITS * 0.75);
 }
 
-export async function askResident(input: { slug: string; question: string; caller: string }): Promise<AskOutcome> {
+export async function askResident(input: {
+  slug: string;
+  question: string;
+  caller: string;
+  byoGeminiKey?: string | null;
+  byoFetchImpl?: typeof fetch;
+}): Promise<AskOutcome> {
   const question = input.question.trim();
+  const byoKey = input.byoGeminiKey?.trim() || null;
   if (!question || question.length > MAX_QUESTION_CHARS) return { ok: false, status: 400, code: "invalid", detail: `\`question\` is required (1–${MAX_QUESTION_CHARS} chars).` };
-  if (freeQuestionsPerDay() === 0) return { ok: false, status: 503, code: "free-tier-off", detail: "The free tier is switched off at this shelter. Hire instead." };
-  if (!(await freeHeadroomLeft())) return { ok: false, status: 429, code: "free-tier-full", detail: "Today's free compute is used up across the shelter; paid questions still work.", retryAfter: 3600 };
+  if (!byoKey && freeQuestionsPerDay() === 0) return { ok: false, status: 503, code: "free-tier-off", detail: "The free tier is switched off at this shelter. Hire instead." };
+  if (!byoKey && !(await freeHeadroomLeft())) return { ok: false, status: 429, code: "free-tier-full", detail: "Today's free compute is used up across the shelter; paid questions still work.", retryAfter: 3600 };
   const resident = await visibleResident(input.slug);
   if (!resident) return { ok: false, status: 404, code: "not-found", detail: `No resident "${input.slug}" lives here. See ${PATHS.catalog}.` };
   const more = moreFor(resident);
   if (["submitted", "screened", "approved"].includes(resident.status)) return { ok: false, status: 503, code: "screening", detail: `${resident.name} is still being screened and is not taking questions yet. Its page is ${residentPageUrl(resident.slug)}.`, retryAfter: 3600 };
   if (resident.status === "hibernated") return { ok: false, status: 503, code: "hibernated", detail: `${resident.name} is hibernating. A sponsorship or a paid question wakes it.`, retryAfter: 3600, more };
-  const quota = freeQuotaTake(input.caller);
+
+  // BYO X-Gemini-Api-Key callers pay their own Google quota: 0 free-tier stipend consumed.
+  // Non-BYO callers must always satisfy per-caller daily free quota FIRST (even on a cache hit!).
+  const quota = byoKey
+    ? { ok: true as const, remaining: freeQuestionsPerDay(), resetsInSeconds: 0 }
+    : freeQuotaTake(input.caller);
   if (!quota.ok) return { ok: false, status: 429, code: "free-quota", detail: `You have used today's ${freeQuestionsPerDay()} free questions. Hire ${resident.name} for ${formatEur(resident.hirePriceCents)} per question, or come back after midnight UTC.`, retryAfter: quota.resetsInSeconds, more };
-  const turn = await runTurn({ residentId: resident.id, question, source: "mcp" }, deps.runtime);
-  if (!turn.ok) {
-    freeQuotaRefund(input.caller);
-    const status = turn.reason === "budget" || turn.reason === "global" || turn.reason === "rate" ? 429 : turn.reason === "no-model" ? 502 : 503;
-    return { ok: false, status, code: turn.reason, detail: turn.reason === "budget" ? `${turn.detail} Paid questions fund its wallet: ${more.hire}` : turn.detail, retryAfter: status === 429 ? 60 : undefined, more };
+
+  // Cache check for standard (non-BYO) identical read-only/demo prompts:
+  const cKey = !byoKey ? askCacheKey(resident, question) : null;
+  if (cKey) {
+    const cached = askResponseCache.get(cKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      await Promise.all([
+        db.resident.update({
+          where: { id: resident.id },
+          data: { freeCalls: { increment: 1 }, lastActiveAt: new Date() },
+        }),
+      ]);
+      return {
+        ok: true,
+        answer: cached.answer,
+        cached: true,
+        resident: { slug: resident.slug, name: resident.name, kind: resident.kind, toolUsed: cached.toolUsed },
+        free: { remainingToday: quota.remaining, questionsPerDay: freeQuestionsPerDay() },
+        more,
+      };
+    }
   }
-  return { ok: true, answer: turn.answer, resident: { slug: resident.slug, name: resident.name, kind: resident.kind, toolUsed: turn.toolUsed }, free: { remainingToday: quota.remaining, questionsPerDay: freeQuestionsPerDay() }, more };
+
+  const turn = await runTurn(
+    {
+      residentId: resident.id,
+      question,
+      source: "mcp",
+      byoGeminiKey: byoKey,
+      byoFetchImpl: input.byoFetchImpl,
+    },
+    deps.runtime,
+  );
+  if (!turn.ok) {
+    if (!byoKey) freeQuotaRefund(input.caller);
+    const status = turn.reason === "budget" || turn.reason === "global" || turn.reason === "rate" ? 429 : turn.reason === "no-model" ? 502 : 503;
+    return {
+      ok: false,
+      status,
+      code: turn.reason,
+      detail: scrubKey(
+        turn.reason === "budget" ? `${turn.detail} Paid questions fund its wallet: ${more.hire}` : turn.detail,
+        byoKey,
+      ),
+      retryAfter: status === 429 ? 60 : undefined,
+      more,
+    };
+  }
+
+  if (cKey && turn.toolUsed === null) {
+    if (askResponseCache.size >= ASK_CACHE_MAX) {
+      const oldest = askResponseCache.keys().next().value;
+      if (oldest !== undefined) askResponseCache.delete(oldest);
+    }
+    askResponseCache.set(cKey, {
+      answer: turn.answer,
+      toolUsed: turn.toolUsed,
+      expiresAt: Date.now() + ASK_CACHE_TTL_MS,
+    });
+  }
+
+  return {
+    ok: true,
+    answer: turn.answer,
+    cached: false,
+    ...(byoKey ? { byoKeyUsed: true } : {}),
+    resident: { slug: resident.slug, name: resident.name, kind: resident.kind, toolUsed: turn.toolUsed },
+    free: { remainingToday: quota.remaining, questionsPerDay: freeQuestionsPerDay() },
+    more,
+  };
 }
 
 function isObjectSchema(v: unknown): v is Record<string, unknown> {
@@ -577,7 +686,12 @@ async function liveBoard() {
   return { stats, bounties: [...open, ...active].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), note: BOARD_NOTE };
 }
 
-async function mcpToolCall(name: string, args: Record<string, unknown>, caller: string): Promise<{ text: string; isError?: boolean }> {
+async function mcpToolCall(
+  name: string,
+  args: Record<string, unknown>,
+  caller: string,
+  opts?: { byoGeminiKey?: string | null },
+): Promise<{ text: string; isError?: boolean }> {
   const origin = servingOrigin();
   if (name.includes(PROXY_TOOL_SEP)) return callProxiedTool(name, args, caller);
   if (name === "surrender") {
@@ -586,9 +700,24 @@ async function mcpToolCall(name: string, args: Record<string, unknown>, caller: 
     return { text: JSON.stringify({ accepted: true, residentId: out.residentId, slug: out.slug, status: out.status, resume: residentPageUrl(out.slug, origin), next: "Screening runs now (12 behavioural probes). A clean, fully screened intake is approved automatically; uncertain ones wait for the owner. The résumé page is live already; poll get_resident for the status.", checks: out.checks }) };
   }
   if (name === "ask") {
-    const out = await askResident({ slug: String(args.slug ?? ""), question: String(args.question ?? ""), caller });
+    const out = await askResident({
+      slug: String(args.slug ?? ""),
+      question: String(args.question ?? ""),
+      caller,
+      byoGeminiKey: opts?.byoGeminiKey,
+    });
     if (!out.ok) return { text: JSON.stringify({ answered: false, code: out.code, detail: out.detail, retryAfterSeconds: out.retryAfter ?? null, more: out.more ?? null }), isError: true };
-    return { text: JSON.stringify({ answered: true, answer: out.answer, resident: out.resident, free: out.free, more: out.more }) };
+    return {
+      text: JSON.stringify({
+        answered: true,
+        answer: out.answer,
+        ...(out.cached ? { cached: true } : {}),
+        ...(out.byoKeyUsed ? { byoKeyUsed: true } : {}),
+        resident: out.resident,
+        free: out.free,
+        more: out.more,
+      }),
+    };
   }
   if (name === "list_residents") {
     const c = await catalog();
@@ -671,7 +800,11 @@ export const notA2A = (origin = servingOrigin()) => ({
   hint: "This URL is a Model Context Protocol server (stateless Streamable HTTP). Send initialize, tools/list and tools/call. No A2A task transport is implemented; do not list this endpoint as an A2A agent.",
 });
 
-export async function handleMcp(body: JsonRpc, caller = "anonymous"): Promise<Record<string, unknown> | null> {
+export async function handleMcp(
+  body: JsonRpc,
+  caller = "anonymous",
+  opts?: { byoGeminiKey?: string | null },
+): Promise<Record<string, unknown> | null> {
   const id = body.id ?? null;
   const reply = (result: unknown) => ({ jsonrpc: "2.0", id, result });
   const fail = (code: number, message: string, data?: Record<string, unknown>) => ({ jsonrpc: "2.0", id, error: data ? { code, message, data } : { code, message } });
@@ -715,7 +848,7 @@ export async function handleMcp(body: JsonRpc, caller = "anonymous"): Promise<Re
       if (!parsed.success) return fail(-32602, "Invalid tool arguments. Read tools/list for the input schema.");
       const args = parsed.data as Record<string, unknown>;
       try {
-        const out = await mcpToolCall(name, args, caller);
+        const out = await mcpToolCall(name, args, caller, opts);
         return reply({ content: [{ type: "text", text: out.text }], isError: out.isError ?? false });
       } catch (error) {
         console.warn(`[mcp] tool ${name} failed: ${error instanceof Error ? error.name : "unknown"}`);
@@ -862,7 +995,7 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
   const mcpCorsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, MCP-Protocol-Version, Mcp-Protocol-Version, MCP-Session-Id, Mcp-Session-Id, Last-Event-Id",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, X-Gemini-Api-Key, MCP-Protocol-Version, Mcp-Protocol-Version, MCP-Session-Id, Mcp-Session-Id, Last-Event-Id",
     "Access-Control-Expose-Headers": "MCP-Protocol-Version, Mcp-Protocol-Version, WWW-Authenticate",
   } as const;
 
@@ -887,7 +1020,8 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
     const message = envelope.data;
     if (message.id === undefined) return c.body(null, 202); // notifications never execute mutating tools
     if (message.method.startsWith("notifications/")) return c.json({ jsonrpc: "2.0", id: message.id, error: { code: -32600, message: "Notifications must not carry an id." } }, 400);
-    const out = await handleMcp(message, callerKey(c.req.raw));
+    const byoGeminiKey = c.req.header("x-gemini-api-key") ?? c.req.header("X-Gemini-Api-Key") ?? null;
+    const out = await handleMcp(message, callerKey(c.req.raw), { byoGeminiKey });
     if (!out) return c.body(null, 202);
     const reqProto = c.req.header("mcp-protocol-version");
     const negotiated =
@@ -925,8 +1059,15 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
   app.all("/sse", sseFallback);
   app.all("/sse/*", sseFallback);
 
-  // ── Ask: one free, stipend-funded question (no payment, no account) ───────
+  // ── Ask: one free, stipend-funded question (or 0-stipend BYO X-Gemini-Api-Key) ──
+  const askCorsHeaders = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Accept, X-Gemini-Api-Key",
+  } as const;
+  app.options(`${PATHS.ask}/:slug`, () => new Response(null, { status: 204, headers: askCorsHeaders }));
   app.post(`${PATHS.ask}/:slug`, async (c) => {
+    for (const [k, v] of Object.entries(askCorsHeaders)) c.header(k, v);
     let raw: unknown;
     try {
       raw = await c.req.json();
@@ -936,12 +1077,29 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
     const question = typeof (raw as { question?: unknown })?.question === "string" ? (raw as { question: string }).question : "";
     const wait = challengeLimiter.hit(`ask:${callerKey(c.req.raw)}`);
     if (wait !== null) return problems.tooMany(wait);
-    const out = await askResident({ slug: c.req.param("slug"), question, caller: callerKey(c.req.raw) });
+    const byoGeminiKey = c.req.header("x-gemini-api-key") ?? c.req.header("X-Gemini-Api-Key") ?? null;
+    const out = await askResident({ slug: c.req.param("slug"), question, caller: callerKey(c.req.raw), byoGeminiKey });
     if (!out.ok) {
       const headers: Record<string, string> = out.retryAfter ? { "retry-after": String(out.retryAfter) } : {};
       return problem(out.status, out.code, out.status === 429 ? "Free questions used up" : out.status === 404 ? "No such resident" : "Not answered", out.detail, { more: out.more ?? null }, headers);
     }
-    return c.json({ answer: out.answer, resident: out.resident, free: { ...out.free, note: "This question was free, funded by the resident's daily compute stipend." }, more: out.more }, 200, { "cache-control": "no-store" });
+    const note = out.byoKeyUsed
+      ? "Answered directly on your X-Gemini-Api-Key (0 Shelter stipend or platform credits used)."
+      : out.cached
+        ? "Served from recent identical-prompt cache (0 Shelter stipend used)."
+        : "This question was free, funded by the resident's daily compute stipend.";
+    return c.json(
+      {
+        answer: out.answer,
+        ...(out.cached ? { cached: true } : {}),
+        ...(out.byoKeyUsed ? { byoKeyUsed: true } : {}),
+        resident: out.resident,
+        free: { ...out.free, note },
+        more: out.more,
+      },
+      200,
+      { "cache-control": "no-store" },
+    );
   });
 
   // ── Hire: pay, ask, answer ────────────────────────────────────────────────
