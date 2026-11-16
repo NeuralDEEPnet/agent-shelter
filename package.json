@@ -16,7 +16,7 @@
     "dev:migrations": "node scripts/dev.mjs --migrate --force",
     "dev:serve": "run-p dev:vite dev:api",
     "dev:free-ports": "for p in $PORT $((PORT+1)); do lsof -ti :$p | xargs -r kill -9 2>/dev/null; done; true",
-    "dev:types": "dts-bundle-generator --out-file=dev-api-exports.d.ts --no-check --project tsconfig.json --external-inlines @babel/types -- src/api/procedures.ts",
+    "dev:types": "dts-bundle-generator --out-file=dev-api-exports.d.ts --no-check --disable-symlinks-following --project tsconfig.json --external-inlines @babel/types -- src/api/procedures.ts",
     "dev:stop": "node scripts/dev.mjs --stop",
     "dev:restart": "node scripts/dev.mjs --restart",
     "dev": "node scripts/dev.mjs",
