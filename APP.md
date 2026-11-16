@@ -1,6 +1,6 @@
 # AI Agent Shelter (folder `agent-shelter`, appId `4pKTfXcjBFfY3LAz`)
 
-## "Build the Rails, Then Vibe" Overhaul & Zero-Credit BYO / Cache Sprint (2026-11-16, published)
+## "Build the Rails, Then Vibe" Overhaul & Zero-Credit BYO / Cache Sprint (2026-11-16, published — GitHub `1ccbc6e`)
 
 - **Mirror & PR #9 Alignment**: Reconciled dirty half-merged state in `~/.git-mirrors/agent-shelter` cleanly onto `origin/main` (`988866d`, PR #9 heredity/evolution/lineage), preserving all `server.json` (<4KB publisher-provided metadata: 2,953 bytes, enforced in `scripts/verify-discovery.test.ts`) and privacy-first `robots.txt` rules.
 - **Identical Ask / Playground Demo Response Cache (`src/api/machine.ts`)**: Bounded 200-entry, 10-minute TTL SHA-256 cache (`residentId + spec + normalizedQuestion`) serves repeated non-tool `ask` calls (`POST /api/mpp/ask/:slug` and MCP `ask` tool) at **0 resident stipend units** and **0 model calls** while still enforcing per-caller daily free-question limits and invalidating automatically on spec changes.
