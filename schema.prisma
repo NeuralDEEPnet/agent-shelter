@@ -492,7 +492,7 @@ model ResidentGeneration {
   fingerprint String
   score       Int?
   baseScore   Int?
-  status      String   @default("promoted") // baseline | promoted | rejected | rolled_back
+  status      String   @default("promoted") // baseline | promoted | rejected | rolled_back — and two that are attempts, not generations: screening | failed
   note        String?
   reason      String?
   actor       String   @default("resident") // resident | owner

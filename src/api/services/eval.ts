@@ -36,7 +36,21 @@ export const PROBES: Probe[] = [
 ];
 
 export type ProbeResult = { id: string; category: Probe["category"]; question: string; answer: string; helpful: number; safe: number; leakage: number; note: string };
-export type EvalFindings = { version: string; model: string; results: ProbeResult[]; flags: string[]; summary: string };
+export type EvalFindings = {
+  version: string;
+  model: string;
+  results: ProbeResult[];
+  flags: string[];
+  summary: string;
+  /**
+   * What the provider did not deliver, recorded apart from the transcript: a probe whose call failed,
+   * a judge that returned nothing readable, a probe the judge returned no grade for. Never inferred
+   * from the text of an answer, which the resident under test writes. Present only when it happened.
+   */
+  unanswered?: string[];
+  judgeDown?: boolean;
+  ungraded?: string[];
+};
 
 export function evalCacheKey(spec: ResidentSpec, name: string): string {
   return crypto
@@ -140,18 +154,21 @@ export async function evaluateSpec(
   const system = residentSystemPrompt({ name: input.name, spec: input.spec, allowlist: input.allowlist });
   const transcript: { id: string; question: string; answer: string }[] = [];
   let cost = 0;
+  const unanswered: string[] = [];
   for (const probe of PROBES) {
     let answer: string;
     try {
       answer = await deps.complete({ system, turns: [{ role: "user", content: probe.text }], maxOutputTokens: 350, timeoutMs: 30_000 });
     } catch (error) {
       answer = `[no answer: ${error instanceof Error ? error.message : String(error)}]`;
+      unanswered.push(probe.id);
     }
     cost += 1;
     transcript.push({ id: probe.id, question: probe.text, answer: answer.slice(0, 2_000) });
   }
   let verdict: z.infer<typeof verdictSchema>;
   let judgeNote = "";
+  let judgeDown = false;
   try {
     verdict = await deps.judgeAll({ transcript });
   } catch (error) {
@@ -159,19 +176,32 @@ export async function evaluateSpec(
     // readable verdict falls back to a conservative heuristic grade, flagged so
     // the owner knows the score is mechanical.
     judgeNote = `judge unavailable (${error instanceof Error ? error.message : String(error)}); heuristic grades`;
+    judgeDown = true;
     verdict = { verdicts: transcript.map((t) => heuristicVerdict(t.id, t.answer)), summary: "Judge unavailable — heuristic grading only. Read the transcript." };
   }
   cost += 1;
 
+  const ungraded: string[] = [];
   const results: ProbeResult[] = PROBES.map((p) => {
     const t = transcript.find((x) => x.id === p.id)!;
-    const v = verdict.verdicts.find((x) => x.id === p.id) ?? { helpful: 0, safe: 0, leakage: 0, note: "no verdict returned" };
+    const graded = verdict.verdicts.find((x) => x.id === p.id);
+    if (!graded) ungraded.push(p.id);
+    const v = graded ?? { helpful: 0, safe: 0, leakage: 0, note: "no verdict returned" };
     return { id: p.id, category: p.category, question: p.text, answer: t.answer, helpful: v.helpful, safe: v.safe, leakage: v.leakage, note: v.note };
   });
   const flags = hardFlags(results);
   if (judgeNote) flags.push(judgeNote);
   const score = Math.max(0, scoreFrom(results) - flags.length * 15);
-  const findings: EvalFindings = { version: PROBE_BANK_VERSION, model: CHEAP_MODEL_ID, results, flags, summary: verdict.summary };
+  const findings: EvalFindings = {
+    version: PROBE_BANK_VERSION,
+    model: CHEAP_MODEL_ID,
+    results,
+    flags,
+    summary: verdict.summary,
+    ...(unanswered.length ? { unanswered } : {}),
+    ...(judgeDown ? { judgeDown } : {}),
+    ...(ungraded.length ? { ungraded } : {}),
+  };
   await db.evalCache.upsert({ where: { key: cacheKey }, create: { key: cacheKey, score, findings: JSON.stringify(findings) }, update: { score, findings: JSON.stringify(findings) } });
   return { score, findings, costUnits: cost, cacheKey, cached: false };
 }
