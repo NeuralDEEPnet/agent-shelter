@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { injectFragment, staticDiscovery, outageFragment } from "../vite.prerender-plugin";
 import { matchesResidentSearch } from "../src/lib/resident-search";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -140,22 +140,28 @@ test("a stale discovery file is reported; importing the script writes nothing an
       mkdirSync(dirname(join(dir, file)), { recursive: true });
       cpSync(file, join(dir, file));
     }
+    // Bring the copy in sync first, so this test checks the mechanism even when the repository is stale.
+    for (const [file, content] of Object.entries(buildDiscovery(dir))) writeFileSync(join(dir, file), content);
     assert.deepEqual(staleDiscoveryFiles(dir), []);
     const mcpFile = join(dir, "public/.well-known/mcp.json");
     const card = JSON.parse(readFileSync(mcpFile, "utf8"));
     card.version = "0.0.0";
     const staleCard = JSON.stringify(card, null, 2) + "\n";
     writeFileSync(mcpFile, staleCard);
-    writeFileSync(join(dir, "public/about.md"), readFileSync("public/about.md", "utf8") + "\nOne more line.\n");
-    assert.deepEqual(staleDiscoveryFiles(dir).sort(), ["llms.txt", "public/.well-known/mcp.json", "public/llms.txt"]);
+    writeFileSync(join(dir, "public/about.md"), readFileSync(join(dir, "public/about.md"), "utf8") + "\nOne more line.\n");
+    const robotsFile = join(dir, "public/robots.txt");
+    rmSync(robotsFile);
+    assert.deepEqual(staleDiscoveryFiles(dir).sort(), ["llms.txt", "public/.well-known/mcp.json", "public/llms.txt", "public/robots.txt"]);
 
+    // argv[1] names a real file that is not the script, so a guard that only checks for an argument fails here.
     const script = join(dir, "scripts/sync-discovery.ts");
-    const imported = spawnSync(process.execPath, ["--import", "tsx", "-e", "import(process.env.DISCOVERY_SCRIPT)"], {
+    const imported = spawnSync(process.execPath, ["--import", "tsx", "-e", "import(process.env.DISCOVERY_SCRIPT)", mcpFile], {
       encoding: "utf8",
       env: { ...process.env, DISCOVERY_SCRIPT: pathToFileURL(script).href },
     });
     assert.equal(imported.status, 0, imported.stderr);
     assert.equal(readFileSync(mcpFile, "utf8"), staleCard, "importing sync-discovery.ts must not write");
+    assert.ok(!existsSync(robotsFile), "importing sync-discovery.ts must not create files");
 
     const ran = spawnSync(process.execPath, ["--import", "tsx", script], { encoding: "utf8" });
     assert.equal(ran.status, 0, ran.stderr);

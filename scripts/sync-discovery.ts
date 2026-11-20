@@ -205,7 +205,7 @@ export function staleDiscoveryFiles(dir: string = root): string[] {
       try {
         return readFileSync(resolve(dir, file), "utf8") !== content;
       } catch {
-        return true; // missing counts as stale
+        return true; // an output that is missing (did.json, robots.txt, the llms.txt copies) is stale; a missing input throws above
       }
     })
     .map(([file]) => file);
