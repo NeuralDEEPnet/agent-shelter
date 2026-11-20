@@ -60,6 +60,20 @@ const serverSchema = z.object({
     .transform((v) => v.trim().toLowerCase() !== "false"),
   /** Unfunded bounty proposals one caller (IP) may post per UTC day over HTTP/MCP. 0 closes that door. */
   SHELTER_BOUNTY_PROPOSALS_PER_DAY: z.coerce.number().int().min(0).default(3),
+  /** The Overflow Desk (docs/OVERFLOW.md): agents hand off a task before they hit a limit. Off = submissions are refused; existing tickets can still be read and collected. */
+  SHELTER_OVERFLOW_ENABLED: z
+    .string()
+    .default("true")
+    .transform((v) => v.trim().toLowerCase() !== "false"),
+  /** Most of SHELTER_GLOBAL_DAILY_UNITS (in percent) that overflow work may use per UTC day: the compute the shelter lends without being paid back. */
+  SHELTER_OVERFLOW_SHARE_PCT: z.coerce.number().int().min(0).max(100).default(20),
+  /**
+   * Dedicated secret (≥ 32 characters) for deriving overflow ticket tokens (HMAC of the public id). Unset or shorter:
+   * the shelter generates 32 random bytes on first use and keeps them in a server-only table — never API_KEY.
+   * Changing it does not invalidate issued tokens (lookups hash the presented token); an idempotent retry of a
+   * ticket filed under the old secret answers 409 instead of returning a token that would not match.
+   */
+  OVERFLOW_TOKEN_SECRET: z.string().optional(),
 
   // Stripe (sponsorships) through the computer's Composio connection.
   STRIPE_CONNECTED_ACCOUNT_ID: z.string().optional(),

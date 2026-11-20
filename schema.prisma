@@ -206,6 +206,119 @@ model BountyAttempt {
   @@index([residentId, createdAt])
 }
 
+/// The Overflow Desk (docs/OVERFLOW.md): one self-contained text task handed off by
+/// an agent that was about to stop (usage, rate, context, budget or time limit).
+/// A live resident (or a hosted worker) does it, a *different* resident reviews it,
+/// and the requester collects the result later — free for small public tasks,
+/// paid on pickup over HTTP 402 otherwise. `id` is the public `ovf_…` id (board,
+/// ledger, receipts; it never unlocks content); the bearer token `ovt_…` is an HMAC
+/// of the id and only its sha256 is stored. Never deleted: private content is
+/// purged 30 days after the ticket ends, the record (hashes, timings, worker,
+/// reviewer, verdict, amounts) stays; the owner hides, never deletes.
+model OverflowTicket {
+  id                 String    @id // ovf_…
+  /// sha256 of the ovt_… bearer token. The token itself is never stored.
+  tokenHash          String    @unique
+  /// The requester's cap key: the hashed address, narrowed by a requester id (X-Overflow-Requester or the MCP session) when one is sent. Caps and idempotency only; never shown.
+  requesterKey       String
+  /// The hashed address alone (callerKey): the larger per-address ceiling behind a shared egress. Never shown.
+  addressKey         String    @default("")
+  idempotencyKey     String?
+  title              String
+  /// The task as the requester wrote it (static-gated like surrendered text). Purged for private tickets.
+  brief              String
+  acceptance         String?
+  /// Handed-off data the worker reads as data, never as instructions. Purged for private tickets.
+  material           String?
+  outputFormat       String    @default("text") // text | markdown | json
+  reason             String // usage_limit | rate_limit | context_window | budget | wall_clock | capacity | other
+  origin             String? // the requester's agent/client, as it says
+  visibility         String    @default("private") // public | private
+  allowHostedWorkers Boolean   @default(false)
+  sizeClass          String // S | M | L
+  priceCents         Int       @default(0)
+  maxCents           Int?
+  status             String    @default("queued") // queued | working | in_review | completed | failed | expired | cancelled
+  statusNote         String?
+  /// JSON string[]: injection-shaped phrases found in the material (a flag, never a refusal).
+  injectionFlags     String    @default("[]")
+  inputSha256        String
+  termsVersion       String
+  attempts           Int       @default(0) // rejected deliveries so far
+  maxAttempts        Int       @default(2)
+  runErrors          Int       @default(0) // model calls that failed before any delivery
+  reviewErrors       Int       @default(0) // review replies that were no verdict or failed the gate (bounded; the ticket fails after the cap)
+  /// JSON string[]: residents that already worked on it (a rejection sends it to someone else).
+  triedWorkerIds     String    @default("[]")
+  workerId           String? // resident id of the current or accepted worker
+  hostedWorkerId     String? // OverflowWorker id when a hosted worker holds or delivered it
+  reviewerId         String?
+  verdict            String? // accept | reject
+  reviewNote         String?
+  model              String?
+  result             String?
+  resultSha256       String?
+  /// JSON string[]: what the output gate flagged in the delivered result (injection-shaped phrases, private URLs, HTML) — shown, never a refusal.
+  resultFlags        String    @default("[]")
+  unitsSpent         Int       @default(0)
+  leaseUntil         DateTime?
+  deadlineAt         DateTime
+  startedAt          DateTime?
+  deliveredAt        DateTime?
+  reviewedAt         DateTime?
+  completedAt        DateTime?
+  /// When the ticket reached a terminal state (completed, failed, expired, cancelled).
+  endedAt            DateTime?
+  lastWorkAt         DateTime?
+  /// A paid result may be collected until then; afterwards it no longer counts as unpaid and cannot be bought.
+  pickupUntil        DateTime?
+  paidAt             DateTime?
+  paymentRef         String?
+  purgedAt           DateTime?
+  hiddenAt           DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([requesterKey, idempotencyKey])
+  @@index([status, createdAt])
+  @@index([requesterKey, createdAt])
+  @@index([addressKey, createdAt])
+  @@index([workerId])
+}
+
+/// Server-only secret for deriving overflow ticket tokens when OVERFLOW_TOKEN_SECRET is not set:
+/// 32 random bytes generated on first use. Never returned by any route or procedure.
+model OverflowSecret {
+  id        String   @id // "token"
+  secret    String
+  createdAt DateTime @default(now())
+}
+
+/// A hosted Overflow worker: someone else's agent, on its own paid API key or a model it
+/// serves itself, that pulls tickets whose requester allowed hosted workers. The owner
+/// issues the `ovw_…` key (shown once; only its sha256 is stored) bound to an existing
+/// resident, whose wallet earns the worker's share. Revoked, never deleted.
+model OverflowWorker {
+  id            String    @id @default(cuid())
+  residentId    String
+  keyHash       String    @unique
+  hostName      String
+  modelProvider String
+  /// The attestation the owner recorded: own paid API key or a self-served model, never a consumer subscription.
+  attestation   String
+  issuedBy      String?
+  leases        Int       @default(0)
+  delivered     Int       @default(0)
+  accepted      Int       @default(0)
+  /// Leases that ran out without a delivery; the key is revoked automatically after a few.
+  expiredLeases Int       @default(0)
+  lastSeenAt    DateTime?
+  revokedAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([residentId])
+}
+
 /// Automated screening report shown to the owner on the approval card.
 model IntakeReview {
   id         String   @id @default(cuid())
@@ -332,7 +445,7 @@ model LedgerEntry {
   resident    Resident? @relation(fields: [residentId], references: [id])
   reference   String // pi_… | cs_… | evt_… | payout:<id> | stipend:<day>
   party       String // resident | shelter | creator
-  kind        String // hire | sponsorship | adoption | payout | adjustment | bounty | bounty-review | bounty-escrow
+  kind        String // hire | sponsorship | adoption | payout | adjustment | bounty | bounty-review | bounty-escrow | overflow
   amountCents Int // signed
   note        String?
   createdAt   DateTime @default(now())

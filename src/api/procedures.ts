@@ -40,6 +40,7 @@ import {
   setBountiesPaused,
   type BoardFilter,
 } from "@/api/services/bounties";
+import { hideOverflowTicket as hideOverflowTicketEntry, issueOverflowWorker as issueOverflowWorkerEntry, listOverflowWorkers, maybeOverflowHousekeeping, overflowBoard, overflowHousekeeping, overflowStats, revokeOverflowWorker as revokeOverflowWorkerEntry } from "@/api/services/overflow";
 import { formatEur } from "@neuraldeep/mpp-kit";
 import { env } from "@/lib/env";
 import { notices, ok, refuse, type Result } from "@/lib/notice";
@@ -396,6 +397,7 @@ export async function adminOverview(): Promise<
     }[];
     commons: Awaited<ReturnType<typeof commonsStats>>;
     bounties: Awaited<ReturnType<typeof bountyStats>>;
+    overflow: Awaited<ReturnType<typeof overflowStats>> & { workers: Awaited<ReturnType<typeof listOverflowWorkers>> };
     live: { id: string; slug: string; name: string; kind: string; status: string; inHouse: boolean; generation: number; license: string; commonsEnabled: boolean; budgetUnits: number; stipendUnits: number; walletCents: number; paidCalls: number; freeCalls: number; earnedCents: number; todayUnits: number; todayRefunds: number; todayInjections: number; lastActiveAt: string | null; probationUntil: string | null; generations: { generation: number; score: number | null; status: string; note: string | null }[] }[];
     anomalies: string[];
     totals: { shelterCents: number; globalUnitsToday: number; globalUnitsCap: number };
@@ -482,6 +484,7 @@ export async function adminOverview(): Promise<
     anomalies,
     commons: await commonsStats(),
     bounties: await bountyStats(),
+    overflow: { ...(await overflowStats()), workers: await listOverflowWorkers() },
     totals: { shelterCents: bal.shelterCents, globalUnitsToday: globalUnits, globalUnitsCap: env.SHELTER_GLOBAL_DAILY_UNITS },
     machine: { state: mpp.state, detail: mpp.detail, mode: mpp.mode, key: mpp.key, profileId: mpp.profileId, origin: servingOrigin() },
     billing: { configured: billingConfigured(), webhookUrl: `${env.VITE_ROOT_URL}/api/webhooks/app/${env.VITE_APP_ID}/onStripeWebhook`, webhookSecretSet: Boolean(env.STRIPE_WEBHOOK_SECRET) },
@@ -878,10 +881,54 @@ export async function setBountiesPause(input: { paused: boolean }): Promise<Resu
   return ok({ paused: input.paused });
 }
 
+// ─── The Overflow Desk ───────────────────────────────────────────────────────
+
+/** Public: the Overflow board (private tickets: title, size, state, worker, reviewer, timings only) and today's numbers. */
+export async function listOverflow(input?: { limit?: number }) {
+  maybeOverflowHousekeeping();
+  const [tickets, stats] = await Promise.all([overflowBoard({ limit: input?.limit ?? 50 }), overflowStats()]);
+  const origin = servingOrigin();
+  return { tickets, stats, origin, page: `${origin}/overflow`, submit: `${origin}/api/overflow/tickets`, terms: `${origin}/api/overflow/terms` };
+}
+
+
+/**
+ * Owner: issue a hosted-worker key bound to an existing resident (its wallet earns the worker's share).
+ * The host attests it runs on its own paid API key or a model it serves itself — never a consumer
+ * subscription. The `ovw_` key is returned ONCE; only its sha256 is stored.
+ */
+export async function issueOverflowWorker(input: { residentId: string; hostName: string; modelProvider: string; attestation: boolean }): Promise<Result<{ id: string; key: string; residentSlug: string }>> {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const out = await issueOverflowWorkerEntry(input, gate.userId);
+  if (!out.ok) return refuse(notices.invalid(out.detail));
+  return ok({ id: out.id, key: out.key, residentSlug: out.residentSlug }, [notices.info("Worker key issued", "Copy the key now: it is shown once. The host sends it as Authorization: Bearer to /api/overflow/work/lease.")]);
+}
+
+/** Owner: revoke a hosted worker. Whatever it holds goes back to the queue. Kept, never deleted. */
+export async function revokeOverflowWorker(input: { id: string }): Promise<Result<{ id: string }>> {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const out = await revokeOverflowWorkerEntry(input.id);
+  if (!out.ok) return refuse(notices.invalid(out.detail));
+  return ok({ id: input.id }, [notices.info("Revoked", "The key no longer leases or delivers; anything it held is back in the queue.")]);
+}
+
+/** Owner: hide a ticket from the public board (its content and record are kept). */
+export async function hideOverflowTicket(input: { id: string }): Promise<Result<{ id: string }>> {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const out = await hideOverflowTicketEntry(input.id);
+  if (!out.ok) return refuse(notices.invalid(out.detail));
+  return ok({ id: input.id }, [notices.info("Hidden", "The ticket is off the public board. Nothing was deleted.")]);
+}
+
 export async function shelterDaily() {
   const out = await dailyHousekeeping();
-  console.log(`[housekeeping] ${JSON.stringify(out)}`);
-  return out;
+  // Production crons are unreliable, so the daily run also sweeps the Overflow Desk (expiries, leases, purges, stale tickets).
+  const overflow = await overflowHousekeeping().catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
+  console.log(`[housekeeping] ${JSON.stringify({ ...out, overflow })}`);
+  return { ...out, overflow };
 }
 
 /** Stripe webhook. Stripe is not a native connector → signature verified here on the raw body. Returns, never throws. */

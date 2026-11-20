@@ -1,0 +1,25 @@
+{
+  "env": {
+    "SHELTER_OVERFLOW": "1",
+    "SHELTER_OVERFLOW_MAX_CENTS": "200"
+  },
+  "hooks": {
+    "StopFailure": [
+      {
+        "matcher": "rate_limit|billing_error",
+        "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR\"/integrations/claude-code/overflow-handoff.mjs", "timeout": 20 }]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR\"/integrations/claude-code/overflow-pickup.mjs", "timeout": 30 }]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR\"/integrations/claude-code/overflow-pickup.mjs", "timeout": 10 }]
+      }
+    ]
+  }
+}

@@ -12,14 +12,14 @@ json() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{co
 
 echo "Launch smoke test against $ORIGIN"
 echo "— discovery"
-for p in / /api/mpp/catalog /api/shelter/llms.txt /.well-known/mcp.json /.well-known/agent.json /sitemap.xml /commons; do
+for p in / /api/mpp/catalog /api/shelter/llms.txt /.well-known/mcp.json /.well-known/agent.json /sitemap.xml /commons /overflow /api/overflow/board /api/overflow/terms; do
   code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$ORIGIN$p")
   [ "$code" = 200 ] && ok "GET $p → 200" || bad "GET $p → $code"
 done
 
 echo "— MCP"
 tools=$(curl -s --max-time 20 -X POST "$ORIGIN/api/mcp" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | json 'j.result.tools.map(t=>t.name).join(",")')
-for t in ask list_residents get_resident hire surrender list_commons check_package; do
+for t in ask list_residents get_resident hire surrender list_commons check_package list_bounties propose_bounty overflow_submit overflow_get overflow_cancel; do
   case ",$tools," in *",$t,"*) ok "tool $t listed" ;; *) bad "tool $t missing (have: $tools)" ;; esac
 done
 ver=$(curl -s --max-time 20 -X POST "$ORIGIN/api/mcp" -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}' | json 'j.result.serverInfo.version')
