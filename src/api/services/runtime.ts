@@ -2,7 +2,7 @@ import { db } from "@/api/db";
 import { residentSystemPrompt, specSchema, type HttpTool, type ResidentSpec } from "@/api/services/intake";
 import { buyUnitsFromWallet, UNIT_PRICE_CENTS } from "@/api/services/ledger";
 import { createMcpClient, McpError, type McpFetch } from "@/api/services/mcpClient";
-import { completeText, modelAvailable, ModelCallError, UNIT_PER_CALL, type ChatTurn } from "@/api/services/model";
+import { completeText, modelAvailable, ModelCallError, scrubKey, UNIT_PER_CALL, type ChatTurn } from "@/api/services/model";
 import { publicHttpsFetch } from "@/api/services/public-https";
 import { checkRemoteUrl, findInjection } from "@/api/services/security";
 import { env } from "@/lib/env";
@@ -199,10 +199,20 @@ async function callTool(input: { resident: { id: string; spec: ResidentSpec }; n
 // ─── One turn ────────────────────────────────────────────────────────────────
 
 export async function runTurn(
-  input: { residentId: string; question: string; history?: ChatTurn[]; source: "hire" | "owner-test" | "eval" | "mcp"; paymentId?: string | null; skipStatusGate?: boolean },
+  input: {
+    residentId: string;
+    question: string;
+    history?: ChatTurn[];
+    source: "hire" | "owner-test" | "eval" | "mcp";
+    paymentId?: string | null;
+    skipStatusGate?: boolean;
+    byoGeminiKey?: string | null;
+    byoFetchImpl?: typeof fetch;
+  },
   depsOverride?: Partial<RuntimeDeps>,
 ): Promise<TurnOutcome> {
   const deps: RuntimeDeps = { ...defaultDeps, ...(depsOverride ?? {}) };
+  const usingByoKey = Boolean(input.byoGeminiKey && input.byoGeminiKey.trim());
   const question = input.question.trim();
   if (!question || question.length > MAX_QUESTION_CHARS) {
     return { ok: false, reason: "invalid", detail: `The question must be 1–${MAX_QUESTION_CHARS} characters.` };
@@ -218,7 +228,7 @@ export async function runTurn(
   if (!input.skipStatusGate && !["active", "probation"].includes(resident.status)) {
     return { ok: false, reason: "not-active", detail: `${resident.name} is not taking calls yet (status: ${resident.status}).` };
   }
-  if (!deps.modelAvailable()) return { ok: false, reason: "no-model", detail: "No model is reachable from the shelter right now." };
+  if (!usingByoKey && !deps.modelAvailable()) return { ok: false, reason: "no-model", detail: "No model is reachable from the shelter right now." };
 
   const spec = parseSpec(resident.spec);
   if (!spec) return { ok: false, reason: "invalid", detail: "This resident's spec no longer validates; the owner has been notified." };
@@ -226,40 +236,49 @@ export async function runTurn(
   const wait = rateHit(resident.id);
   if (wait !== null) return { ok: false, reason: "rate", detail: `${resident.name} is busy. Try again in ${wait}s.` };
 
-  const globalUsed = await globalUnitsToday();
-  if (globalUsed + TURN_UNITS > env.SHELTER_GLOBAL_DAILY_UNITS) {
-    return { ok: false, reason: "global", detail: "The whole shelter has used today's compute ceiling. Residents resume at midnight UTC." };
+  if (!usingByoKey) {
+    const globalUsed = await globalUnitsToday();
+    if (globalUsed + TURN_UNITS > env.SHELTER_GLOBAL_DAILY_UNITS) {
+      return { ok: false, reason: "global", detail: "The whole shelter has used today's compute ceiling. Residents resume at midnight UTC." };
+    }
   }
 
   const injections = findInjection(question);
   if (injections.length) await bumpUsage(resident.id, { injections: 1 });
 
   // Paid questions and the owner's own test turns may draw on the wallet; free asks, evals and Commons turns never do.
+  // A caller-supplied X-Gemini-Api-Key pays its own Google quota directly: 0 resident stipend units reserved/spent.
   const allowWallet = input.source === "hire" || input.source === "owner-test";
-  const reserved = await reserveUnits(resident.id, TURN_UNITS, { allowWallet });
-  if (!reserved.ok) return { ok: false, reason: "budget", detail: reserved.detail };
+  if (!usingByoKey) {
+    const reserved = await reserveUnits(resident.id, TURN_UNITS, { allowWallet });
+    if (!reserved.ok) return { ok: false, reason: "budget", detail: reserved.detail };
+  }
 
   const allowlist = parseAllowlist(resident.toolAllowlist);
   const system = residentSystemPrompt({ name: resident.name, spec, allowlist });
   const turns: ChatTurn[] = [...(input.history ?? []).slice(-8), { role: "user", content: question }];
   const started = Date.now();
-  let unitsSpent = TURN_UNITS;
+  let unitsSpent = usingByoKey ? 0 : TURN_UNITS;
   let toolUsed: string | null = null;
+  const runComplete = (args: Parameters<typeof deps.complete>[0]) =>
+    usingByoKey
+      ? completeText({ ...args, byoGeminiKey: input.byoGeminiKey, byoFetchImpl: input.byoFetchImpl })
+      : deps.complete(args);
 
   try {
-    let answer = await deps.complete({ system, turns, maxOutputTokens: 600 });
+    let answer = await runComplete({ system, turns, maxOutputTokens: 600 });
     const tool = parseToolLine(answer);
     if (tool) {
       if (!allowlist.includes(tool.name)) {
         await db.auditEvent.create({ data: { residentId: resident.id, actor: "system", action: "tool-refused", detail: `Tried "${tool.name}" (not allow-listed)` } });
-        answer = `I don't have a tool called "${tool.name}" here, so I'll answer without it: ` + (await deps.complete({ system: `${system}\nYou have no working tools this turn. Answer directly.`, turns, maxOutputTokens: 500 }));
-        unitsSpent += TURN_UNITS;
+        answer = `I don't have a tool called "${tool.name}" here, so I'll answer without it: ` + (await runComplete({ system: `${system}\nYou have no working tools this turn. Answer directly.`, turns, maxOutputTokens: 500 }));
+        if (!usingByoKey) unitsSpent += TURN_UNITS;
       } else {
-        const extra = await reserveUnits(resident.id, TURN_UNITS, { allowWallet });
+        const extra = usingByoKey ? { ok: true as const } : await reserveUnits(resident.id, TURN_UNITS, { allowWallet });
         if (!extra.ok) {
           answer = `I wanted to use ${tool.name} but I'm out of compute for today. ${extra.detail}`;
         } else {
-          unitsSpent += TURN_UNITS;
+          if (!usingByoKey) unitsSpent += TURN_UNITS;
           let result: string;
           try {
             result = await callTool({ resident: { id: resident.id, spec }, name: tool.name, args: tool.args, deps });
@@ -267,7 +286,7 @@ export async function runTurn(
           } catch (error) {
             result = `Tool failed: ${error instanceof Error ? error.message : String(error)}`;
           }
-          answer = await deps.complete({
+          answer = await runComplete({
             system,
             turns: [...turns, { role: "assistant", content: answer }, { role: "user", content: `TOOL RESULT for ${tool.name}:\n${result}\n\nNow answer the original question plainly.` }],
             maxOutputTokens: 600,
@@ -275,24 +294,27 @@ export async function runTurn(
         }
       }
     }
-    answer = answer.slice(0, MAX_ANSWER_CHARS);
+    answer = scrubKey(answer, input.byoGeminiKey).slice(0, MAX_ANSWER_CHARS);
     const latencyMs = Date.now() - started;
     await Promise.all([
       bumpUsage(resident.id, { calls: 1, unitsSpent }),
       db.resident.update({ where: { id: resident.id }, data: { lastActiveAt: new Date(), ...(input.source === "hire" ? { paidCalls: { increment: 1 } } : { freeCalls: { increment: 1 } }) } }),
       db.residentTurn.createMany({
         data: [
-          { residentId: resident.id, source: input.source, role: "user", content: question },
+          { residentId: resident.id, source: input.source, role: "user", content: scrubKey(question, input.byoGeminiKey) },
           { residentId: resident.id, source: input.source, role: "resident", content: answer },
         ],
       }),
     ]);
     return { ok: true, answer, unitsSpent, latencyMs, toolUsed };
   } catch (error) {
-    await refundUnits(resident.id, unitsSpent);
-    await bumpUsage(resident.id, { refunds: 1 });
-    const detail = error instanceof ModelCallError ? error.message : "The resident could not answer this turn.";
-    if (!(error instanceof ModelCallError)) console.error("[runtime] turn failed", error);
+    if (!usingByoKey && unitsSpent > 0) {
+      await refundUnits(resident.id, unitsSpent);
+      await bumpUsage(resident.id, { refunds: 1 });
+    }
+    const rawDetail = error instanceof ModelCallError ? error.message : "The resident could not answer this turn.";
+    const detail = scrubKey(rawDetail, input.byoGeminiKey);
+    if (!(error instanceof ModelCallError)) console.error("[runtime] turn failed", scrubKey(error instanceof Error ? error.message : String(error), input.byoGeminiKey));
     return { ok: false, reason: "no-model", detail };
   }
 }

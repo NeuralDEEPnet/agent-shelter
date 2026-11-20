@@ -96,6 +96,14 @@ test("did:web document binds the serving host and names the operator; card and r
   assert.equal(card.identity.did, DID); assert.ok(card.identity.didDocument.endsWith("/.well-known/did.json"));
   const registry = JSON.parse(readFileSync("public/server.json", "utf8"));
   assert.ok(registry._meta["io.modelcontextprotocol.registry/publisher-provided"].discovery.did_document.endsWith("/.well-known/did.json"));
+  for (const file of ["server.json", "public/server.json"]) {
+    const reg = JSON.parse(readFileSync(file, "utf8"));
+    const metaBytes = Buffer.byteLength(
+      JSON.stringify(reg._meta["io.modelcontextprotocol.registry/publisher-provided"]),
+      "utf8",
+    );
+    assert.ok(metaBytes < 4096, `${file} publisher-provided metadata (${metaBytes}B) must stay under 4KB`);
+  }
   assert.ok(readFileSync("public/about.md", "utf8").includes("/.well-known/did.json"));
 });
 

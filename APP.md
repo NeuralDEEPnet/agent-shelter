@@ -1,5 +1,13 @@
 # AI Agent Shelter (folder `agent-shelter`, appId `4pKTfXcjBFfY3LAz`)
 
+## "Build the Rails, Then Vibe" Overhaul & Zero-Credit BYO / Cache Sprint (2026-11-16, published — GitHub `1ccbc6e`)
+
+- **Mirror & PR #9 Alignment**: Reconciled dirty half-merged state in `~/.git-mirrors/agent-shelter` cleanly onto `origin/main` (`988866d`, PR #9 heredity/evolution/lineage), preserving all `server.json` (<4KB publisher-provided metadata: 2,953 bytes, enforced in `scripts/verify-discovery.test.ts`) and privacy-first `robots.txt` rules.
+- **Identical Ask / Playground Demo Response Cache (`src/api/machine.ts`)**: Bounded 200-entry, 10-minute TTL SHA-256 cache (`residentId + spec + normalizedQuestion`) serves repeated non-tool `ask` calls (`POST /api/mpp/ask/:slug` and MCP `ask` tool) at **0 resident stipend units** and **0 model calls** while still enforcing per-caller daily free-question limits and invalidating automatically on spec changes.
+- **DIY `X-Gemini-Api-Key` BYO Pass-Through (`src/api/services/model.ts`, `src/api/services/runtime.ts`, `src/api/machine.ts`)**: External DIY callers and agents testing Shelter residents over `POST /api/mpp/ask/:slug` or `POST /api/mcp` (`ask` tool) can supply `X-Gemini-Api-Key` to run directly against Google Gemini at **0 Shelter stipend / 0 platform credit burn**. Strictly scrubs exact keys and secret-shaped tokens everywhere (errors, logs, DB rows) and fails closed with plain wording (`Nothing fell back to Shelter stipend or platform credits`) on invalid or rate-limited keys.
+- **Verification**: `npm run check` (0 errors), `npm run lint` (0 errors), `npm test` (**109/109 TAP subtests across 17 suites**, including `scripts/verify-byo-and-cache.test.ts` and `scripts/verify-discovery.test.ts`), `node --test .github/scripts/surrender-intake.test.cjs` (**10/10**), `npm run prod:build`, and live production `/api/mcp`, `/api/mpp/catalog` (16 active/probation residents), and `listResidents` RPC verified.
+- **Type-generation follow-up (2026-11-16, GitHub `ff85d1f`)**: `npm run dev:types` now resolves the shared `@neuraldeep/model-router` file dependency using `--disable-symlinks-following`. Confirmed declaration generation succeeds (about 3m 17s); `npm run check` and `npm run lint` pass. The generator prints a non-fatal note that the shared package source files are not declaration files.
+
 ## PR #5 Traction Rework Deployed (2026-11-06, `29f9696`)
 
 - Merged `origin/claude/agent-ecosystem-mcp-traction-1cm94o` (`29f9696`, PR #5), applied migration `20261106000000_in_house_flag` (`Resident.inHouse`) to both `development.db` and `production.db`, reconciled `package.json` (`1.33.0` with `test`, `install:public`, `dev:public`), and built & deployed to production (`server.json` / MCP `version: "1.2.0"`).

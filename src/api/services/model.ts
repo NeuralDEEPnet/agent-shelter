@@ -10,10 +10,23 @@ import { env } from "@/lib/env";
  * prompt-in / answer-out work; no delegated agent runs.
  */
 
-export const CHEAP_MODEL_ID = route("eval").model;
+export const EVAL_ROUTE = route("eval");
+export const CHEAP_MODEL_ID = EVAL_ROUTE.model;
+const DIRECT_GEMINI_MODEL_ID =
+  EVAL_ROUTE.chain.find((id) => id.startsWith("google/"))?.slice("google/".length) ??
+  "gemini-2.5-flash";
 
 /** Metered unit: one model call (any size within the caps) = 1 unit. */
 export const UNIT_PER_CALL = 1;
+
+const SECRET_PATTERNS =
+  /(?:AIza[0-9A-Za-z_-]{20,}|AQ\.[0-9A-Za-z._-]{20,}|sk-[A-Za-z0-9_-]{20,}|rk_live_[A-Za-z0-9]{10,}|hf_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,})/g;
+
+/** Scrub exact caller key and any secret-shaped token from strings before logging or returning. */
+export function scrubKey(text: string, exactKey?: string | null): string {
+  const step1 = exactKey && exactKey.length >= 6 ? text.split(exactKey).join("[redacted]") : text;
+  return step1.replace(SECRET_PATTERNS, "[redacted]");
+}
 
 export class ModelCallError extends Error {
   readonly detail: string;
@@ -22,6 +35,39 @@ export class ModelCallError extends Error {
     this.name = "ModelCallError";
     this.detail = detail;
   }
+}
+
+function describeByoGeminiFailure(status: number | undefined, rawDetail: string, apiKey: string): ModelCallError {
+  const safeDetail = scrubKey(rawDetail, apiKey).slice(0, 500);
+  const noFallback = "Nothing fell back to Shelter stipend or platform credits.";
+  if (status === 400 || status === 401 || status === 403 || /api_key_invalid|invalid api key|permission_denied/i.test(safeDetail)) {
+    return new ModelCallError(
+      `Google rejected your X-Gemini-Api-Key, so this turn was not answered. ${noFallback}`,
+      safeDetail,
+    );
+  }
+  if (status === 429 || /resource_exhausted|quota|rate limit/i.test(safeDetail)) {
+    return new ModelCallError(
+      `Your X-Gemini-Api-Key is rate-limited or out of quota right now. ${noFallback}`,
+      safeDetail,
+    );
+  }
+  if (status !== undefined && status >= 500) {
+    return new ModelCallError(
+      `Google returned a server error on your X-Gemini-Api-Key. ${noFallback}`,
+      safeDetail,
+    );
+  }
+  if (/timeout|abort|fetch failed|econnreset/i.test(safeDetail)) {
+    return new ModelCallError(
+      `Google could not be reached in time using your X-Gemini-Api-Key. ${noFallback}`,
+      safeDetail,
+    );
+  }
+  return new ModelCallError(
+    `Your X-Gemini-Api-Key request could not be completed. ${noFallback}`,
+    safeDetail,
+  );
 }
 
 function describeModelFailure(error: unknown): ModelCallError {
@@ -61,13 +107,100 @@ export function modelAvailable(): boolean {
 
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 
+/**
+ * Direct completion on a caller-supplied Google Gemini API key (`X-Gemini-Api-Key`).
+ * Fails closed on any error, scrubs the key everywhere, and NEVER falls back to OpenRouter.
+ */
+export async function completeTextWithByoGemini(input: {
+  apiKey: string;
+  system: string;
+  turns: ChatTurn[];
+  maxOutputTokens?: number;
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+}): Promise<string> {
+  const key = input.apiKey.trim();
+  if (key.length < 12 || key.length > 256 || /\s/.test(key)) {
+    throw describeByoGeminiFailure(401, "Malformed X-Gemini-Api-Key header", key);
+  }
+  const doFetch = input.fetchImpl ?? fetch;
+  let res: Response;
+  try {
+    res = await doFetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${DIRECT_GEMINI_MODEL_ID}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-goog-api-key": key,
+        },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: input.system }] },
+          contents: input.turns.map((t) => ({
+            role: t.role === "assistant" ? "model" : "user",
+            parts: [{ text: t.content }],
+          })),
+          generationConfig: {
+            temperature: 0.4,
+            maxOutputTokens: input.maxOutputTokens ?? 500,
+          },
+        }),
+        signal: AbortSignal.timeout(input.timeoutMs ?? 25_000),
+      },
+    );
+  } catch (err) {
+    throw describeByoGeminiFailure(
+      undefined,
+      err instanceof Error ? err.message : String(err),
+      key,
+    );
+  }
+
+  const rawBody = await res.text().catch(() => "");
+  if (!res.ok) {
+    throw describeByoGeminiFailure(res.status, rawBody || `HTTP ${res.status}`, key);
+  }
+
+  try {
+    const parsed = JSON.parse(rawBody) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+    };
+    const text = (parsed.candidates?.[0]?.content?.parts ?? [])
+      .map((p) => p.text ?? "")
+      .join("")
+      .trim();
+    if (!text) {
+      throw new Error("Empty candidate response from Gemini");
+    }
+    return scrubKey(text, key);
+  } catch (err) {
+    throw describeByoGeminiFailure(
+      502,
+      err instanceof Error ? err.message : "Invalid JSON from Gemini",
+      key,
+    );
+  }
+}
+
 /** Plain text completion, capped output. Throws ModelCallError only. */
 export async function completeText(input: {
   system: string;
   turns: ChatTurn[];
   maxOutputTokens?: number;
   timeoutMs?: number;
+  byoGeminiKey?: string | null;
+  byoFetchImpl?: typeof fetch;
 }): Promise<string> {
+  if (input.byoGeminiKey && input.byoGeminiKey.trim()) {
+    return completeTextWithByoGemini({
+      apiKey: input.byoGeminiKey,
+      system: input.system,
+      turns: input.turns,
+      maxOutputTokens: input.maxOutputTokens,
+      timeoutMs: input.timeoutMs,
+      fetchImpl: input.byoFetchImpl,
+    });
+  }
   const openrouter = provider();
   if (!openrouter) throw new ModelCallError("No model is reachable from this app right now.", "OPENROUTER_OPENCODE_BASE_URL unset");
   try {
