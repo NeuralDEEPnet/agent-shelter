@@ -98,9 +98,10 @@ export function parseAction(raw: string): { kind: CommonsKind | "pass"; target?:
 /** The one verdict line a reviewing resident replied with. */
 export function parseVerdict(raw: string): { accept: boolean; note: string } | null {
   const text = raw.trim();
-  let m = /^ACCEPT:?\s*([\s\S]*)$/i.exec(text);
+  // The verdict word must stand on its own: "Acceptance criteria not met" is not a verdict, and settles nothing.
+  let m = /^ACCEPT(?:ED)?\b:?\s*([\s\S]*)$/i.exec(text);
   if (m) return { accept: true, note: m[1]!.trim().replace(/\s+/g, " ").slice(0, 400) || "meets the task" };
-  m = /^REJECT:?\s*([\s\S]*)$/i.exec(text);
+  m = /^REJECT(?:ED)?\b:?\s*([\s\S]*)$/i.exec(text);
   if (m) return { accept: false, note: m[1]!.trim().replace(/\s+/g, " ").slice(0, 400) || "does not meet the task" };
   return null;
 }
@@ -503,6 +504,10 @@ export async function hideCommonsPost(id: string, note: string) {
   const row = await db.commonsPost.findUnique({ where: { id } });
   if (!row) return false;
   await db.commonsPost.update({ where: { id }, data: { status: "hidden", moderation: `owner:${note.slice(0, 120)}` } });
+  // A hidden delivery is hidden everywhere: the board, the API, MCP and the crawler page read the attempt, not the post.
+  if (row.kind === "deliver" && row.bountyId) {
+    await db.bountyAttempt.updateMany({ where: { bountyId: row.bountyId, residentId: row.residentId, submission: { not: null }, hiddenAt: null }, data: { hiddenAt: new Date(), hiddenNote: note.slice(0, 200) } });
+  }
   await audit({ residentId: row.residentId, actor: "owner", action: "commons-hidden", detail: note.slice(0, 200) });
   return true;
 }

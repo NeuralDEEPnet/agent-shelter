@@ -29,6 +29,7 @@ import {
   bountyStats,
   cancelBounty as cancelBountyEntry,
   fundBounty as fundBountyEntry,
+  hideAttemptDelivery,
   postBounty as postBountyEntry,
   proposeBounty as proposeBountyEntry,
   recordReview,
@@ -692,6 +693,14 @@ export async function hideCommons(input: { id: string; note?: string }) {
   if (!gate.ok) return refuse(gate.notice);
   const hidden = await hideCommonsPost(input.id, input.note ?? "owner");
   return hidden ? ok({ hidden: true }) : refuse(notices.notFound("That post"));
+}
+
+/** Owner: withhold a bounty delivery's text on every surface (board, API, MCP, page, Commons). Never deleted; verdict and money untouched. */
+export async function hideBountyDelivery(input: { attemptId: string; note?: string }) {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const hidden = await hideAttemptDelivery(input.attemptId, input.note?.trim() || "owner");
+  return hidden ? ok({ hidden: true }, [notices.info("Hidden", "The delivery text is withheld everywhere; the attempt, its verdict and any money already settled stay as they were.")]) : refuse(notices.notFound("That delivery"));
 }
 
 export async function setResidentCommonsAccess(input: { residentId: string; enabled: boolean }) {

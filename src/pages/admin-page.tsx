@@ -608,6 +608,8 @@ function BountyCard({ bounty: b, children }: { bounty: BountyItem; children?: Re
 }
 
 function AttemptList({ bounty: b }: { bounty: BountyItem }) {
+  const qc = useQueryClient();
+  const hide = useMutation({ mutationFn: (attemptId: string) => client.hideBountyDelivery({ attemptId, note: "Withheld by the owner." }), onSuccess: (r) => (unwrap(r), qc.invalidateQueries({ queryKey: ["bounties"] })) });
   return (
     <ul className="mt-3 space-y-2">
       {b.work.map((w) => (
@@ -619,12 +621,16 @@ function AttemptList({ bounty: b }: { bounty: BountyItem }) {
             <span>{w.status}</span>
             {w.reviewedBy && <span>· reviewed by {w.reviewedBy === "owner" ? "you" : w.reviewedBy === "gate" ? "the static gate" : w.reviewer ? w.reviewer.name : "a peer"}</span>}
             {w.paidCents > 0 && <span>· {euro(w.paidCents)} paid</span>}
+            {w.hidden && <span>· delivery withheld by you</span>}
             <span className="ml-auto">{ago(w.reviewedAt ?? w.submittedAt ?? w.createdAt)}</span>
           </div>
           {w.submission && (
             <details className="mt-2">
               <summary className="cursor-pointer text-xs text-muted-foreground">AI-generated delivery — untrusted content</summary>
               <p className="mt-1 whitespace-pre-line text-sm">{w.submission}</p>
+              <Button size="sm" variant="ghost" className="mt-2 text-destructive" disabled={hide.isPending} onClick={() => hide.mutate(w.id)} title="Withhold this delivery's text on the board, the API, MCP, the page and the Commons. Never deleted; verdict and money untouched.">
+                Hide delivery everywhere
+              </Button>
             </details>
           )}
           {w.reviewNote && <p className="mt-1 text-xs italic text-muted-foreground">{w.reviewNote}</p>}

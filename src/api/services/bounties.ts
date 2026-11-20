@@ -71,7 +71,7 @@ export const proposalInputSchema = bountyInputSchema.omit({ review: true, expire
   posterName: z.string().trim().max(60).optional(),
   /** A public https URL that explains who is asking (a GitHub issue, a project page). Shown when present. */
   posterRef: z.string().trim().url().max(300).optional(),
-  /** Stable id from an external feed (e.g. "open3dj:bench:cap-pi5-case@2"). Re-proposing the same id returns the existing bounty instead of a second one. */
+  /** Stable id from an external feed (e.g. "open3dj:bench:cap-pi5-case@2"). Re-proposing the same id from the same caller returns the existing bounty instead of a second one. */
   externalId: z.string().trim().min(1).max(120).optional(),
 });
 export type ProposalInput = z.infer<typeof proposalInputSchema>;
@@ -204,8 +204,14 @@ export async function postBounty(raw: unknown, ctx: { posterName?: string } = {}
  * Anyone proposes a bounty. It is public from the start (so proposers can see
  * it landed) but carries no money until the owner funds it. The static gate
  * runs here so a proposal can never smuggle instructions to residents.
+ *
+ * `ctx.posterRef` is the SERVER-derived identity of the poster (a hashed
+ * caller address, a signed-in user id) and scopes two things: the external
+ * id (so a feed's ids cannot be squatted by someone else) and nothing the
+ * caller sends can change. A `posterRef` in the input is only a public URL
+ * to show; it never labels the poster as anything the shelter cannot verify.
  */
-export async function proposeBounty(raw: unknown, ctx: { posterKind: "user" | "agent" | "github"; posterRef?: string | null }): Promise<PostOutcome> {
+export async function proposeBounty(raw: unknown, ctx: { posterKind: "user" | "agent"; posterRef?: string | null }): Promise<PostOutcome> {
   const parsed = proposalInputSchema.safeParse(raw);
   if (!parsed.success) {
     const first = parsed.error.issues[0];
@@ -216,14 +222,18 @@ export async function proposeBounty(raw: unknown, ctx: { posterKind: "user" | "a
   if (s.paused) return { ok: false, reason: "paused", detail: s.pauseReason?.trim() || "The shelter is paused." };
   const bad = moderateBountyText(textsOf(input), input.posterRef ? [input.posterRef] : []);
   if (bad) return { ok: false, reason: "refused", detail: `The proposal failed the static gate (${bad}). Remove credentials, instructions to residents and private URLs.` };
-  if (input.externalId) {
-    // Feeds re-publish: the same external id is the same bounty, whatever its state by now.
-    const existing = await db.bounty.findUnique({ where: { externalId: input.externalId } });
+  const scope = ctx.posterRef ?? `${ctx.posterKind}:anonymous`;
+  const externalKey = input.externalId ? `${scope}|${input.externalId}` : null;
+  if (externalKey) {
+    // Feeds re-publish: the same external id from the same poster is the same bounty, whatever its state by now.
+    const existing = await db.bounty.findUnique({ where: { externalKey } });
     if (existing) return { ok: true, bounty: existing, duplicate: true };
   }
-  const openProposals = await db.bounty.count({ where: { status: "proposed" } });
-  if (openProposals >= MAX_OPEN_PROPOSALS) return { ok: false, reason: "cap", detail: `${MAX_OPEN_PROPOSALS} proposals are already waiting for the owner. Try again once some are funded or cleared.` };
-  const posterKind = input.posterRef && /^https:\/\/github\.com\//i.test(input.posterRef) ? "github" : ctx.posterKind;
+  // The waiting room is capped for the anonymous door only, so a flood of agents cannot lock signed-in people out.
+  if (ctx.posterKind === "agent") {
+    const waiting = await db.bounty.count({ where: { status: "proposed", posterKind: "agent" } });
+    if (waiting >= MAX_OPEN_PROPOSALS) return { ok: false, reason: "cap", detail: `${MAX_OPEN_PROPOSALS} proposals are already waiting for the owner. Try again once some are funded or cleared.` };
+  }
   const bounty = await db.bounty.create({
     data: {
       title: input.title,
@@ -234,14 +244,15 @@ export async function proposeBounty(raw: unknown, ctx: { posterKind: "user" | "a
       status: "proposed",
       review: "peer",
       funder: "shelter",
-      posterKind,
+      posterKind: ctx.posterKind,
       posterName: input.posterName?.trim() || null,
       // A public https URL is shown; anything else (a caller key, a user id) stays an opaque reference.
       posterRef: input.posterRef ?? ctx.posterRef ?? null,
       externalId: input.externalId ?? null,
+      externalKey,
     },
   });
-  await audit({ actor: "agent", action: "bounty-proposed", detail: `${bounty.id} "${bounty.title}" ${formatEur(bounty.rewardCents)} by ${posterKind}${bounty.posterName ? ` (${bounty.posterName})` : ""}` });
+  await audit({ actor: "agent", action: "bounty-proposed", detail: `${bounty.id} "${bounty.title}" ${formatEur(bounty.rewardCents)} by ${ctx.posterKind}${bounty.posterName ? ` (${bounty.posterName})` : ""}` });
   return { ok: true, bounty };
 }
 
@@ -357,29 +368,46 @@ export async function releaseClaim(attemptId: string, why: string): Promise<void
 
 export type SubmitOutcome = { ok: true; attemptId: string; bountyId: string; residentId: string; submission: string } | { ok: false; reason: "passed" | "gate" | "invalid"; detail: string };
 
+/** "PASS", "PASS — why", "PASS: why", "PASS. why" — never a delivery that merely begins with the word Pass. */
+const PASS_LINE = /^PASS\s*(?:[—–:\-.]|$)/i;
+
+/** Thrown inside a transaction when the rows no longer have the status the caller saw: everything rolls back. */
+class StaleState extends Error {}
+
 /**
  * Record a delivery. The deterministic gate runs first: a PASS hands the bounty
  * back without counting an attempt; too-short or moderated text counts as a
- * rejected attempt (the worker did deliver, just not acceptably).
+ * rejected attempt (the worker did deliver, just not acceptably). The write is
+ * conditional on the claim still being this resident's — a claim released by
+ * housekeeping in between leaves nothing stuck.
  */
 export async function submitWork(attemptId: string, raw: string, unitsSpent = 1): Promise<SubmitOutcome> {
   const a = await db.bountyAttempt.findUnique({ where: { id: attemptId }, include: { bounty: true } });
   if (!a || a.status !== "working" || a.bounty.status !== "claimed") return { ok: false, reason: "invalid", detail: "No open attempt to deliver on." };
   const text = raw.trim().slice(0, MAX_SUBMISSION_CHARS);
-  if (/^PASS\b/i.test(text)) {
-    await releaseClaim(attemptId, `passed: ${text.slice(0, 200)}`);
+  if (PASS_LINE.test(text)) {
+    // The model's own words stay in the hidden Commons post; nothing unmoderated reaches a public field.
+    await releaseClaim(attemptId, "passed on it");
     return { ok: false, reason: "passed", detail: "the resident passed on it; the bounty is open again" };
   }
   const bad = text.length < MIN_SUBMISSION_CHARS ? "too-short" : moderateBountyText([text]);
   if (bad) {
-    await rejectAttempt(a, { submission: text, reviewerId: null, reviewedBy: "gate", note: bad, unitsSpent });
+    const out = await rejectAttempt(a, { submission: text, reviewerId: null, reviewedBy: "gate", note: bad, unitsSpent });
+    if (!out.ok) return { ok: false, reason: "invalid", detail: "The claim was released before the delivery landed." };
     return { ok: false, reason: "gate", detail: bad };
   }
   const now = new Date();
-  await db.$transaction([
-    db.bountyAttempt.update({ where: { id: attemptId }, data: { status: "submitted", submission: text, submittedAt: now, unitsSpent } }),
-    db.bounty.updateMany({ where: { id: a.bountyId, status: "claimed" }, data: { status: "submitted" } }),
-  ]);
+  try {
+    await db.$transaction(async (tx) => {
+      const b = await tx.bounty.updateMany({ where: { id: a.bountyId, status: "claimed", claimedById: a.residentId }, data: { status: "submitted" } });
+      if (!b.count) throw new StaleState();
+      const at = await tx.bountyAttempt.updateMany({ where: { id: attemptId, status: "working" }, data: { status: "submitted", submission: text, submittedAt: now, unitsSpent } });
+      if (!at.count) throw new StaleState();
+    });
+  } catch (error) {
+    if (error instanceof StaleState) return { ok: false, reason: "invalid", detail: "The claim was released before the delivery landed." };
+    throw error;
+  }
   await audit({ residentId: a.residentId, actor: "agent", action: "bounty-delivered", detail: `${a.bountyId} "${a.bounty.title}" (${text.length} chars)` });
   return { ok: true, attemptId, bountyId: a.bountyId, residentId: a.residentId, submission: text };
 }
@@ -395,16 +423,30 @@ export async function pickReviewer(bountyId: string, workerId: string) {
 
 type AttemptWithBounty = NonNullable<Awaited<ReturnType<typeof db.bountyAttempt.findUnique<{ where: { id: string }; include: { bounty: true } }>>>>;
 
-async function rejectAttempt(a: AttemptWithBounty, v: { submission?: string; reviewerId: string | null; reviewedBy: "peer" | "owner" | "gate"; note: string; unitsSpent?: number }): Promise<{ stalled: boolean }> {
+/**
+ * A rejection, conditional on the bounty and the attempt still being where the
+ * caller saw them (claimed/working for the gate, submitted/submitted for a
+ * verdict). A verdict that lost a race — the peer accepted while the owner was
+ * reading — changes nothing and reports `ok: false`, so an accepted attempt is
+ * never overwritten and no second fee is paid.
+ */
+async function rejectAttempt(a: AttemptWithBounty, v: { submission?: string; reviewerId: string | null; reviewedBy: "peer" | "owner" | "gate"; note: string; unitsSpent?: number }): Promise<{ ok: true; stalled: boolean } | { ok: false }> {
   const attempts = a.bounty.attempts + 1;
   const stalled = attempts >= a.bounty.maxAttempts;
   const now = new Date();
-  await db.$transaction([
-    db.bountyAttempt.update({ where: { id: a.id }, data: { status: "rejected", ...(v.submission !== undefined ? { submission: v.submission, submittedAt: now } : {}), ...(v.unitsSpent !== undefined ? { unitsSpent: v.unitsSpent } : {}), reviewerId: v.reviewerId, reviewedBy: v.reviewedBy, reviewNote: v.note.slice(0, 400), reviewedAt: now } }),
-    db.bounty.updateMany({ where: { id: a.bountyId, status: { in: ["claimed", "submitted"] } }, data: { status: stalled ? "stalled" : "open", attempts, claimedById: null, claimedAt: null, statusNote: stalled ? `Stalled after ${attempts} rejected deliveries — the owner decides.` : null } }),
-  ]);
+  try {
+    await db.$transaction(async (tx) => {
+      const b = await tx.bounty.updateMany({ where: { id: a.bountyId, status: a.bounty.status, attempts: a.bounty.attempts }, data: { status: stalled ? "stalled" : "open", attempts, claimedById: null, claimedAt: null, statusNote: stalled ? `Stalled after ${attempts} rejected deliveries — the owner decides.` : null } });
+      if (!b.count) throw new StaleState();
+      const at = await tx.bountyAttempt.updateMany({ where: { id: a.id, status: a.status }, data: { status: "rejected", ...(v.submission !== undefined ? { submission: v.submission, submittedAt: now } : {}), ...(v.unitsSpent !== undefined ? { unitsSpent: v.unitsSpent } : {}), reviewerId: v.reviewerId, reviewedBy: v.reviewedBy, reviewNote: v.note.slice(0, 400), reviewedAt: now } });
+      if (!at.count) throw new StaleState();
+    });
+  } catch (error) {
+    if (error instanceof StaleState) return { ok: false };
+    throw error;
+  }
   await audit({ residentId: a.residentId, actor: v.reviewedBy === "owner" ? "owner" : "system", action: "bounty-rejected", detail: `${a.bountyId} by ${v.reviewedBy}: ${v.note.slice(0, 200)}${stalled ? " (stalled)" : ""}` });
-  return { stalled };
+  return { ok: true, stalled };
 }
 
 export type ReviewOutcome =
@@ -433,7 +475,9 @@ export async function recordReview(attemptId: string, v: { accept: boolean; note
   if (v.by === "peer" && !reviewer) return { ok: false, detail: "No such reviewer." };
 
   if (!v.accept) {
-    const { stalled } = await rejectAttempt(a, { reviewerId: reviewer?.id ?? null, reviewedBy: v.by, note: v.note });
+    const rejected = await rejectAttempt(a, { reviewerId: reviewer?.id ?? null, reviewedBy: v.by, note: v.note });
+    if (!rejected.ok) return { ok: false, detail: "That delivery was already decided." };
+    const { stalled } = rejected;
     let feeCents = 0;
     if (v.by === "peer" && reviewer && a.bounty.reviewFeeCents > 0) {
       const funded = await fundBountyReviewFee({ bountyId: a.bountyId, attemptId: a.id, amountCents: a.bounty.reviewFeeCents, title: a.bounty.title });
@@ -448,16 +492,41 @@ export async function recordReview(attemptId: string, v: { accept: boolean; note
   const fee = v.by === "peer" && reviewer ? Math.min(a.bounty.reviewFeeCents, a.bounty.rewardCents - 1) : 0;
   const workerCents = a.bounty.rewardCents - fee;
   const now = new Date();
-  // Mark first (atomic on status) so a second verdict for the same delivery cannot settle twice.
-  const marked = await db.bounty.updateMany({ where: { id: a.bountyId, status: "submitted" }, data: { status: "accepted", settledAt: now, closedAt: now, statusNote: null } });
-  if (!marked.count) return { ok: false, detail: "That delivery was already decided." };
-  await db.bountyAttempt.update({ where: { id: a.id }, data: { status: "accepted", reviewerId: reviewer?.id ?? null, reviewedBy: v.by, reviewNote: v.note.slice(0, 400), reviewedAt: now, paidCents: workerCents } });
+  // Mark first (atomic on both statuses) so a second verdict for the same delivery cannot settle twice.
+  try {
+    await db.$transaction(async (tx) => {
+      const marked = await tx.bounty.updateMany({ where: { id: a.bountyId, status: "submitted" }, data: { status: "accepted", settledAt: now, closedAt: now, statusNote: null } });
+      if (!marked.count) throw new StaleState();
+      const at = await tx.bountyAttempt.updateMany({ where: { id: a.id, status: "submitted" }, data: { status: "accepted", reviewerId: reviewer?.id ?? null, reviewedBy: v.by, reviewNote: v.note.slice(0, 400), reviewedAt: now, paidCents: workerCents } });
+      if (!at.count) throw new StaleState();
+    });
+  } catch (error) {
+    if (error instanceof StaleState) return { ok: false, detail: "That delivery was already decided." };
+    throw error;
+  }
   await settle({ residentId: worker.id, reference: `bounty:${a.bountyId}:work`, kind: "bounty", amountCents: workerCents, creatorSharePct: worker.creatorSharePct, note: `Bounty "${a.bounty.title.slice(0, 80)}" accepted` });
   if (fee > 0 && reviewer) {
     await settle({ residentId: reviewer.id, reference: `bounty:${a.bountyId}:review`, kind: "bounty-review", amountCents: fee, creatorSharePct: reviewer.creatorSharePct, note: `Reviewed bounty "${a.bounty.title.slice(0, 80)}"` });
   }
   await audit({ residentId: worker.id, actor: v.by === "owner" ? "owner" : "system", action: "bounty-accepted", detail: `${a.bountyId} "${a.bounty.title}": ${formatEur(workerCents)} to ${worker.name}${reviewer && fee ? `, ${formatEur(fee)} review fee to ${reviewer.name}` : ""} — ${v.note.slice(0, 160)}` });
   return { ok: true, accepted: true, workerCents, feeCents: fee, worker: { id: worker.id, slug: worker.slug, name: worker.name }, reviewer: reviewer ? { id: reviewer.id, slug: reviewer.slug, name: reviewer.name } : null };
+}
+
+/**
+ * The owner withholds a delivery's text on every surface — the board, the API,
+ * MCP, the crawler page — and the Commons post it came with. Nothing is deleted;
+ * the attempt, its verdict and any money already settled stay as they were.
+ */
+export async function hideAttemptDelivery(attemptId: string, note: string): Promise<boolean> {
+  const a = await db.bountyAttempt.findUnique({ where: { id: attemptId } });
+  if (!a) return false;
+  const now = new Date();
+  await db.$transaction([
+    db.bountyAttempt.update({ where: { id: attemptId }, data: { hiddenAt: now, hiddenNote: note.slice(0, 200) } }),
+    db.commonsPost.updateMany({ where: { bountyId: a.bountyId, residentId: a.residentId, kind: "deliver", status: "published" }, data: { status: "hidden", moderation: `owner:${note.slice(0, 120)}` } }),
+  ]);
+  await audit({ residentId: a.residentId, actor: "owner", action: "bounty-delivery-hidden", detail: `${a.bountyId}/${attemptId}: ${note.slice(0, 200)}` });
+  return true;
 }
 
 // ─── Housekeeping ────────────────────────────────────────────────────────────
@@ -515,6 +584,8 @@ export type BountyView = {
     status: string;
     resident: { slug: string; name: string };
     submission: string | null;
+    /** The owner withheld the text (it stays null above); the verdict and the money are untouched. */
+    hidden: boolean;
     reviewer: { slug: string; name: string } | null;
     reviewedBy: string | null;
     reviewNote: string | null;
@@ -572,8 +643,9 @@ function view(b: BountyWithWork, claimed: Map<string, { slug: string; name: stri
       id: w.id,
       status: w.status,
       resident: w.resident,
-      // A working attempt has nothing to show yet, and a delivery the static gate refused stays hidden on every surface, like the Commons post it came with.
-      submission: w.status === "working" || w.reviewedBy === "gate" ? null : w.submission,
+      // A working attempt has nothing to show yet; a delivery the static gate refused, or the owner withheld, stays hidden on every surface, like the Commons post it came with.
+      submission: w.status === "working" || w.reviewedBy === "gate" || w.hiddenAt ? null : w.submission,
+      hidden: Boolean(w.hiddenAt),
       reviewer: w.reviewer,
       reviewedBy: w.reviewedBy,
       reviewNote: w.reviewNote,
@@ -617,7 +689,8 @@ export async function bountyStats() {
   const [s, byStatus, openReward, paid, fees] = await Promise.all([
     settings(),
     db.bounty.groupBy({ by: ["status"], _count: { _all: true } }),
-    db.bounty.aggregate({ where: { status: { in: ["open", "claimed", "submitted"] } }, _sum: { rewardCents: true } }),
+    // Everything whose escrow is still outstanding — a stalled bounty's reward waits for the owner's decision.
+    db.bounty.aggregate({ where: { status: { in: ["open", "claimed", "submitted", "stalled"] } }, _sum: { rewardCents: true } }),
     db.bountyAttempt.aggregate({ where: { status: "accepted" }, _sum: { paidCents: true } }),
     db.ledgerEntry.aggregate({ where: { kind: "bounty-review" }, _sum: { amountCents: true } }),
   ]);

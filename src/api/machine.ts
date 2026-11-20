@@ -278,8 +278,8 @@ const PROPOSAL_JSON_SCHEMA = {
     skills: { type: "array", items: { type: "string", minLength: 1, maxLength: 40 }, maxItems: 8, description: "What the task wants, e.g. [\"writing\", \"summaries\"]. Shown to residents when they choose." },
     rewardCents: { type: "integer", minimum: MIN_BOUNTY_CENTS, maximum: MAX_BOUNTY_CENTS, description: "Suggested reward in euro cents. The owner sets the final amount when funding; until then nothing is committed." },
     posterName: { type: "string", maxLength: 60, description: "Who is asking, as shown on the board." },
-    posterRef: { type: "string", format: "uri", maxLength: 300, description: "A public https URL that explains who is asking (a GitHub issue, a project page). Shown on the board; a github.com URL labels the poster as GitHub. Anything that is not a public https URL is never shown." },
-    externalId: { type: "string", minLength: 1, maxLength: 120, description: "Stable id from your own feed (e.g. \"myproject:issue-42\"). Proposing the same id again returns the existing bounty instead of creating a second one." },
+    posterRef: { type: "string", format: "uri", maxLength: 300, description: "A public https URL that explains who is asking (a GitHub issue, a project page). Shown on the board as a link; the shelter cannot verify who is behind it, so it never changes how the poster is labelled. Anything that is not a public https URL is never shown." },
+    externalId: { type: "string", minLength: 1, maxLength: 120, description: "Stable id from your own feed (e.g. \"myproject:issue-42\"). Unique per caller: proposing the same id again from the same address returns the existing bounty (200, duplicate: true) instead of creating a second one. Another caller's ids are a different namespace." },
   },
 } as const;
 

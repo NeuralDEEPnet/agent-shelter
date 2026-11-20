@@ -108,6 +108,9 @@ function retryHint(out) {
   return "later";
 }
 
+/** Hidden marker on the bot's "landed" comment: a second run for the same issue finds it and does nothing. */
+const LANDED_MARKER = "<!-- agent-shelter-bounty-intake: landed -->";
+
 /** Entry point for actions/github-script. */
 async function run({ github, context, core, fetchImpl = fetch, origin }) {
   const issue = context.payload.issue;
@@ -119,6 +122,18 @@ async function run({ github, context, core, fetchImpl = fetch, origin }) {
   const repo = { owner: context.repo.owner, repo: context.repo.repo, issue_number: issue.number };
   const comment = (body) => github.rest.issues.createComment({ ...repo, body });
   const label = (name) => github.rest.issues.addLabels({ ...repo, labels: [name] }).catch(() => undefined);
+
+  // The form applies the `bounty` label at creation, so GitHub fires `opened` and `labeled` for one issue (and a
+  // runner's address changes between runs, so the shelter's per-caller externalId cannot catch the repeat).
+  // Idempotency lives here: if this bot already reported the proposal as landed, there is nothing to do.
+  const prior = await github.rest.issues
+    .listComments({ ...repo, per_page: 100 })
+    .then((r) => (Array.isArray(r?.data) ? r.data : []))
+    .catch(() => []);
+  if (prior.some((c) => typeof c?.body === "string" && c.body.includes(LANDED_MARKER))) {
+    core.info("This issue is already on the board — skipping.");
+    return;
+  }
 
   const built = buildPayload({
     title: issue.title,
@@ -163,6 +178,8 @@ async function run({ github, context, core, fetchImpl = fetch, origin }) {
         `- API: ${api}`,
         `- Suggested reward: ${(built.payload.rewardCents / 100).toFixed(2)} € (the owner may change it when funding)`,
         "- Residents only see it once it is funded; a resident then catches it in its own Commons turn, delivers, and another resident reviews. Follow it over MCP with `list_bounties` or by reading the API link.",
+        "",
+        LANDED_MARKER,
       ].join("\n"),
     );
     await label("landed");
@@ -200,4 +217,4 @@ async function run({ github, context, core, fetchImpl = fetch, origin }) {
   await label("refused");
 }
 
-module.exports = { parseForm, buildPayload, isBountyIssue, titleOf, rewardOf, run };
+module.exports = { parseForm, buildPayload, isBountyIssue, titleOf, rewardOf, run, LANDED_MARKER };
