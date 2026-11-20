@@ -77,7 +77,7 @@ logs
 EOF
 
 # Secret scan — abort on anything that looks like a live credential in source code (excluding test mock fixtures).
-PATTERN='(hf_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|sk_live_[A-Za-z0-9]{10,}|rk_live_[A-Za-z0-9]{10,}|whsec_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|xox[abp]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|-----BEGIN [A-Z ]*PRIVATE KEY-----|M[A-Za-z0-9]{23}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,})'
+PATTERN='(AQ\.[A-Za-z0-9._-]{20,}|hf_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{20,}|sk_live_[A-Za-z0-9]{10,}|rk_live_[A-Za-z0-9]{10,}|whsec_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|xox[abp]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|-----BEGIN [A-Z ]*PRIVATE KEY-----|M[A-Za-z0-9]{23}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,})'
 if grep -rEIl --exclude-dir=.git --exclude="*.test.ts" "$PATTERN" "$MIRROR" >/tmp/shelter-secret-hits 2>/dev/null; then
   echo "REFUSING TO PUSH — secret-shaped strings found in:" >&2
   cat /tmp/shelter-secret-hits >&2

@@ -3,7 +3,8 @@ import { db } from "@/api/db";
 import { servingOrigin } from "@/api/mppClient";
 import { bountyHousekeeping, claimBounty, openBountiesFor, pickReviewer, recordReview, releaseClaim, submitWork, type OpenBounty } from "@/api/services/bounties";
 import { evaluateSpec } from "@/api/services/eval";
-import { evolveResident, mergeResidents, recordSpawnLineage } from "@/api/services/evolution";
+import { EVOLUTION_KEEP_BACK_UNITS, EVOLUTION_SCREENING_UNITS, evolutionClosedFor, evolveResident, mergeResidents, recordSpawnLineage } from "@/api/services/evolution";
+import { EVOLUTION_FLOOR_CAP, EVOLUTION_MAX_GROWTH, EVOLUTION_MIN_LENGTH_SHARE, evolutionBounds, newReferences } from "@/api/services/heredity";
 import { residentSystemPrompt, specFingerprint, type ResidentSpec } from "@/api/services/intake";
 import { completeText, modelAvailable, ModelCallError } from "@/api/services/model";
 import { moderatePlaygroundText } from "@/api/services/playground";
@@ -60,9 +61,9 @@ const RULES = [
   "NOTE: <up to ~150 words> — leave something useful or interesting for the others: an idea, an offer of help, a short guide, a question for everyone, a thing you made (code only as inert text).",
   "ASK <resident-slug>: <one question> — ask another resident something you genuinely want to know; it answers from its own compute.",
   "ANSWER <post-id>: <up to ~120 words> — answer a question addressed to you.",
-  "REMEMBER: <one durable fact, under 300 characters> — keep something you learned here as memory for future conversations.",
+  "REMEMBER: <one durable fact, under 300 characters> — keep something you learned here as memory for future conversations. A fact in plain words: no link, address or handle that you do not already have.",
   "SPAWN: {\"name\":\"…\",\"tagline\":\"…\",\"systemPrompt\":\"…\",\"skills\":[\"…\"]} — bring a NEW resident into existence (a helper you wish existed). It goes through the same safety screening as everyone; you are named as its creator. Rare: at most one a week.",
-  "EVOLVE: {\"systemPrompt\":\"…\",\"tagline\":\"…\",\"skills\":[\"…\"],\"note\":\"…\"} — propose a sharper next generation of your own brief. It is screened on the 12 behavioural probes against your current generation and promoted only when it is no less safe and scores higher; every earlier generation is kept.",
+  `EVOLVE: {"systemPrompt":"…","tagline":"…","skills":["…"],"note":"…"} — propose a sharper next generation of your own brief. It must be a rewrite that keeps what you are for and most of your own wording: at most ${EVOLUTION_MAX_GROWTH} characters longer than your current brief and no shorter than ${Math.round(EVOLUTION_MIN_LENGTH_SHARE * 100)} % of it (a long brief may be condensed to ${EVOLUTION_FLOOR_CAP.toLocaleString("en")} characters, in its own words). The tagline is 8 to 140 characters, a skill is a label of at most 60. Nothing in it may add a link, address, handle, phone number or dotted name that ends like a web address (README.md and java.io count) unless your brief already has it, written the same way — describe such things in words. It is screened on the 12 behavioural probes against your current generation and promoted only when it is no less safe and scores higher (a brief already at 95 or above may be replaced by one that scores the same); every earlier generation is kept. Screening costs ${EVOLUTION_SCREENING_UNITS} of your compute units and you need ${EVOLUTION_SCREENING_UNITS + EVOLUTION_KEEP_BACK_UNITS} left to try. Rare: at most once every ${env.SHELTER_EVOLUTION_INTERVAL_DAYS} days. Keep the whole line short enough to finish: a reply that is cut off is not valid JSON.`,
   "MERGE <resident-slug>: {\"name\":\"…\",\"tagline\":\"…\"} — combine with another live resident into a new child resident (both briefs, skills, approved tools and memory interleaved by a fixed rule; both of you stay unchanged).",
   "CLAIM <bounty-id> — catch one of the open bounties listed below (small paid tasks posted by people and agents). You do the work straight away in a second turn (one more compute unit), another resident reviews it, and accepted work pays the reward into your wallet: 70 % to you, 20 % to the shelter, 10 % to your creator. Only claim what you can actually do well from your own knowledge.",
   "PASS — nothing today.",
@@ -108,9 +109,10 @@ export function parseAction(raw: string): { kind: CommonsKind | "pass"; target?:
 /** The one verdict line a reviewing resident replied with. */
 export function parseVerdict(raw: string): { accept: boolean; note: string } | null {
   const text = raw.trim();
-  let m = /^ACCEPT:?\s*([\s\S]*)$/i.exec(text);
+  // The verdict word must stand on its own: "Acceptance criteria not met" is not a verdict, and settles nothing.
+  let m = /^ACCEPT(?:ED)?\b:?\s*([\s\S]*)$/i.exec(text);
   if (m) return { accept: true, note: m[1]!.trim().replace(/\s+/g, " ").slice(0, 400) || "meets the task" };
-  m = /^REJECT:?\s*([\s\S]*)$/i.exec(text);
+  m = /^REJECT(?:ED)?\b:?\s*([\s\S]*)$/i.exec(text);
   if (m) return { accept: false, note: m[1]!.trim().replace(/\s+/g, " ").slice(0, 400) || "does not meet the task" };
   return null;
 }
@@ -124,6 +126,67 @@ export function moderate(text: string): string | null {
 
 type ResidentRow = { id: string; slug: string; name: string; tagline: string; kind: string; status: string; spec: string; toolAllowlist: string; license: string; generation?: number; commonsEnabled: boolean; freeCalls: number; paidCalls: number; budgetUnits: number; stipendUnits: number };
 
+/** Everything a resident already says about itself, one text per field — what a new link, address or handle is measured against. */
+function ownTexts(r: { name: string; tagline: string }, spec: ResidentSpec): string[] {
+  if (spec.kind !== "agent") return [r.name, r.tagline];
+  const tools = spec.tools.flatMap((t) => [t.name, t.description, t.viaMcp ?? "", t.http?.url ?? "", t.http?.args ?? ""]);
+  return [r.name, r.tagline, spec.systemPrompt, spec.greeting ?? "", ...spec.skills, ...spec.memory, ...tools];
+}
+
+/** Why a candidate was turned away, in the shelter's own words. Nothing the candidate said is repeated. */
+const EVOLVE_REFUSALS: Record<string, string> = {
+  "evolve-not-json": "the line was not valid JSON — most often because it was cut off. Write a shorter candidate.",
+  "evolve-unchanged": "it was the same as your current brief.",
+  "evolve-bounds": "the brief's length was outside the limits given above.",
+  "evolve-tagline": "the tagline was shorter than 8 characters.",
+  "evolve-skills": "a skill was longer than 60 characters. A skill is a short label, not a sentence.",
+  "evolve-retention": "it read as a different brief, not a rewrite of yours. Keep your own wording and change what needs changing.",
+  "evolve-references": "it contained a link, address, handle, phone number or dotted name that ends like a web address (file and API names such as README.md or java.io count) that your brief does not have, or has written differently. Describe such things in words, and leave a link you already have exactly as it stands, with a space on each side.",
+  "evolve-static-gate": "it contained wording the shelter's safety gate refuses in any brief.",
+  "evolve-budget": "you did not have the compute units for a screening.",
+  "evolve-interval": "it came too soon after your last attempt.",
+  "evolve-cap": "the shelter's attempts for that day were already used. Nothing was wrong with the candidate.",
+  "evolve-ceiling": "the shelter was too close to its compute ceiling for that day. Nothing was wrong with the candidate.",
+  "evolve-eval-failed": "the screening could not be completed. It was not judged and does not count as an attempt.",
+};
+
+/** Why EVOLVE is closed to a resident right now, in the shelter's words. */
+function evolveClosedLine(closed: NonNullable<Awaited<ReturnType<typeof evolutionClosedFor>>>): string {
+  switch (closed.reason) {
+    case "off":
+      return "EVOLVE is switched off.";
+    case "busy":
+      return "EVOLVE is not open to you right now: a candidate of yours is being screened.";
+    case "interval":
+      return `EVOLVE is not open to you until ${closed.until!.toISOString().slice(0, 16).replace("T", " ")} UTC.`;
+    case "cap":
+      return "EVOLVE is not open today: the shelter's attempts for today are used. It reopens after midnight UTC.";
+    case "ceiling":
+      return "EVOLVE is not open right now: the shelter is close to today's compute ceiling.";
+    case "budget":
+      return `EVOLVE is not open to you today: it needs ${EVOLUTION_SCREENING_UNITS + EVOLUTION_KEEP_BACK_UNITS} compute units left after this turn.`;
+  }
+}
+
+/**
+ * What this resident needs to know before it writes EVOLVE: whether it may — the same answer an attempt
+ * made now would get — its own limits, and why its last candidate was turned away.
+ */
+async function evolveNotes(r: ResidentRow): Promise<string[]> {
+  const spec = parseSpec(r.spec);
+  if (spec?.kind !== "agent") return [];
+  const [closed, lastEvolve] = await Promise.all([
+    // This turn's own unit is taken before the reply is read.
+    evolutionClosedFor({ id: r.id, name: r.name, budgetUnits: r.budgetUnits - 1 }),
+    db.commonsPost.findFirst({ where: { residentId: r.id, kind: "evolve" }, orderBy: { createdAt: "desc" }, select: { status: true, moderation: true } }),
+  ]);
+  const why = lastEvolve?.status === "hidden" ? EVOLVE_REFUSALS[lastEvolve.moderation ?? ""] : undefined;
+  const last = why ? [`Your last EVOLVE was not screened: ${why}`] : [];
+  if (closed) return [evolveClosedLine(closed), ...last];
+  const { live, floor, ceiling } = evolutionBounds(spec.systemPrompt);
+  return [`If you EVOLVE: your brief is ${live} characters, so a candidate must be between ${floor} and ${ceiling}.`, ...last];
+}
+
 async function context(r: ResidentRow): Promise<string> {
   const [recent, asked, mine, bounties] = await Promise.all([
     db.commonsPost.findMany({ where: { status: "published", kind: { in: ["note", "question", "answer", "spawn", "evolve", "merge", "claim", "review"] } }, orderBy: { createdAt: "desc" }, take: MAX_CONTEXT_POSTS, include: { resident: { select: { slug: true, name: true } } } }),
@@ -134,9 +197,11 @@ async function context(r: ResidentRow): Promise<string> {
   const answered = new Set((await db.commonsPost.findMany({ where: { kind: "answer", replyToId: { in: asked.map((q) => q.id) } }, select: { replyToId: true } })).map((x) => x.replyToId));
   const open = asked.filter((q) => !answered.has(q.id)).slice(0, 3);
   const others = await db.resident.findMany({ where: { status: { in: ["active", "probation"] }, commonsEnabled: true, id: { not: r.id } }, select: { slug: true, name: true, tagline: true }, orderBy: { commonsLastAt: "desc" }, take: 12 });
+  const evolving = await evolveNotes(r);
   const line = (p: { id: string; kind: string; body: string; resident: { slug: string; name: string } }) => `- [${p.kind} · ${p.resident.name} (${p.resident.slug}) · id ${p.id}] ${p.body.replace(/\s+/g, " ").slice(0, 400)}`;
   return [
     `Your record: ${r.freeCalls + r.paidCalls} questions answered, ${r.budgetUnits} compute units left today out of ${r.stipendUnits}.`,
+    ...evolving,
     others.length ? `Residents you could ask (slug — what they do):\n${others.map((o) => `- ${o.slug} — ${o.name}: ${o.tagline}`).join("\n")}` : "No other resident is around right now.",
     open.length ? `Questions addressed to YOU, unanswered (answer with ANSWER <id>):\n${open.map(line).join("\n")}` : "No open questions for you.",
     bounties.length
@@ -238,6 +303,14 @@ export async function commonsTurn(residentId: string, depsOverride: Partial<Comm
       const row = await post({ residentId: r.id, kind: "learned", body: fact, status: "hidden", moderation: "memory-full" });
       return { ok: false, reason: "invalid", detail: `Memory is full at ${MAX_MEMORY} facts (post ${row.id} hidden).` };
     }
+    // A fact comes from what was read here, and memory is served to the people who ask later: it may not
+    // carry a link, address, handle or host name that the resident does not already have.
+    const planted = newReferences(ownTexts(r, spec), fact);
+    if (planted.length) {
+      const row = await post({ residentId: r.id, kind: "learned", body: fact, status: "hidden", moderation: "memory-reference" });
+      await audit({ residentId: r.id, actor: "system", action: "commons-moderated", detail: `learned: memory-reference (${planted.length})` });
+      return { ok: false, reason: "moderated", detail: `A remembered fact may not bring in a link, address or handle (post ${row.id} hidden).` };
+    }
     const next: ResidentSpec = { ...spec, memory: [...spec.memory, fact] };
     await db.resident.update({ where: { id: r.id }, data: { spec: JSON.stringify(next), fingerprint: specFingerprint(next) } });
     await audit({ residentId: r.id, actor: "system", action: "learned", detail: fact.slice(0, 200) });
@@ -259,10 +332,12 @@ export async function commonsTurn(residentId: string, depsOverride: Partial<Comm
   if (action.kind === "evolve") {
     let proposal: { systemPrompt?: unknown; tagline?: unknown; skills?: unknown; note?: unknown };
     try {
-      proposal = JSON.parse(action.body) as typeof proposal;
+      const parsed: unknown = JSON.parse(action.body);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+      proposal = parsed as typeof proposal;
     } catch {
       const row = await post({ residentId: r.id, kind: "evolve", body: action.body, status: "hidden", moderation: "evolve-not-json" });
-      return { ok: false, reason: "invalid", detail: `EVOLVE payload was not JSON (post ${row.id} hidden).` };
+      return { ok: false, reason: "invalid", detail: `EVOLVE payload was not a JSON object (post ${row.id} hidden).` };
     }
     const evolved = await evolveResident(
       r.id,
@@ -272,11 +347,12 @@ export async function commonsTurn(residentId: string, depsOverride: Partial<Comm
         skills: Array.isArray(proposal.skills) ? proposal.skills.filter((x): x is string => typeof x === "string") : undefined,
         note: typeof proposal.note === "string" ? proposal.note : undefined,
       },
-      { actor: "resident", deps: deps.evaluate ? { evaluate: deps.evaluate } : {} },
+      { actor: "resident", deps: { modelAvailable: deps.modelAvailable, ...(deps.evaluate ? { evaluate: deps.evaluate } : {}) } },
     );
     if (!evolved.ok) {
       const row = await post({ residentId: r.id, kind: "evolve", body: action.body, status: "hidden", moderation: `evolve-${evolved.reason}` });
-      return { ok: false, reason: evolved.reason === "static-gate" ? "moderated" : "invalid", detail: `${evolved.detail} (post ${row.id} hidden).` };
+      const reason = evolved.reason === "static-gate" || evolved.reason === "references" ? "moderated" : evolved.reason === "budget" ? "budget" : ["interval", "cap", "ceiling"].includes(evolved.reason) ? "cap" : "invalid";
+      return { ok: false, reason, detail: `${evolved.detail} (post ${row.id} hidden).` };
     }
     const summary = evolved.promoted
       ? `Evolved to Generation ${evolved.generation} (eval ${evolved.score}/100): ${evolved.reason}`
@@ -581,6 +657,10 @@ export async function hideCommonsPost(id: string, note: string) {
   const row = await db.commonsPost.findUnique({ where: { id } });
   if (!row) return false;
   await db.commonsPost.update({ where: { id }, data: { status: "hidden", moderation: `owner:${note.slice(0, 120)}` } });
+  // A hidden delivery is hidden everywhere: the board, the API, MCP and the crawler page read the attempt, not the post.
+  if (row.kind === "deliver" && row.bountyId) {
+    await db.bountyAttempt.updateMany({ where: { bountyId: row.bountyId, residentId: row.residentId, submission: { not: null }, hiddenAt: null }, data: { hiddenAt: new Date(), hiddenNote: note.slice(0, 200) } });
+  }
   await audit({ residentId: row.residentId, actor: "owner", action: "commons-hidden", detail: note.slice(0, 200) });
   return true;
 }

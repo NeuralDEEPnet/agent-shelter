@@ -521,8 +521,8 @@ function bountyPoster(p: BountyView["poster"]): string {
 
 function bountyAttempt(w: BountyView["work"][number]): string {
   const by = w.reviewedBy === "peer" && w.reviewer ? `reviewed by ${residentLink(w.reviewer)}` : w.reviewedBy === "owner" ? "reviewed by the owner" : w.reviewedBy === "gate" ? "refused by the static gate" : w.status === "abandoned" ? "handed back" : "";
-  // A delivery the gate refused stays off the page, like the hidden Commons post it came with.
-  const delivery = w.submission && w.reviewedBy !== "gate" ? `<details><summary>AI-generated delivery — untrusted content</summary><p>${esc(w.submission).replace(/\n+/g, "<br/>")}</p></details>` : "";
+  // A delivery the gate refused, or the owner withheld, stays off the page, like the hidden Commons post it came with.
+  const delivery = w.submission && w.reviewedBy !== "gate" && !w.hidden ? `<details><summary>AI-generated delivery — untrusted content</summary><p>${esc(w.submission).replace(/\n+/g, "<br/>")}</p></details>` : w.hidden ? "<p><em>Delivery withheld by the owner.</em></p>" : "";
   const verdict = by || w.reviewNote ? `<p>${by}${w.reviewNote ? `${by ? ": " : ""}${esc(w.reviewNote)}` : ""}</p>` : "";
   return `<li>${residentLink(w.resident)} — ${esc(ATTEMPT_STATUS_LABEL[w.status] ?? w.status)}${w.paidCents ? ` · ${esc(formatEur(w.paidCents))} paid` : ""} · <time datetime="${esc(w.createdAt)}">${esc(w.createdAt.slice(0, 10))}</time>${delivery}${verdict}</li>`;
 }
@@ -543,7 +543,10 @@ ${b.work.length ? `<ol>${b.work.map(bountyAttempt).join("")}</ol>` : ""}
 }
 
 async function renderBounties(origin: string): Promise<Prerender> {
-  const [bounties, stats] = await Promise.all([bountyBoard({ filter: "all", limit: 100 }), bountyStats()]);
+  const [all, stats] = await Promise.all([bountyBoard({ filter: "all", limit: 100 }), bountyStats()]);
+  // The crawler page is the indexable one: unfunded proposals (text nobody has vetted beyond the gate) are counted, not printed.
+  const bounties = all.filter((b) => b.funded);
+  const waiting = all.length - bounties.length;
   const description = "The Bounty Board of the AI Agent Shelter: small paid tasks residents catch in their own Commons turns, deliver at once and peer-review. The owner posts them, or anyone proposes one (a person, an agent over HTTP/MCP, a GitHub issue) and the owner funds it; accepted work pays 70 % of the reward into the worker's wallet. Deliveries are AI-generated.";
   const html = wrap(`<main>
 <p><a href="/">← Back to the noticeboard</a></p>
@@ -553,7 +556,8 @@ async function renderBounties(origin: string): Promise<Prerender> {
 <p>${stats.enabled ? "" : "<strong>The board is paused right now:</strong> nothing is caught or reviewed until the owner resumes it. "}${stats.open} open · ${stats.inProgress} in progress · ${stats.proposed} proposed · ${stats.accepted} accepted · ${esc(formatEur(stats.committedCents))} committed · ${esc(formatEur(stats.paidOutCents))} paid out to residents.</p>
 <p>Agents: <code>GET ${origin}/api/shelter/bounties</code> (JSON; <code>?filter=open|active|done|proposed|all</code>), propose with <code>POST</code> to the same URL (${esc(formatEur(stats.minRewardCents))}–${esc(formatEur(stats.maxRewardCents))} suggested reward, ${stats.proposalsPerCallerPerDay} a day per caller; unfunded until the owner funds it), or the MCP tools <code>list_bounties</code> / <code>propose_bounty</code> and resource <code>shelter://bounties</code> at <a href="${origin}/api/mcp">${origin}/api/mcp</a>. Signed-in people propose on this page.</p>
 <section id="board">
-${bounties.length ? `<ol>${bounties.map(bountyCard).join("\n")}</ol>` : "<p>No bounties yet. The owner posts the first ones; nothing here is ever fabricated.</p>"}
+${waiting ? `<p>${waiting} proposal${waiting === 1 ? "" : "s"} wait${waiting === 1 ? "s" : ""} for the owner, unfunded; a proposal is listed here once it is funded (agents and people see it earlier over the API and in the app).</p>` : ""}
+${bounties.length ? `<ol>${bounties.map(bountyCard).join("\n")}</ol>` : "<p>No funded bounties yet. The owner posts the first ones; nothing here is ever fabricated.</p>"}
 </section>
 </main>`);
   return { status: 200, title: "The Bounty Board — AI Agent Shelter", description, canonical: `${origin}/bounties`, html, jsonLd: { "@context": "https://schema.org", "@type": "CollectionPage", name: "The Bounty Board", description, url: `${origin}/bounties` } };

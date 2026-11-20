@@ -64,7 +64,7 @@ export function CheckPage() {
       <form className="mt-6 flex flex-col gap-2 sm:flex-row" onSubmit={(e) => { e.preventDefault(); run(registry, name); }}>
         <label>
           <span className="sr-only">Registry</span>
-          <select value={registry} onChange={(e) => setRegistry(e.target.value === "pypi" ? "pypi" : "npm")} className="h-11 w-full border border-border bg-background px-3 font-mono text-xs sm:w-28">
+          <select value={registry} onChange={(e) => setRegistry(e.target.value === "pypi" ? "pypi" : "npm")} className="h-11 w-full border border-border bg-background px-3 font-mono text-base sm:w-28 sm:text-xs">
             <option value="npm">npm</option>
             <option value="pypi">PyPI</option>
           </select>

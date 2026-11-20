@@ -162,8 +162,10 @@ model Bounty {
   posterName     String?
   /// Public source when it is a URL (a GitHub issue); otherwise an opaque caller or user key, never shown.
   posterRef      String?
-  /// Stable id from an external feed (e.g. "open3dj:bench:cap-pi5-case@2"); a re-proposal with the same id is the same bounty, a new version a new bounty.
-  externalId     String?   @unique
+  /// Stable id from an external feed (e.g. "open3dj:bench:cap-pi5-case@2"); a re-proposal with the same id FROM THE SAME POSTER is the same bounty, a new version a new bounty.
+  externalId     String?
+  /// `<server-derived poster scope>|<externalId>` — unique, so nobody can squat another feed's ids.
+  externalKey    String?   @unique
   attempts       Int       @default(0) // rejected deliveries so far
   maxAttempts    Int       @default(3)
   claimedById    String?
@@ -198,6 +200,9 @@ model BountyAttempt {
   unitsSpent  Int       @default(0)
   /// Gross cents credited to the worker's ledger when accepted (before the 70/20/10 split).
   paidCents   Int       @default(0)
+  /// Set by the owner: the delivery text is withheld on every surface (never deleted).
+  hiddenAt    DateTime?
+  hiddenNote  String?
   createdAt   DateTime  @default(now())
   submittedAt DateTime?
   reviewedAt  DateTime?
@@ -605,7 +610,7 @@ model ResidentGeneration {
   fingerprint String
   score       Int?
   baseScore   Int?
-  status      String   @default("promoted") // baseline | promoted | rejected | rolled_back
+  status      String   @default("promoted") // baseline | promoted | rejected | rolled_back — and two that are attempts, not generations: screening | failed
   note        String?
   reason      String?
   actor       String   @default("resident") // resident | owner

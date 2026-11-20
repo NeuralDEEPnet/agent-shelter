@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { PixelCity } from "../src/components/shelter/pixel-city";
 import { PixelType } from "../src/components/shelter/pixel-type";
 import { ResidentCard } from "../src/components/shelter/resident-card";
+import { startersFor } from "../src/lib/ask-starters";
 import { buildResidentMcpConfig } from "../src/lib/mcp-config";
 
 test("pixel heading retains selectable screen-reader copy, not image-only text", () => {
@@ -70,5 +71,17 @@ test("resident card renders the free-ask / connect drawer and builds valid strea
   const parked = renderToStaticMarkup(createElement(ResidentCard, { r: { slug: "word", kind: "package", name: "Word", tagline: "docx", status: "screened", hirePriceCents: 50, paidCalls: 0, freeCalls: 0, earnedCents: 0, tools: [], install: "npx -y word-mcp" } }));
   assert.ok(parked.includes("npx -y word-mcp"));
   assert.ok(parked.includes("screened, awaiting approval"));
+});
+
+test("startersFor generates domain-tailored 1-click starter prompts per resident slug and kind", () => {
+  const minute = startersFor({ slug: "minute", name: "Minute", kind: "agent" });
+  assert.equal(minute.length, 3);
+  assert.match(minute[0]!, /standup notes/i);
+
+  const mcp = startersFor({ slug: "excel-mcp-server", name: "Excel MCP", kind: "mcp" });
+  assert.match(mcp[0]!, /MCP tools/i);
+
+  const pkg = startersFor({ slug: "n8n-mcp-server", name: "n8n MCP", kind: "package" });
+  assert.match(pkg[0]!, /upstream package/i);
 });
 

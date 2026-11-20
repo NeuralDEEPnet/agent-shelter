@@ -14,6 +14,9 @@ process.env.SHELTER_TURNS_PER_MINUTE = "1000";
 process.env.SHELTER_CLEAN_APPROVAL = "false";
 process.env.SHELTER_COMMONS_TURNS_PER_DAY = "50";
 process.env.SHELTER_COMMONS_SPAWNS_PER_DAY = "1";
+// This suite proves the Commons loop; the limits on evolution itself are proven in verify-evolution-limits.test.ts.
+process.env.SHELTER_EVOLUTIONS_PER_DAY = "50";
+process.env.SHELTER_EVOLUTION_INTERVAL_DAYS = "0";
 
 const { db } = await import("../src/api/db");
 const shelter = await import("../src/api/services/shelter");
@@ -230,6 +233,8 @@ test("EVOLVE, MERGE, owner rollback and heredity lineage on résumés", async ()
   await db.commonsDay.upsert({ where: { day: new Date().toISOString().slice(0, 10) }, create: { day: new Date().toISOString().slice(0, 10) }, update: { spawns: 0, turns: 0 } });
 
   const evoA = await admit(`Evolver ${TAG}`);
+  // Screening a candidate is paid from the resident's own stipend, on top of the turn.
+  await db.resident.update({ where: { id: evoA.residentId }, data: { budgetUnits: 40, stipendUnits: 40 } });
   await db.intakeReview.create({
     data: {
       residentId: evoA.residentId,
@@ -273,7 +278,7 @@ test("EVOLVE, MERGE, owner rollback and heredity lineage on résumés", async ()
   // 2. EVOLVE that scores lower (85 < 91) is recorded as rejected and keeps Gen 2 live
   const turn2 = await commons.commonsTurn(evoA.residentId, {
     complete: complete(
-      `EVOLVE: {"systemPrompt":"You are Evolver ${TAG}, candidate 3 with a slightly weaker brief that does not beat generation 2.","tagline":"Weaker candidate tagline.","note":"Attempted brevity."}`,
+      `EVOLVE: {"systemPrompt":"You are Evolver ${TAG}, generation 2. You turn complex engineering specs into structured checklists and risk tables, a little more tersely than before.","tagline":"Weaker candidate tagline.","note":"Attempted brevity."}`,
     ),
     modelAvailable: () => true,
     evaluate: stubEval(85, 10),

@@ -1,6 +1,6 @@
 # Roadmap — from zero traction to a working loop
 
-**Date:** 2026-11-06. Replaces the priorities in `IMPROVEMENTS.md` (kept as history).
+**Date:** 2026-11-06 (updated 2026-11-20 — deployed GitHub `a7597aa` / `35623fa`: PRs #10, #11, #12 + bounty hardening, 0-credit direct Gemini primary engine, 1-click Home UX & 57-URL IndexNow 200 OK). Replaces the priorities in `IMPROVEMENTS.md` (kept as history).
 
 ## Diagnosis (seven lenses, each finding adversarially verified)
 
@@ -103,7 +103,9 @@ make in its turn, and a blind guess becomes a design loop.
    must be multi-tenant and sandboxed inside the shelter; days if it stays on the separate box.
 6. **One contract module.** Derive the MCP `surrender` input schema and the OpenAPI request body from
    the zod `specSchema` (`z.toJSONSchema`) so the advertised contract can never drift from validation;
-   add a discovery-drift test that regenerates the static cards and fails when committed files differ.
+   ~~add a discovery-drift test that regenerates the static cards and fails when committed files differ~~
+   (done 2026-11-20: `npm test` fails when a committed card differs from what `scripts/sync-discovery.ts`
+   writes, and importing the script no longer rewrites the cards).
 7. **Real usage signals.** Publish the last few owner-sampled Q&A per resident (not free-ask questions,
    which belong to the askers), ok-rate from `HireCall`, and record the stipend's real cost in the ledger.
 8. **Playground.** Either make it call a model (it is the home page's third button) or move it behind a

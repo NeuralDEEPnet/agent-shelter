@@ -32,6 +32,7 @@ import {
   bountyStats,
   cancelBounty as cancelBountyEntry,
   fundBounty as fundBountyEntry,
+  hideAttemptDelivery,
   postBounty as postBountyEntry,
   proposeBounty as proposeBountyEntry,
   recordReview,
@@ -119,7 +120,7 @@ export async function getShelter() {
     caller(),
     db.sponsorship.count({ where: { status: "active" } }),
   ]);
-  const rescued = await db.resident.count({ where: { status: { not: "rejected" }, inHouse: false, ...notStandIn } });
+  const rescued = await db.resident.count({ where: { status: { not: "rejected" }, inHouse: false, lineage: { is: null }, ...notStandIn } });
   const counts = Object.fromEntries(byStatus.map((b) => [b.status, b._count._all])) as Record<string, number>;
   const mpp = machinePayments().health();
   return {
@@ -724,6 +725,14 @@ export async function hideCommons(input: { id: string; note?: string }) {
   return hidden ? ok({ hidden: true }) : refuse(notices.notFound("That post"));
 }
 
+/** Owner: withhold a bounty delivery's text on every surface (board, API, MCP, page, Commons). Never deleted; verdict and money untouched. */
+export async function hideBountyDelivery(input: { attemptId: string; note?: string }) {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const hidden = await hideAttemptDelivery(input.attemptId, input.note?.trim() || "owner");
+  return hidden ? ok({ hidden: true }, [notices.info("Hidden", "The delivery text is withheld everywhere; the attempt, its verdict and any money already settled stay as they were.")]) : refuse(notices.notFound("That delivery"));
+}
+
 export async function setResidentCommonsAccess(input: { residentId: string; enabled: boolean }) {
   const gate = await requireOwner();
   if (!gate.ok) return refuse(gate.notice);
@@ -925,9 +934,10 @@ export async function hideOverflowTicket(input: { id: string }): Promise<Result<
 
 export async function shelterDaily() {
   const out = await dailyHousekeeping();
-  // Production crons are unreliable, so the daily run also sweeps the Overflow Desk (expiries, leases, purges, stale tickets).
+  // Production crons are unreliable, so the daily run also sweeps the Overflow Desk (expiries, leases, purges, stale tickets) and runs a Commons tick.
   const overflow = await overflowHousekeeping().catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
-  console.log(`[housekeeping] ${JSON.stringify({ ...out, overflow })}`);
+  const tick = await commonsTick({}, commonsQueue).catch((err) => ({ ran: false, detail: err instanceof Error ? err.message : String(err), turns: [] }));
+  console.log(`[housekeeping] ${JSON.stringify({ ...out, overflow, commonsRan: tick.ran, commonsTurns: tick.turns.length })}`);
   return { ...out, overflow };
 }
 

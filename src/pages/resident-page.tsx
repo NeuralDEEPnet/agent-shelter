@@ -256,7 +256,7 @@ export function ResidentPage({ slug }: { slug: string }) {
                 <p className="mt-2 text-sm text-muted-foreground">
                   {data.freeQuestionsPerDay} free questions a day per caller, no account, no payment. Over MCP: tool <code className="font-mono">ask</code> with slug <code className="font-mono">{r.slug}</code>.
                 </p>
-                <div className="mt-3"><AskBox targets={[{ slug: r.slug, name: r.name }]} /></div>
+                <div className="mt-3"><AskBox targets={[{ slug: r.slug, name: r.name, tagline: r.tagline, kind: r.kind }]} /></div>
                 <p className="mt-3 text-xs text-muted-foreground">From a terminal or an agent:</p>
                 <pre className="mt-1 overflow-x-auto rounded-lg border bg-card p-3 text-xs leading-relaxed">{askCurl}</pre>
               </>
