@@ -1,7 +1,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { buildPayload, isBountyIssue, titleOf, rewardOf, run } = require("./bounty-intake.cjs");
+const { buildPayload, isBountyIssue, titleOf, rewardOf, run, LANDED_MARKER } = require("./bounty-intake.cjs");
 
 const body = `### Brief
 
@@ -75,13 +75,14 @@ test("only bounty issues are picked up", () => {
   assert.equal(isBountyIssue({ title: "[Surrender] Minute", labels: ["surrender"] }), false);
 });
 
-function harness(response) {
+function harness(response, priorComments = []) {
   const calls = { comments: [], labels: [], fetch: [] };
   const github = {
     rest: {
       issues: {
         createComment: async ({ body }) => calls.comments.push(body),
         addLabels: async ({ labels }) => calls.labels.push(...labels),
+        listComments: async () => ({ data: priorComments.map((body) => ({ body })) }),
       },
     },
   };
@@ -107,7 +108,21 @@ test("201: the proposal is on the board, unfunded; the comment carries the board
   assert.match(calls.comments[0], /3\.00 €/);
   assert.match(calls.comments[0], /unfunded/);
   assert.doesNotMatch(calls.comments[0], /is now funded|has been funded|will be paid|reward is committed/i, "never claim money moved on a proposal");
+  assert.ok(calls.comments[0].includes(LANDED_MARKER), "the landed comment carries the idempotency marker");
   assert.deepEqual(calls.labels, ["landed"]);
+});
+
+test("a second run for the same issue (opened + labeled, or the label re-added) finds the landed marker and posts nothing", async () => {
+  const { calls, args } = harness({ status: 201, json: { accepted: true, id: "cmx1", status: "proposed" } }, [`**Welcome note** is on the board, unfunded.\n\n${LANDED_MARKER}`]);
+  await run(args);
+  assert.equal(calls.fetch.length, 0, "no second proposal is posted");
+  assert.deepEqual(calls.comments, []);
+  assert.deepEqual(calls.labels, []);
+  // A refusal comment is not the marker: the retry after an edit still posts.
+  const retry = harness({ status: 201, json: { accepted: true, id: "cmx2", status: "proposed", title: "Welcome note for new residents", board: "https://shelter.test/bounties#cmx2", api: "https://shelter.test/api/shelter/bounties/cmx2", duplicate: false } }, ["The shelter did not take this proposal (HTTP 400)."]);
+  await run(retry.args);
+  assert.equal(retry.calls.fetch.length, 1);
+  assert.deepEqual(retry.calls.labels, ["landed"]);
 });
 
 test("200 duplicate (same externalId): nothing new was created, still landed", async () => {
