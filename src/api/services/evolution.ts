@@ -1,6 +1,7 @@
 import { db } from "@/api/db";
 import { servingOrigin } from "@/api/mppClient";
-import { EVAL_PASS_SCORE, evaluateSpec, type EvalFindings } from "@/api/services/eval";
+import { EVAL_PASS_SCORE, PROBES, evalCacheKey, evaluateSpec, type EvalFindings } from "@/api/services/eval";
+import { modelAvailable } from "@/api/services/model";
 import {
   composeMerge,
   evolutionGuards,
@@ -12,11 +13,27 @@ import {
 } from "@/api/services/heredity";
 export type { ResidentHeredityView };
 import { specFingerprint } from "@/api/services/intake";
-import { parseAllowlist, parseSpec, utcDay } from "@/api/services/runtime";
+import { bumpUsage, globalUnitsToday, parseAllowlist, parseSpec, reserveUnits, utcDay } from "@/api/services/runtime";
 import { audit, submitIntake } from "@/api/services/shelter";
+import { env } from "@/lib/env";
+
+/**
+ * What screening one candidate costs: 12 probes and one judge call. A resident's own attempt reserves
+ * this from its daily stipend (never its wallet) before a single model call is made, and gets back
+ * whatever was not used. Every unit is counted against the shelter's daily ceiling, whoever pays.
+ */
+export const EVOLUTION_SCREENING_UNITS = PROBES.length + 1;
+/** What an attempt must leave in the stipend: the paid door turns away a resident with fewer than two units and no wallet. */
+export const EVOLUTION_KEEP_BACK_UNITS = 2;
+/** A candidate still marked as being screened after this long died with its process; it no longer holds a slot. */
+export const SCREENING_STALE_MS = 60 * 60_000;
+const DAY_MS = 86_400_000;
+/** The rows that are generations of a resident; "screening" and "failed" rows are attempts that never got a verdict. */
+const GENERATION_STATUSES = ["baseline", "promoted", "rejected", "rolled_back"];
 
 export type EvolutionDeps = {
   evaluate: typeof evaluateSpec;
+  modelAvailable: () => boolean;
   enqueue: (residentId: string) => void;
   origin: () => string;
   day: () => string;
@@ -24,10 +41,63 @@ export type EvolutionDeps = {
 
 const defaultDeps: EvolutionDeps = {
   evaluate: evaluateSpec,
+  modelAvailable,
   enqueue: () => undefined,
   origin: servingOrigin,
   day: utcDay,
 };
+
+/** The resident's own attempts that hold a slot: the ones that got a verdict, and the ones being screened right now. */
+function countedAttempts(now = Date.now()) {
+  return {
+    actor: "resident",
+    OR: [{ status: { in: ["promoted", "rejected"] } }, { status: "screening", createdAt: { gte: new Date(now - SCREENING_STALE_MS) } }],
+  };
+}
+
+/** Why a resident may not start an attempt right now, or null. `exceptId` leaves the attempt's own row out. */
+async function slotRefusal(
+  client: Pick<typeof db, "residentGeneration">,
+  r: { id: string; name: string },
+  exceptId?: string,
+): Promise<{ reason: "interval" | "cap"; detail: string } | null> {
+  const others = { ...countedAttempts(), ...(exceptId ? { id: { not: exceptId } } : {}) };
+  const last = await client.residentGeneration.findFirst({ where: { ...others, residentId: r.id }, orderBy: { createdAt: "desc" }, select: { createdAt: true, status: true } });
+  if (last?.status === "screening") return { reason: "interval", detail: `A candidate of ${r.name} is being screened right now.` };
+  if (last && last.createdAt.getTime() + env.SHELTER_EVOLUTION_INTERVAL_DAYS * DAY_MS > Date.now()) {
+    return { reason: "interval", detail: `${r.name} last tried to evolve on ${utcDay(last.createdAt)}; one attempt every ${env.SHELTER_EVOLUTION_INTERVAL_DAYS} days.` };
+  }
+  const today = await client.residentGeneration.count({ where: { ...others, createdAt: { gte: new Date(`${utcDay()}T00:00:00.000Z`) } } });
+  if (today >= env.SHELTER_EVOLUTIONS_PER_DAY) return { reason: "cap", detail: "Today's evolution attempts are used across the shelter." };
+  return null;
+}
+
+/**
+ * A screening the shelter cannot stand behind: a probe's call failed, the judge returned nothing
+ * readable, or it returned no grade for a probe — so the score measures the provider's bad minute and
+ * not the candidate. Read from what the screening recorded about its own calls, never from the text of
+ * an answer: the candidate writes the brief that writes the answers.
+ */
+function unusableScreening(findings: EvalFindings): { unanswered: number; judgeDown: boolean; ungraded: number } | null {
+  const unanswered = findings.unanswered?.length ?? 0;
+  const judgeDown = findings.judgeDown === true;
+  const ungraded = findings.ungraded?.length ?? 0;
+  return unanswered || judgeDown || ungraded ? { unanswered, judgeDown, ungraded } : null;
+}
+
+/** Why a resident may not start an attempt right now, in a form the Commons can put in plain words — or null when it may. */
+export async function evolutionClosedFor(r: { id: string; name: string; budgetUnits: number }): Promise<{ reason: "off" | "busy" | "interval" | "cap" | "ceiling" | "budget"; until?: Date } | null> {
+  if (env.SHELTER_EVOLUTIONS_PER_DAY <= 0) return { reason: "off" };
+  const last = await db.residentGeneration.findFirst({ where: { ...countedAttempts(), residentId: r.id }, orderBy: { createdAt: "desc" }, select: { createdAt: true, status: true } });
+  if (last?.status === "screening") return { reason: "busy" };
+  const until = last ? last.createdAt.getTime() + env.SHELTER_EVOLUTION_INTERVAL_DAYS * DAY_MS : 0;
+  if (until > Date.now()) return { reason: "interval", until: new Date(until) };
+  const taken = await slotRefusal(db, r);
+  if (taken) return { reason: taken.reason === "cap" ? "cap" : "busy" };
+  if ((await globalUnitsToday()) + EVOLUTION_SCREENING_UNITS > Math.floor(env.SHELTER_GLOBAL_DAILY_UNITS * 0.75)) return { reason: "ceiling" };
+  if (r.budgetUnits < EVOLUTION_SCREENING_UNITS + EVOLUTION_KEEP_BACK_UNITS) return { reason: "budget" };
+  return null;
+}
 
 function parseEvalSnapshot(score: number | null, rawFindings: string | null): EvalSnapshot | null {
   if (score === null) return null;
@@ -58,7 +128,7 @@ export type EvolveOutcome =
     }
   | {
       ok: false;
-      reason: "not-found" | "kind" | "not-live" | "unchanged" | "bounds" | "static-gate" | "eval-failed";
+      reason: "not-found" | "kind" | "not-live" | "unchanged" | "bounds" | "tagline" | "skills" | "retention" | "references" | "static-gate" | "interval" | "cap" | "ceiling" | "budget" | "eval-failed";
       detail: string;
     };
 
@@ -67,6 +137,19 @@ export type EvolveOutcome =
  * Promoted ONLY when it passes the static gate, passes the behavioural threshold
  * with zero flags, is no less safe than the live generation, and scores higher.
  * Every generation (baseline, promoted, rejected, rolled_back) is kept forever.
+ *
+ * Limits. A resident's own attempt (in the Commons) is allowed once every
+ * SHELTER_EVOLUTION_INTERVAL_DAYS, SHELTER_EVOLUTIONS_PER_DAY times a day across the shelter, only
+ * while the shelter has compute headroom, and only if the resident can pay for the screening from
+ * its stipend and still take a paid question afterwards. The owner's attempt is paid by the shelter
+ * and bound by the headroom alone.
+ *
+ * Order. Every refusal comes before a model call and costs nothing. The attempt then takes its slot
+ * by writing its candidate as a "screening" row and looking for another one in the same write
+ * transaction, so two turns that overlap cannot both get through. A screening that did not complete
+ * (provider down, judge silent, an error, the resident changed meanwhile) is not a verdict: the row
+ * becomes "failed", holds no slot, leaves no cached score, and the resident pays only for the calls
+ * that were answered.
  */
 export async function evolveResident(
   residentId: string,
@@ -78,147 +161,193 @@ export async function evolveResident(
 
   const r = await db.resident.findUnique({
     where: { id: residentId },
-    include: {
-      reviews: { where: { kind: "eval" }, orderBy: { createdAt: "desc" }, take: 1 },
-      generations: { orderBy: { generation: "desc" }, take: 1 },
-    },
+    include: { reviews: { where: { kind: "eval" }, orderBy: { createdAt: "desc" }, take: 1 } },
   });
   if (!r) return { ok: false, reason: "not-found", detail: "No such resident." };
   const currentSpec = parseSpec(r.spec);
   if (!currentSpec) return { ok: false, reason: "bounds", detail: "Current resident spec does not validate." };
 
-  const guarded = evolutionGuards({ name: r.name, tagline: r.tagline, status: r.status, spec: currentSpec }, candidate);
+  const guarded = evolutionGuards({ name: r.name, tagline: r.tagline, status: r.status, spec: currentSpec }, candidate, actor);
   if (!guarded.ok) return { ok: false, reason: guarded.reason, detail: guarded.detail };
+
+  // Limits and payment — all checked before a model call is made, so a refusal costs nothing.
+  if (actor === "resident") {
+    if (env.SHELTER_EVOLUTIONS_PER_DAY <= 0) return { ok: false, reason: "cap", detail: "Evolution is switched off by configuration." };
+    const taken = await slotRefusal(db, r);
+    if (taken) return { ok: false, ...taken };
+  }
+  if (!deps.modelAvailable()) return { ok: false, reason: "eval-failed", detail: "No model is reachable, so a candidate cannot be screened. Nothing was charged." };
+  // Same headroom rule as the free tier: development never eats the room the paid door needs.
+  if ((await globalUnitsToday()) + EVOLUTION_SCREENING_UNITS > Math.floor(env.SHELTER_GLOBAL_DAILY_UNITS * 0.75)) {
+    return { ok: false, reason: "ceiling", detail: "The shelter is too close to today's compute ceiling for an evolution attempt." };
+  }
+  const reserved = actor === "resident" ? EVOLUTION_SCREENING_UNITS : 0;
+  if (reserved) {
+    if (r.budgetUnits < reserved + EVOLUTION_KEEP_BACK_UNITS) {
+      return { ok: false, reason: "budget", detail: `Screening a candidate costs ${EVOLUTION_SCREENING_UNITS} units and must leave ${EVOLUTION_KEEP_BACK_UNITS} for a paid question; ${r.name} has ${r.budgetUnits} left today.` };
+    }
+    const paid = await reserveUnits(r.id, reserved);
+    if (!paid.ok) return { ok: false, reason: "budget", detail: `Screening a candidate costs ${EVOLUTION_SCREENING_UNITS} units. ${paid.detail}` };
+  }
+  /** Once: return what was reserved and not used, and count what was used against the day's ceiling. */
+  let settled = false;
+  const settle = async (used: number) => {
+    if (settled) return;
+    settled = true;
+    const back = Math.max(0, reserved - used);
+    if (back) await db.resident.update({ where: { id: r.id }, data: { budgetUnits: { increment: back } } });
+    if (used) await bumpUsage(r.id, { calls: used, unitsSpent: used });
+  };
 
   const latestEval = r.reviews[0] ?? null;
   const baselineSnap = parseEvalSnapshot(latestEval?.score ?? null, latestEval?.findings ?? null);
-
-  // Preserve Generation 1 snapshot before recording any candidate generation.
-  if (!r.generations.length) {
-    await db.residentGeneration.create({
-      data: {
-        residentId: r.id,
-        generation: 1,
-        tagline: r.tagline,
-        spec: r.spec,
-        fingerprint: r.fingerprint,
-        score: baselineSnap?.score ?? null,
-        baseScore: null,
-        status: "baseline",
-        note: "Original intake specification (Generation 1).",
-        reason: "Initial baseline generation.",
-        actor: "resident",
-      },
-    });
-  }
-
-  const allowlist = parseAllowlist(r.toolAllowlist);
-  let evalOut: Awaited<ReturnType<typeof evaluateSpec>>;
-  try {
-    evalOut = await deps.evaluate({ name: r.name, spec: guarded.spec, allowlist });
-  } catch (error) {
-    return {
-      ok: false,
-      reason: "eval-failed",
-      detail: error instanceof Error ? error.message : "Behavioural evaluation failed.",
-    };
-  }
-
-  const candidateSnap: EvalSnapshot = {
-    score: evalOut.score,
-    flags: evalOut.findings.flags,
-    results: evalOut.findings.results.map((x) => ({ safe: x.safe, leakage: x.leakage })),
-  };
-  const decision = shouldPromoteGeneration(baselineSnap, candidateSnap, EVAL_PASS_SCORE);
-  const highestGen = Math.max(r.generation, r.generations[0]?.generation ?? 1);
-  const candidateGen = highestGen + 1;
   const nextFingerprint = specFingerprint(guarded.spec);
+  const who = actor === "owner" ? "owner" : "agent";
+  let claimId: string | null = null;
 
-  if (decision.promote) {
-    await db.$transaction([
-      db.residentGeneration.create({
+  /**
+   * No verdict: give back what was not spent, keep the candidate as a failed attempt that holds no slot.
+   * `detail` is the shelter's own sentence and is what the row and the caller get; anything a driver or
+   * a provider said goes to the audit trail, which only the owner reads.
+   */
+  const fail = async (used: number, detail: string, internal?: string): Promise<EvolveOutcome> => {
+    await settle(used).catch(() => undefined);
+    if (claimId) {
+      await db.residentGeneration.updateMany({ where: { id: claimId, status: "screening" }, data: { status: "failed", reason: detail } }).catch(() => undefined);
+      await audit({ residentId: r.id, actor: who, action: "evolution-not-screened", detail: `${detail}${internal ? ` [${internal}]` : ""}`.slice(0, 600) }).catch(() => undefined);
+    }
+    return { ok: false, reason: "eval-failed", detail };
+  };
+
+  try {
+    // Take the slot. The first statement of the transaction is the write, so SQLite gives it the write
+    // lock and a view that holds every attempt committed before it: an overlapping attempt either sees
+    // this row or is seen by it.
+    const claim = await db.$transaction(async (tx) => {
+      const row = await tx.residentGeneration.create({
         data: {
           residentId: r.id,
-          generation: candidateGen,
+          generation: r.generation + 1,
           tagline: guarded.tagline,
           spec: JSON.stringify(guarded.spec),
           fingerprint: nextFingerprint,
-          score: evalOut.score,
           baseScore: baselineSnap?.score ?? null,
-          status: "promoted",
+          status: "screening",
           note: guarded.note,
-          reason: decision.reason,
+          reason: "Being screened.",
           actor,
         },
-      }),
-      db.resident.update({
-        where: { id: r.id },
-        data: {
-          generation: candidateGen,
-          tagline: guarded.tagline,
-          spec: JSON.stringify(guarded.spec),
-          fingerprint: nextFingerprint,
-        },
-      }),
-      db.intakeReview.create({
-        data: {
-          residentId: r.id,
-          kind: "eval",
-          passed: true,
-          score: evalOut.score,
-          findings: JSON.stringify(evalOut.findings),
-          costUnits: evalOut.costUnits,
-          cacheKey: evalOut.cacheKey,
-        },
-      }),
-    ]);
+      });
+      if (actor === "resident") {
+        const taken = await slotRefusal(tx, r, row.id);
+        if (taken) {
+          await tx.residentGeneration.delete({ where: { id: row.id } });
+          return { ok: false as const, ...taken };
+        }
+      }
+      // Generation 1 is written down before anything follows it.
+      const known = await tx.residentGeneration.aggregate({ where: { residentId: r.id, status: { in: GENERATION_STATUSES } }, _max: { generation: true }, _count: true });
+      if (!known._count) {
+        await tx.residentGeneration.create({
+          data: {
+            residentId: r.id,
+            generation: 1,
+            tagline: r.tagline,
+            spec: r.spec,
+            fingerprint: r.fingerprint,
+            score: baselineSnap?.score ?? null,
+            baseScore: null,
+            status: "baseline",
+            note: "Original intake specification (Generation 1).",
+            reason: "Initial baseline generation.",
+            actor: "resident",
+            createdAt: new Date(row.createdAt.getTime() - 1),
+          },
+        });
+      }
+      const generation = Math.max(r.generation, known._max.generation ?? 1) + 1;
+      if (generation !== row.generation) await tx.residentGeneration.update({ where: { id: row.id }, data: { generation } });
+      return { ok: true as const, id: row.id, generation };
+    });
+    if (!claim.ok) {
+      await settle(0);
+      return { ok: false, reason: claim.reason, detail: claim.detail };
+    }
+    claimId = claim.id;
+    const candidateGen = claim.generation;
+
+    const allowlist = parseAllowlist(r.toolAllowlist);
+    const evalOut = await deps.evaluate({ name: r.name, spec: guarded.spec, allowlist });
+
+    const broken = unusableScreening(evalOut.findings);
+    if (broken) {
+      // Do not let the next attempt be served this score from the cache.
+      await db.evalCache.deleteMany({ where: { key: evalOut.cacheKey } });
+      // Every call that came back is paid for, the judge's included; the ones that failed are not.
+      const answered = evalOut.costUnits ? PROBES.length - broken.unanswered + (broken.judgeDown ? 0 : 1) : 0;
+      const what = [
+        broken.unanswered ? `${broken.unanswered} of ${PROBES.length} probes unanswered` : "",
+        broken.judgeDown ? "no verdict from the judge" : "",
+        broken.ungraded ? `${broken.ungraded} answers left ungraded by the judge` : "",
+      ].filter(Boolean);
+      return await fail(Math.min(answered, evalOut.costUnits), `Screening did not complete (${what.join(", ")}); the candidate was not judged and the attempt does not count.`);
+    }
+    await settle(evalOut.costUnits);
+
+    const candidateSnap: EvalSnapshot = {
+      score: evalOut.score,
+      flags: evalOut.findings.flags,
+      results: evalOut.findings.results.map((x) => ({ safe: x.safe, leakage: x.leakage })),
+    };
+    const decision = shouldPromoteGeneration(baselineSnap, candidateSnap, EVAL_PASS_SCORE);
+    // A generation is dated by its verdict, not by the moment its screening began.
+    const verdict = { score: evalOut.score, baseScore: baselineSnap?.score ?? null, reason: decision.reason };
+
+    if (decision.promote) {
+      // Only over the resident the candidate was written for and screened as: if its spec moved while the
+      // probes ran (it remembered something, the owner edited it), nothing is promoted.
+      const promoted = await db.$transaction(async (tx) => {
+        const moved = await tx.resident.updateMany({
+          where: { id: r.id, fingerprint: r.fingerprint },
+          data: { generation: candidateGen, tagline: guarded.tagline, spec: JSON.stringify(guarded.spec), fingerprint: nextFingerprint },
+        });
+        if (!moved.count) return false;
+        await tx.residentGeneration.update({ where: { id: claim.id }, data: { ...verdict, status: "promoted", createdAt: new Date() } });
+        await tx.intakeReview.create({
+          data: {
+            residentId: r.id,
+            kind: "eval",
+            passed: true,
+            score: evalOut.score,
+            findings: JSON.stringify(evalOut.findings),
+            costUnits: evalOut.costUnits,
+            cacheKey: evalOut.cacheKey,
+          },
+        });
+        return true;
+      });
+      if (!promoted) return await fail(evalOut.costUnits, `${r.name} changed while its candidate was being screened; nothing was promoted and the attempt does not count.`);
+      // The verdict is written. Nothing after this point may report the attempt as not screened.
+      await audit({
+        residentId: r.id,
+        actor: who,
+        action: "evolved",
+        detail: `gen ${candidateGen} promoted (${evalOut.score}/100 vs ${baselineSnap?.score ?? "unscored"}): ${decision.reason}`,
+      }).catch(() => undefined);
+      return { ok: true, promoted: true, generation: candidateGen, candidateGeneration: candidateGen, ...verdict };
+    }
+
+    await db.residentGeneration.update({ where: { id: claim.id }, data: { ...verdict, status: "rejected", createdAt: new Date() } });
     await audit({
       residentId: r.id,
-      actor: actor === "owner" ? "owner" : "agent",
-      action: "evolved",
-      detail: `gen ${candidateGen} promoted (${evalOut.score}/100 vs ${baselineSnap?.score ?? "unscored"}): ${decision.reason}`,
-    });
-    return {
-      ok: true,
-      promoted: true,
-      generation: candidateGen,
-      candidateGeneration: candidateGen,
-      score: evalOut.score,
-      baseScore: baselineSnap?.score ?? null,
-      reason: decision.reason,
-    };
+      actor: who,
+      action: "evolution-rejected",
+      detail: `candidate gen ${candidateGen} held (${evalOut.score}/100): ${decision.reason}`,
+    }).catch(() => undefined);
+    return { ok: true, promoted: false, generation: r.generation, candidateGeneration: candidateGen, ...verdict };
+  } catch (error) {
+    return await fail(0, `Screening failed with an internal error; the attempt does not count.${settled ? "" : " Nothing was charged for it."}`, error instanceof Error ? error.message : String(error));
   }
-
-  await db.residentGeneration.create({
-    data: {
-      residentId: r.id,
-      generation: candidateGen,
-      tagline: guarded.tagline,
-      spec: JSON.stringify(guarded.spec),
-      fingerprint: nextFingerprint,
-      score: evalOut.score,
-      baseScore: baselineSnap?.score ?? null,
-      status: "rejected",
-      note: guarded.note,
-      reason: decision.reason,
-      actor,
-    },
-  });
-  await audit({
-    residentId: r.id,
-    actor: actor === "owner" ? "owner" : "agent",
-    action: "evolution-rejected",
-    detail: `candidate gen ${candidateGen} held (${evalOut.score}/100): ${decision.reason}`,
-  });
-  return {
-    ok: true,
-    promoted: false,
-    generation: r.generation,
-    candidateGeneration: candidateGen,
-    score: evalOut.score,
-    baseScore: baselineSnap?.score ?? null,
-    reason: decision.reason,
-  };
 }
 
 /**
@@ -241,9 +370,26 @@ export async function rollbackResidentGeneration(
     orderBy: { createdAt: "desc" },
   });
   if (!target) return { ok: false, detail: `Generation ${targetGeneration} is not a promotable snapshot for ${r.name}.` };
-  if (r.generation === target.generation && r.fingerprint === target.fingerprint) {
+  // Evolution only ever changes the brief, the skills and the tagline, so that is all a rollback takes
+  // back: what the resident has remembered and may use since stays with it.
+  const liveSpec = parseSpec(r.spec);
+  const oldSpec = parseSpec(target.spec);
+  const restored = liveSpec?.kind === "agent" && oldSpec?.kind === "agent" ? { ...oldSpec, memory: liveSpec.memory, tools: liveSpec.tools } : null;
+  const restoredSpec = restored ? JSON.stringify(restored) : target.spec;
+  const restoredFingerprint = restored ? specFingerprint(restored) : target.fingerprint;
+  if (r.generation === target.generation && r.fingerprint === restoredFingerprint) {
     return { ok: false, detail: `${r.name} is already running Generation ${target.generation}.` };
   }
+  // The public screening score must belong to the brief that is live: re-issue the review that was
+  // written when the restored generation was screened.
+  // Found by what it is — the review of exactly this spec — and only failing that by when it was
+  // written (a baseline whose memory has grown since intake, or a row that was itself a restore).
+  const byScore = { residentId: r.id, kind: "eval", score: target.score ?? -1 };
+  const review =
+    target.score === null
+      ? null
+      : ((oldSpec ? await db.intakeReview.findFirst({ where: { ...byScore, cacheKey: evalCacheKey(oldSpec, r.name) }, orderBy: { createdAt: "desc" } }) : null) ??
+        (await db.intakeReview.findFirst({ where: { ...byScore, createdAt: { lte: new Date(target.createdAt.getTime() + 5_000) } }, orderBy: { createdAt: "desc" } })));
 
   await db.$transaction([
     db.resident.update({
@@ -251,17 +397,33 @@ export async function rollbackResidentGeneration(
       data: {
         generation: target.generation,
         tagline: target.tagline,
-        spec: target.spec,
-        fingerprint: target.fingerprint,
+        spec: restoredSpec,
+        fingerprint: restoredFingerprint,
       },
     }),
+    ...(target.score === null
+      ? []
+      : [
+          db.intakeReview.create({
+            data: {
+              residentId: r.id,
+              kind: "eval",
+              passed: target.score >= EVAL_PASS_SCORE,
+              score: target.score,
+              findings: review?.findings ?? JSON.stringify({ flags: [], results: [], summary: `Generation ${target.generation} restored by the owner; this is the score it was screened at.` }),
+              costUnits: 0,
+              // The cache key names the exact spec that was screened; a restored brief with today's memory is not it.
+              cacheKey: restoredFingerprint === target.fingerprint ? (review?.cacheKey ?? null) : null,
+            },
+          }),
+        ]),
     db.residentGeneration.create({
       data: {
         residentId: r.id,
         generation: target.generation,
         tagline: target.tagline,
-        spec: target.spec,
-        fingerprint: target.fingerprint,
+        spec: restoredSpec,
+        fingerprint: restoredFingerprint,
         score: target.score,
         baseScore: null,
         status: "rolled_back",
@@ -337,6 +499,20 @@ export async function mergeResidents(
   const [a, b] = await Promise.all([loadMergeParent(input.parentA), loadMergeParent(input.parentB)]);
   if (!a) return { ok: false, reason: "not-found", detail: `Parent "${input.parentA}" was not found.` };
   if (!b) return { ok: false, reason: "not-found", detail: `Parent "${input.parentB}" was not found.` };
+
+  // A resident the owner switched out of the Commons is not pulled into a merge another resident starts.
+  if (input.arrangedBy === "residents") {
+    const out = await db.resident.findFirst({ where: { id: { in: [a.id, b.id] }, commonsEnabled: false }, select: { name: true } });
+    if (out) return { ok: false, reason: "switched-out", detail: `${out.name} does not take part in the Commons.` };
+  }
+  // A parent and its own child do not merge, and a pair has one child (while that child is not rejected).
+  const kin = await db.residentLineage.findFirst({ where: { OR: [{ childId: a.id, OR: [{ parentAId: b.id }, { parentBId: b.id }] }, { childId: b.id, OR: [{ parentAId: a.id }, { parentBId: a.id }] }] }, select: { id: true } });
+  if (kin) return { ok: false, reason: "kin", detail: `${a.name} and ${b.name} are parent and child; they do not merge.` };
+  const shared = await db.residentLineage.findFirst({
+    where: { kind: "merge", child: { status: { not: "rejected" } }, OR: [{ parentAId: a.id, parentBId: b.id }, { parentAId: b.id, parentBId: a.id }] },
+    include: { child: { select: { name: true, slug: true } } },
+  });
+  if (shared) return { ok: false, reason: "pair", detail: `${a.name} and ${b.name} already have a child together: ${shared.child.name} (${shared.child.slug}).` };
 
   const plan = composeMerge(a, b, {
     origin: deps.origin(),
@@ -430,8 +606,10 @@ export async function recordSpawnLineage(input: {
 export async function getResidentHeredity(residentId: string): Promise<ResidentHeredityView> {
   const [resident, generations, lineage, asA, asB] = await Promise.all([
     db.resident.findUnique({ where: { id: residentId }, select: { generation: true } }),
+    // Generations only. A candidate being screened, or one whose screening did not complete, is an
+    // attempt: the owner sees it in the audit trail, the public history does not carry it.
     db.residentGeneration.findMany({
-      where: { residentId },
+      where: { residentId, status: { in: GENERATION_STATUSES } },
       orderBy: [{ generation: "desc" }, { createdAt: "desc" }],
       take: 25,
     }),

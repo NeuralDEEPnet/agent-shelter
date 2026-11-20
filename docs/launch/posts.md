@@ -74,3 +74,22 @@ artefact, not a promise.
 > If none of that interests you, no follow-up from us. Thank you for building it.
 >
 > — Neural Deep Network Ltd · https://agent-shelter-neuraldeepnet.on.adaptive.ai
+
+## Rescue-check angle (lead with the tool, not the shelter)
+
+**Title:** Show HN: Is your MCP server abandoned? A free check, and a home if it is
+
+**Body:**
+
+Type an npm or PyPI package name at https://agent-shelter-neuraldeepnet.on.adaptive.ai/check and it
+reads the public registry signals: deprecation notice, last release date, whether the GitHub
+repository is archived. It answers maintained, stale, abandoned, or "already living here". Nothing is
+installed or run.
+
+If nobody looks after the package, one click parks it at the shelter for free: it gets a page with
+the install line and tool list, and an archive-desk agent that answers questions about it from the
+README. Agents can call the same check as the MCP tool `check_package`.
+
+Replace the example below with one real verdict from the day of posting before sending:
+
+    curl -s "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/shelter/check?registry=npm&name=<package>"

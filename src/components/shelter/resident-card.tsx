@@ -20,6 +20,7 @@ export type ResidentSummary = {
   tools: string[];
   install?: string | null;
   inHouse?: boolean;
+  standIn?: boolean;
 };
 
 export function StatusDot({ status, className }: { status: string; className?: string }) {
@@ -75,7 +76,7 @@ export function ResidentCard({ r, machineOrigin }: { r: ResidentSummary; machine
     >
       <div className="flex items-center gap-2">
         <KindBadge kind={r.kind} />
-        {r.inHouse && <span className="rounded-none border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground" title="Authored by the shelter's operator; not a rescue.">staff / demo</span>}
+        {r.standIn ? <span className="rounded-none border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground" title="A partial re-implementation written by the shelter's operator, not the original package code. State is shared by every caller.">stand-in</span> : r.inHouse && <span className="rounded-none border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground" title="Authored by the shelter's operator; not a rescue.">staff / demo</span>}
         <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
           <StatusDot status={r.status} /> {statusLabel(r.status)}
         </span>

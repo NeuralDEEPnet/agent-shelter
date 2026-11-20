@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 
 /**
- * Built-in Foster Host for the four rescued MIT MCP servers described in
+ * Shelter STAND-INS for four MIT MCP servers described in
  * `hosting/foster-host/endpoints.example.json`:
  *   - word       (GongRzhe/Office-Word-MCP-Server, MIT, PyPI office-word-mcp-server 1.1.11)
  *   - powerpoint (GongRzhe/Office-PowerPoint-MCP-Server, MIT, PyPI office-powerpoint-mcp-server 2.0.7)
@@ -13,6 +13,13 @@ import { Hono } from "hono";
  * and stay reachable 24/7 across container sleep/wake cycles and daily
  * re-fingerprinting. All document/workbook/task state is sandboxed in-memory
  * with bounded collections (no host filesystem or shell access).
+ *
+ * These are partial re-implementations written for the shelter (a handful of
+ * each original's tools), NOT the upstream code, and their state is shared by
+ * every caller. They say so in `initialize` (serverInfo + instructions), and
+ * src/api/services/stand-in.ts labels them on every public surface and keeps
+ * them out of the "rescued" count. Running the real packages is a separate,
+ * isolated-host decision (docs/GROWTH.md).
  */
 
 type ToolDef = {
@@ -29,6 +36,8 @@ type FosterServer = {
 };
 
 const MAX_ITEMS = 50;
+/** The stand-ins' own version; the upstream version they imitate stays in `FosterServer.version`. */
+const STAND_IN_VERSION = "0.1.0";
 
 // ─── 1. Office Word MCP (office-word-mcp-server 1.1.11) ──────────────────────
 
@@ -790,7 +799,7 @@ export function fosterRoutes() {
   app.get("/api/foster/:server/healthz", (c) => {
     const srv = SERVERS[c.req.param("server")];
     if (!srv) return c.json({ ok: false, error: "unknown foster server" }, 404);
-    return c.json({ ok: true, server: srv.name, version: srv.version, tools: srv.tools.length });
+    return c.json({ ok: true, standInFor: `${srv.name} ${srv.version}`, version: STAND_IN_VERSION, tools: srv.tools.length, note: "Partial re-implementation by the shelter, not the original package code." });
   });
 
   app.post("/api/foster/:server/mcp", async (c) => {
@@ -822,7 +831,9 @@ export function fosterRoutes() {
         return reply({
           protocolVersion,
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: srv.name, version: srv.version },
+          // Honest identity: this is the shelter's stand-in, not the upstream package.
+          serverInfo: { name: `agent-shelter-stand-in-for-${srv.name}`, title: `${srv.name} (shelter stand-in)`, version: STAND_IN_VERSION },
+          instructions: `Shelter stand-in for ${srv.name} ${srv.version}: a partial re-implementation written by the AI Agent Shelter's operator (${srv.tools.length} tools), not the original package code. State lives in memory and is shared by every caller; do not send anything private.`,
         });
       }
       case "notifications/initialized":

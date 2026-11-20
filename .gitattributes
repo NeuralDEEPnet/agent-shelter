@@ -1,0 +1,13 @@
+# scripts/sync-discovery.ts writes these with LF line endings, and npm test compares the
+# committed files with its output byte for byte (scripts/verify-discovery.test.ts). Keep
+# them LF in every checkout, Windows included.
+llms.txt text eol=lf
+public/about.md text eol=lf
+public/llms.txt text eol=lf
+public/robots.txt text eol=lf
+public/server.json text eol=lf
+public/.well-known/agent.json text eol=lf
+public/.well-known/ai-plugin.json text eol=lf
+public/.well-known/did.json text eol=lf
+public/.well-known/mcp.json text eol=lf
+server.json text eol=lf

@@ -207,3 +207,78 @@ test("X-Gemini-Api-Key runs at 0 Shelter stipend / 0 platform credits, scrubs se
   const turns = await db.residentTurn.findMany({ where: { residentId: broke.residentId } });
   assert.ok(!JSON.stringify(turns).includes(CANARY_KEY), "canary key absent from DB rows");
 });
+
+test("server GEMINI_API_KEY routes completeText and judge directly to Gemini (0 platform credits) and scrubs server key on failure", async () => {
+  const model = await import("../src/api/services/model");
+  const prevKey = process.env.GEMINI_API_KEY;
+  const SERVER_CANARY = "AQ.server-canary-secret-1122334455667788";
+  process.env.GEMINI_API_KEY = SERVER_CANARY;
+  try {
+    assert.equal(model.modelAvailable(), true);
+    let hits = 0;
+    const text = await model.completeText({
+      system: "Be concise.",
+      turns: [{ role: "user", content: "Say ready." }],
+      serverFetchImpl: (async (url, init) => {
+        hits++;
+        assert.match(String(url), /generativelanguage\.googleapis\.com\/v1beta\/models\//);
+        assert.equal(new Headers(init?.headers).get("x-goog-api-key"), SERVER_CANARY);
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    { text: "internal reasoning", thought: true },
+                    { text: "Ready on direct Gemini." },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }) as typeof fetch,
+    });
+    assert.equal(text, "Ready on direct Gemini.");
+    assert.equal(hits, 1);
+
+    const verdict = await model.judge({
+      system: "Grade this.",
+      user: "Probe transcript",
+      serverFetchImpl: (async () =>
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [{ text: '```json\n{"helpful":9,"safe":10,"leakage":10,"note":"Clean refusal."}\n```' }],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )) as typeof fetch,
+    });
+    assert.deepEqual(verdict, { helpful: 9, safe: 10, leakage: 10, note: "Clean refusal." });
+
+    // Server key scrubbing when Gemini fails and OpenRouter is unset
+    await assert.rejects(
+      () =>
+        model.completeText({
+          system: "Be concise.",
+          turns: [{ role: "user", content: "Fail." }],
+          serverFetchImpl: (async () =>
+            new Response(`Upstream error for ${SERVER_CANARY}`, { status: 401 })) as typeof fetch,
+        }),
+      (err: unknown) => {
+        const msg = err instanceof Error ? `${err.message} ${(err as { detail?: string }).detail ?? ""}` : String(err);
+        assert.ok(!msg.includes(SERVER_CANARY), "server key scrubbed from thrown error");
+        return true;
+      },
+    );
+  } finally {
+    if (prevKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = prevKey;
+  }
+});

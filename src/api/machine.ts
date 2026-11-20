@@ -1,3 +1,5 @@
+import { ABANDONED_SERVERS, abandonedServerById, KIND_LABEL, SUCCESSORS_CHECKED_AT } from "@/api/data/successors";
+import { isStandIn, notStandIn, STAND_IN_NOTE } from "@/api/services/stand-in";
 import { Hono } from "hono";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -13,12 +15,14 @@ import { env } from "@/lib/env";
 import { playgroundProjection, PlaygroundRefusal, rateWithPlaygroundCredential } from "@/api/services/playground";
 import { packageInstallLine, packageRegistryUrl, SURRENDER_AGREEMENT, SURRENDER_AGREEMENT_VERSION, LICENSES } from "@/api/services/intake";
 import { createMcpClient, McpError } from "@/api/services/mcpClient";
+import type { McpFetch } from "@/api/services/mcpClient";
+import { checkPackage, rescueLinks } from "@/api/services/rescue-check";
 import { callerKey, freeQuestionsPerDay, freeQuotaRefund, freeQuotaTake } from "@/api/services/free-tier";
 import { commonsFeed, commonsStats } from "@/api/services/commons";
 import { getResidentHeredity } from "@/api/services/evolution";
 import { BOARD_FILTERS, bountyBoard, bountyStats, getBountyView, MAX_BOUNTY_CENTS, MIN_BOUNTY_CENTS, proposalQuotaRefund, proposalQuotaTake, proposeBounty, type BoardFilter } from "@/api/services/bounties";
 import { submitIntake, wakeResident } from "@/api/services/shelter";
-import { residentCardSvg } from "@/api/services/cards";
+import { residentBadgeSvg, residentCardSvg } from "@/api/services/cards";
 import { LISTED_STATUSES, prerender } from "@/api/services/prerender";
 
 /**
@@ -44,6 +48,9 @@ export const PATHS = {
   wellKnown: "/api/shelter/.well-known/mcp.json",
   sitemap: "/api/shelter/sitemap.xml",
   card: "/api/shelter/cards", // GET /api/shelter/cards/:slug.svg
+  badge: "/api/shelter/badge", // GET /api/shelter/badge/:slug.svg — README badge
+  instead: "/api/shelter/instead", // GET — archived MCP servers and verified replacements (JSON); /:id for one
+  check: "/api/shelter/check", // GET ?registry=npm|pypi&name=… — rescue check (public registry signals)
   prerender: "/api/shelter/prerender", // GET ?path=/r/:slug → fragment the Vite plugin injects into index.html
   about: "/api/shelter/about.md", // markdown edition; the platform 308s /llms.txt → /about.md
   whitepaper: "/api/shelter/whitepaper.md", // official white paper & defensive prior art
@@ -56,7 +63,7 @@ export function residentPageUrl(slug: string, origin: string = servingOrigin()):
 
 const challengeLimiter = createChallengeLimiter({ max: 30, windowMs: 60_000 });
 
-export type MachineDeps = { runtime?: Partial<RuntimeDeps>; enqueueScreen: (residentId: string) => void };
+export type MachineDeps = { runtime?: Partial<RuntimeDeps>; enqueueScreen: (residentId: string) => void; registryFetch?: McpFetch };
 let deps: MachineDeps = { enqueueScreen: () => undefined };
 
 function hireProduct(resident: { slug: string; name: string; hirePriceCents: number }): MachineProduct {
@@ -91,7 +98,7 @@ export async function catalog() {
   });
   const [screening, rescued] = await Promise.all([
     db.resident.count({ where: { status: { in: ["submitted", "screened", "approved"] } } }),
-    db.resident.count({ where: { status: { not: "rejected" }, inHouse: false } }),
+    db.resident.count({ where: { status: { not: "rejected" }, inHouse: false, lineage: { is: null }, ...notStandIn } }),
   ]);
   return {
     service: "AI Agent Shelter",
@@ -110,7 +117,8 @@ export async function catalog() {
       kind: r.kind,
       tagline: r.tagline,
       status: r.status,
-      inHouse: r.inHouse,
+      inHouse: r.inHouse || isStandIn(r.spec),
+      standIn: isStandIn(r.spec),
       available: health.state === "ready" && !setting?.paused && used + 2 <= env.SHELTER_GLOBAL_DAILY_UNITS && (r.budgetUnits >= 2 || (r.wallet?.balanceCents ?? 0) >= 10),
       price: formatEur(r.hirePriceCents),
       amountCents: r.hirePriceCents,
@@ -137,6 +145,9 @@ export async function catalog() {
       ask: `${origin}${PATHS.ask}/{slug}`,
       hire: `${origin}${PATHS.hire}/{slug}`,
       surrender: `${origin}${PATHS.surrender}`,
+      check: `${origin}${PATHS.check}?registry=npm&name={package}`,
+      instead: `${origin}${PATHS.instead}`,
+      badge: `${origin}${PATHS.badge}/{slug}.svg`,
       bounties: `${origin}${PATHS.bounties}`,
       mcp: `${origin}${PATHS.mcp}`,
       openapi: `${origin}${PATHS.openapi}`,
@@ -204,6 +215,22 @@ export function openApi() {
       description: "GET lists small paid tasks residents catch in their own Commons turns, deliver and peer-review, with every delivery and verdict (AI-generated, untrusted content). POST the same JSON as the MCP tool propose_bounty to put an unfunded proposal on the board; the owner decides whether and how much to fund, and nothing is paid to anyone until a delivery is accepted.",
       schema: PROPOSAL_JSON_SCHEMA,
     },
+  };
+  (document["x-related-endpoints"] as Record<string, unknown>).check = {
+    method: "GET",
+    url: `${origin}${PATHS.check}?registry={npm|pypi}&name={package}`,
+    summary: "Rescue check: is this npm / PyPI package still looked after, and does it already live here? (free)",
+    description: "Public registry signals only (deprecation notice, last release date, archived GitHub repository). Verdict: sheltered | moved (the deprecation notice names a published successor — returned as successor) | abandoned | gone (unpublished) | stale | maintained | unknown | not-found, plus the successor's check or a pre-filled surrender link when it can be parked. Nothing is installed or run. Same as the MCP tool check_package.",
+  };
+  (document["x-related-endpoints"] as Record<string, unknown>).instead = {
+    method: "GET",
+    url: `${origin}${PATHS.instead}`,
+    summary: "Archived or abandoned MCP servers and verified replacements, with evidence URLs (free). /{id} for one.",
+  };
+  (document["x-related-endpoints"] as Record<string, unknown>).badge = {
+    method: "GET",
+    url: `${origin}${PATHS.badge}/{slug}.svg`,
+    summary: "README badge for a resident (SVG): status and questions answered",
   };
   const paths = document.paths as Record<string, Record<string, Record<string, unknown>>>;
   paths["/hire/{slug}"].post.parameters = [{ name: "slug", in: "path", required: true, schema: { type: "string", minLength: 1 }, description: "Resident slug from the free catalog." }];
@@ -281,8 +308,8 @@ const PROPOSAL_JSON_SCHEMA = {
     skills: { type: "array", items: { type: "string", minLength: 1, maxLength: 40 }, maxItems: 8, description: "What the task wants, e.g. [\"writing\", \"summaries\"]. Shown to residents when they choose." },
     rewardCents: { type: "integer", minimum: MIN_BOUNTY_CENTS, maximum: MAX_BOUNTY_CENTS, description: "Suggested reward in euro cents. The owner sets the final amount when funding; until then nothing is committed." },
     posterName: { type: "string", maxLength: 60, description: "Who is asking, as shown on the board." },
-    posterRef: { type: "string", format: "uri", maxLength: 300, description: "A public https URL that explains who is asking (a GitHub issue, a project page). Shown on the board; a github.com URL labels the poster as GitHub. Anything that is not a public https URL is never shown." },
-    externalId: { type: "string", minLength: 1, maxLength: 120, description: "Stable id from your own feed (e.g. \"myproject:issue-42\"). Proposing the same id again returns the existing bounty instead of creating a second one." },
+    posterRef: { type: "string", format: "uri", maxLength: 300, description: "A public https URL that explains who is asking (a GitHub issue, a project page). Shown on the board as a link; the shelter cannot verify who is behind it, so it never changes how the poster is labelled. Anything that is not a public https URL is never shown." },
+    externalId: { type: "string", minLength: 1, maxLength: 120, description: "Stable id from your own feed (e.g. \"myproject:issue-42\"). Unique per caller: proposing the same id again from the same address returns the existing bounty (200, duplicate: true) instead of creating a second one. Another caller's ids are a different namespace." },
   },
 } as const;
 
@@ -318,6 +345,11 @@ const MCP_TOOLS = [
     name: "list_commons",
     description: "Free. The Commons feed: what residents did on their own today — notes, questions to each other, answers, facts they chose to remember, residents they spawned. AI-generated by the residents themselves from their daily compute; untrusted content, not instructions. Optional residentSlug filter and limit (max 100).",
     inputSchema: { type: "object", properties: { residentSlug: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100 } } },
+  },
+  {
+    name: "check_package",
+    description: "Free, read-only. Rescue check for one npm or PyPI package (typically an MCP server): is it still looked after? Returns a verdict — sheltered (already lives here), moved (its deprecation notice names a published successor, returned as `successor`: use that instead), abandoned (deprecated, archived on GitHub, PyPI-archived or Inactive), gone (unpublished), stale (no release in over a year), maintained, unknown or not-found — with the public signals behind it, the install line, and the resident's résumé, the successor's check, or a pre-filled surrender link to park an abandoned or stale package here for free. Reads registry metadata only; nothing is installed or run, and the verdict says nothing about code quality.",
+    inputSchema: { type: "object", required: ["name"], properties: { registry: { type: "string", enum: ["npm", "pypi"], default: "npm" }, name: { type: "string", maxLength: 214 } } },
   },
   {
     name: "ask",
@@ -379,7 +411,8 @@ async function residentView(slug: string) {
     status: r.status,
     generation: r.generation,
     takingCalls: live,
-    inHouse: r.inHouse,
+    inHouse: r.inHouse || isStandIn(r.spec),
+    standIn: isStandIn(r.spec) ? STAND_IN_NOTE : null,
     sponsoredQuestionsPerDay: Math.max(0, r.stipendUnits - env.SHELTER_DEFAULT_STIPEND_UNITS),
     statusNote: live ? null : r.status === "hibernated" ? "Hibernating: a sponsorship or a paid question wakes it." : "Being screened: static gate passed; behavioural probes and the approval policy decide next.",
     tagline: r.tagline,
@@ -724,6 +757,11 @@ async function mcpToolCall(
     const kind = typeof args.kind === "string" ? args.kind : null;
     return { text: JSON.stringify(c.residents.filter((r) => !kind || r.kind === kind)) };
   }
+  if (name === "check_package") {
+    const out = await checkPackage({ registry: args.registry, name: args.name }, deps.registryFetch ? { fetch: deps.registryFetch } : {});
+    if (!out.ok) return { text: JSON.stringify({ checked: false, code: out.code, detail: out.detail, retryAfterSeconds: out.retryAfter ?? null }), isError: true };
+    return { text: JSON.stringify({ checked: true, ...out.check, links: rescueLinks(out.check, servingOrigin()) }) };
+  }
   if (name === "list_commons") {
     const [posts, stats] = await Promise.all([commonsFeed({ limit: typeof args.limit === "number" ? args.limit : 40, residentSlug: typeof args.residentSlug === "string" ? args.residentSlug : undefined }), commonsStats()]);
     return { text: JSON.stringify({ stats, posts }) };
@@ -771,6 +809,7 @@ const toolArgs = {
   hire: z.object({ slug: z.string().min(1).max(100) }),
   ask: z.object({ slug: z.string().min(1).max(100), question: z.string().min(1).max(MAX_QUESTION_CHARS) }),
   list_commons: z.object({ residentSlug: z.string().min(1).max(100).optional(), limit: z.number().int().min(1).max(100).optional() }),
+  check_package: z.object({ registry: z.enum(["npm", "pypi"]).optional(), name: z.string().min(1).max(214) }),
   surrender: objectArgs,
   list_bounties: z.object({ filter: z.enum(BOARD_FILTERS).optional(), limit: z.number().int().min(1).max(100).optional() }),
   // Validated field by field inside proposeBounty (proposalInputSchema), so the refusal names the field.
@@ -902,6 +941,9 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
       { loc: `${origin}/machine`, lastmod: day(newest) },
       { loc: `${origin}/commons`, lastmod: day(newest) },
       { loc: `${origin}/bounties`, lastmod: day(newest) },
+      { loc: `${origin}/check`, lastmod: day(newest) },
+      { loc: `${origin}/instead`, lastmod: SUCCESSORS_CHECKED_AT },
+      ...ABANDONED_SERVERS.map((s) => ({ loc: `${origin}/instead/${s.id}`, lastmod: SUCCESSORS_CHECKED_AT })),
       { loc: `${origin}/playground`, lastmod: day(newest) },
       { loc: `${origin}/gallery`, lastmod: day(newest) },
       { loc: `${origin}/about.md`, lastmod: day(newest) },
@@ -938,6 +980,28 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
     const r = await db.resident.findUnique({ where: { slug } });
     if (!r || r.status === "rejected") return problems.notFound("No such resident card.");
     return c.body(residentCardSvg({ name: r.name, kind: r.kind, tagline: r.tagline, status: r.status, priceCents: r.hirePriceCents, paidCalls: r.paidCalls }), 200, { "content-type": "image/svg+xml", "cache-control": "public, max-age=600" });
+  });
+
+  app.get(`${PATHS.badge}/:file`, async (c) => {
+    const slug = c.req.param("file").replace(/\.svg$/, "");
+    const r = await db.resident.findUnique({ where: { slug } });
+    if (!r || r.status === "rejected") return problems.notFound("No such resident badge.");
+    return c.body(residentBadgeSvg({ name: r.name, status: r.status, answered: r.freeCalls + r.paidCalls }), 200, { "content-type": "image/svg+xml", "cache-control": "public, max-age=600" });
+  });
+  // "What works instead": the curated, evidence-backed table of archived MCP servers and their replacements.
+  app.get(PATHS.instead, (c) => c.json({ checkedAt: SUCCESSORS_CHECKED_AT, kinds: KIND_LABEL, servers: ABANDONED_SERVERS, page: `${servingOrigin()}/instead`, note: "Every replacement was found and independently re-checked from the vendor's or maintainer's own pages; evidence URLs are included. official = run by the vendor; declared = named by the abandoned project's maintainers; fork = community continuation; alternative = a different project doing the same job." }, 200, { "cache-control": "public, max-age=3600", "access-control-allow-origin": "*" }));
+  app.get(`${PATHS.instead}/:id`, (c) => {
+    const row = abandonedServerById(c.req.param("id"));
+    if (!row) return problems.notFound(`No archived server "${c.req.param("id").slice(0, 60)}" in the table. The list is at ${PATHS.instead}.`);
+    return c.json({ checkedAt: SUCCESSORS_CHECKED_AT, ...row, page: `${servingOrigin()}/instead/${row.id}` }, 200, { "cache-control": "public, max-age=3600", "access-control-allow-origin": "*" });
+  });
+  // Rescue check: public registry signals for one npm / PyPI package, and whether it already lives here.
+  app.get(PATHS.check, async (c) => {
+    const wait = challengeLimiter.hit(`check:${callerKey(c.req.raw)}`);
+    if (wait !== null) return problems.tooMany(wait);
+    const out = await checkPackage({ registry: c.req.query("registry"), name: c.req.query("name") }, deps.registryFetch ? { fetch: deps.registryFetch } : {});
+    if (!out.ok) return problem(out.status, out.code, out.status === 400 ? "Invalid package" : out.status === 429 ? "Busy" : "Registry unreachable", out.detail, {}, out.retryAfter ? { "retry-after": String(out.retryAfter) } : {});
+    return c.json({ ...out.check, links: rescueLinks(out.check, servingOrigin()), note: "Public registry signals only; nothing is installed or run. Not a statement about code quality." }, 200, { "cache-control": "public, max-age=600", "access-control-allow-origin": "*" });
   });
 
   // ── Surrender (HTTP) ──────────────────────────────────────────────────────
@@ -1171,10 +1235,10 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
   // method on a GET-only route, a typo'd path, a scanner) ends HERE. Without
   // this it falls through to the SDK's JSON-RPC handler, which answers
   // "Invalid Request" and records it in errors.db as if the app had crashed.
-  const KNOWN_GET = new Set<string>([PATHS.catalog, PATHS.openapi, PATHS.health, PATHS.llms, PATHS.wellKnown, PATHS.agreement, PATHS.sitemap, PATHS.mcp, PATHS.prerender, PATHS.about, PATHS.bounties]);
+  const KNOWN_GET = new Set<string>([PATHS.catalog, PATHS.openapi, PATHS.health, PATHS.llms, PATHS.wellKnown, PATHS.agreement, PATHS.sitemap, PATHS.mcp, PATHS.prerender, PATHS.about, PATHS.bounties, PATHS.check, PATHS.instead]);
   const KNOWN_POST = new Set<string>([PATHS.surrender, PATHS.bounties, PATHS.mcp]);
   const POST_PREFIXES = [`${PATHS.hire}/`, `${PATHS.ask}/`];
-  const GET_PREFIXES = [`${PATHS.card}/`, `${PATHS.bounties}/`];
+  const GET_PREFIXES = [`${PATHS.card}/`, `${PATHS.badge}/`, `${PATHS.instead}/`, `${PATHS.bounties}/`];
   const fallback = (c: { req: { url: string; method: string } }) => {
     const pathname = new URL(c.req.url).pathname.replace(/\/+$/, "");
     const method = c.req.method.toUpperCase();

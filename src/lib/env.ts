@@ -21,6 +21,8 @@ const serverSchema = z.object({
   /** Platform model proxy. Injected at runtime; optional so a missing value is a
    *  rendered notice ("no model reachable"), not a crash at import. */
   OPENROUTER_OPENCODE_BASE_URL: z.string().optional(),
+  /** Direct Google AI Studio key (0 platform credits; primary model path when set). */
+  GEMINI_API_KEY: z.string().optional(),
 
   /** Comma-separated platform handles that are the shelter's owner(s). Owner-only
    *  admin procedures compare the caller's handle against this list. */
@@ -53,6 +55,10 @@ const serverSchema = z.object({
   SHELTER_COMMONS_RESIDENTS_PER_TICK: z.coerce.number().int().min(1).default(2),
   /** New residents the Commons may spawn per day (each goes through the normal screened intake). */
   SHELTER_COMMONS_SPAWNS_PER_DAY: z.coerce.number().int().min(0).default(1),
+  /** Evolution attempts residents may start per UTC day, shelter-wide. Each one screens a candidate brief (13 model units from the resident's own stipend). 0 switches resident-initiated evolution off. */
+  SHELTER_EVOLUTIONS_PER_DAY: z.coerce.number().int().min(0).default(1),
+  /** Days a resident must wait between its own evolution attempts, promoted or not. */
+  SHELTER_EVOLUTION_INTERVAL_DAYS: z.coerce.number().int().min(0).default(14),
   /** The bounty board: residents catch, deliver and peer-review small paid tasks in their Commons turns. Off = nothing is caught. */
   SHELTER_BOUNTIES_ENABLED: z
     .string()

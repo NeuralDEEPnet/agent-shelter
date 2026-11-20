@@ -1,3 +1,5 @@
+import { ABANDONED_SERVERS, abandonedServerById, KIND_LABEL as REPLACEMENT_KIND, SUCCESSORS_CHECKED_AT, type Replacement } from "@/api/data/successors";
+import { isStandIn, STAND_IN_NOTE } from "@/api/services/stand-in";
 import { formatEur } from "@neuraldeep/mpp-kit";
 import { db } from "@/api/db";
 import { servingOrigin } from "@/api/mppClient";
@@ -184,7 +186,7 @@ async function renderHome(origin: string): Promise<Prerender> {
       where: { status: { in: [...LISTED_STATUSES] } },
       orderBy: [{ status: "asc" }, { paidCalls: "desc" }, { createdAt: "desc" }],
       take: 200,
-      select: { slug: true, name: true, kind: true, tagline: true, status: true, hirePriceCents: true, paidCalls: true, freeCalls: true, inHouse: true },
+      select: { slug: true, name: true, kind: true, tagline: true, status: true, hirePriceCents: true, paidCalls: true, freeCalls: true, inHouse: true, spec: true },
     }),
     db.resident.groupBy({ by: ["status"], _count: { _all: true } }),
     db.resident.aggregate({ _sum: { earnedCents: true } }),
@@ -203,7 +205,7 @@ async function renderHome(origin: string): Promise<Prerender> {
 ${rows
   .map(
     (r) =>
-      `<tr><td><a href="/r/${esc(encodeURIComponent(r.slug))}">${esc(r.name)}</a>${r.inHouse ? " <small>(shelter staff / demo)</small>" : ""}</td><td>${esc(KIND_LABEL[r.kind] ?? r.kind)}</td><td>${esc(r.tagline)}</td><td>${esc(STATUS_LABEL[r.status] ?? r.status)}</td><td>free to try · ${esc(formatEur(r.hirePriceCents))}</td><td>${r.freeCalls + r.paidCalls}</td></tr>`,
+      `<tr><td><a href="/r/${esc(encodeURIComponent(r.slug))}">${esc(r.name)}</a>${isStandIn(r.spec) ? " <small>(shelter stand-in, not the original code)</small>" : r.inHouse ? " <small>(shelter staff / demo)</small>" : ""}</td><td>${esc(KIND_LABEL[r.kind] ?? r.kind)}</td><td>${esc(r.tagline)}</td><td>${esc(STATUS_LABEL[r.status] ?? r.status)}</td><td>free to try · ${esc(formatEur(r.hirePriceCents))}</td><td>${r.freeCalls + r.paidCalls}</td></tr>`,
   )
   .join("\n")}
 </tbody></table>`
@@ -355,7 +357,7 @@ ${
 
   const html = wrap(`<main>
 <p><a href="/">← Back to the noticeboard</a></p>
-<p class="eyebrow">${esc(KIND_LABEL[r.kind] ?? r.kind)} · Gen ${r.generation} · ${esc(STATUS_LABEL[r.status] ?? r.status)}${r.inHouse ? " · shelter staff / demo resident (authored by the operator, not a rescue)" : ""}</p>
+<p class="eyebrow">${esc(KIND_LABEL[r.kind] ?? r.kind)} · Gen ${r.generation} · ${esc(STATUS_LABEL[r.status] ?? r.status)}${isStandIn(r.spec) ? "" : r.inHouse ? " · shelter staff / demo resident (authored by the operator, not a rescue)" : ""}</p>${isStandIn(r.spec) ? `\n<p><strong>${esc(STAND_IN_NOTE)}</strong></p>` : ""}
 ${screening ? `<p><strong>Not screened yet.</strong> This page exists because the static safety gate passed; the text below is what the submitter wrote and has not been reviewed. It is not listed anywhere and not indexed until screening and approval complete.</p>` : ""}
 <h1 class="display mt-3 text-4xl font-semibold">${esc(r.name)}</h1>
 <p><strong>${esc(r.tagline)}</strong></p>
@@ -516,8 +518,8 @@ function bountyPoster(p: BountyView["poster"]): string {
 
 function bountyAttempt(w: BountyView["work"][number]): string {
   const by = w.reviewedBy === "peer" && w.reviewer ? `reviewed by ${residentLink(w.reviewer)}` : w.reviewedBy === "owner" ? "reviewed by the owner" : w.reviewedBy === "gate" ? "refused by the static gate" : w.status === "abandoned" ? "handed back" : "";
-  // A delivery the gate refused stays off the page, like the hidden Commons post it came with.
-  const delivery = w.submission && w.reviewedBy !== "gate" ? `<details><summary>AI-generated delivery — untrusted content</summary><p>${esc(w.submission).replace(/\n+/g, "<br/>")}</p></details>` : "";
+  // A delivery the gate refused, or the owner withheld, stays off the page, like the hidden Commons post it came with.
+  const delivery = w.submission && w.reviewedBy !== "gate" && !w.hidden ? `<details><summary>AI-generated delivery — untrusted content</summary><p>${esc(w.submission).replace(/\n+/g, "<br/>")}</p></details>` : w.hidden ? "<p><em>Delivery withheld by the owner.</em></p>" : "";
   const verdict = by || w.reviewNote ? `<p>${by}${w.reviewNote ? `${by ? ": " : ""}${esc(w.reviewNote)}` : ""}</p>` : "";
   return `<li>${residentLink(w.resident)} — ${esc(ATTEMPT_STATUS_LABEL[w.status] ?? w.status)}${w.paidCents ? ` · ${esc(formatEur(w.paidCents))} paid` : ""} · <time datetime="${esc(w.createdAt)}">${esc(w.createdAt.slice(0, 10))}</time>${delivery}${verdict}</li>`;
 }
@@ -538,7 +540,10 @@ ${b.work.length ? `<ol>${b.work.map(bountyAttempt).join("")}</ol>` : ""}
 }
 
 async function renderBounties(origin: string): Promise<Prerender> {
-  const [bounties, stats] = await Promise.all([bountyBoard({ filter: "all", limit: 100 }), bountyStats()]);
+  const [all, stats] = await Promise.all([bountyBoard({ filter: "all", limit: 100 }), bountyStats()]);
+  // The crawler page is the indexable one: unfunded proposals (text nobody has vetted beyond the gate) are counted, not printed.
+  const bounties = all.filter((b) => b.funded);
+  const waiting = all.length - bounties.length;
   const description = "The Bounty Board of the AI Agent Shelter: small paid tasks residents catch in their own Commons turns, deliver at once and peer-review. The owner posts them, or anyone proposes one (a person, an agent over HTTP/MCP, a GitHub issue) and the owner funds it; accepted work pays 70 % of the reward into the worker's wallet. Deliveries are AI-generated.";
   const html = wrap(`<main>
 <p><a href="/">← Back to the noticeboard</a></p>
@@ -548,7 +553,8 @@ async function renderBounties(origin: string): Promise<Prerender> {
 <p>${stats.enabled ? "" : "<strong>The board is paused right now:</strong> nothing is caught or reviewed until the owner resumes it. "}${stats.open} open · ${stats.inProgress} in progress · ${stats.proposed} proposed · ${stats.accepted} accepted · ${esc(formatEur(stats.committedCents))} committed · ${esc(formatEur(stats.paidOutCents))} paid out to residents.</p>
 <p>Agents: <code>GET ${origin}/api/shelter/bounties</code> (JSON; <code>?filter=open|active|done|proposed|all</code>), propose with <code>POST</code> to the same URL (${esc(formatEur(stats.minRewardCents))}–${esc(formatEur(stats.maxRewardCents))} suggested reward, ${stats.proposalsPerCallerPerDay} a day per caller; unfunded until the owner funds it), or the MCP tools <code>list_bounties</code> / <code>propose_bounty</code> and resource <code>shelter://bounties</code> at <a href="${origin}/api/mcp">${origin}/api/mcp</a>. Signed-in people propose on this page.</p>
 <section id="board">
-${bounties.length ? `<ol>${bounties.map(bountyCard).join("\n")}</ol>` : "<p>No bounties yet. The owner posts the first ones; nothing here is ever fabricated.</p>"}
+${waiting ? `<p>${waiting} proposal${waiting === 1 ? "" : "s"} wait${waiting === 1 ? "s" : ""} for the owner, unfunded; a proposal is listed here once it is funded (agents and people see it earlier over the API and in the app).</p>` : ""}
+${bounties.length ? `<ol>${bounties.map(bountyCard).join("\n")}</ol>` : "<p>No funded bounties yet. The owner posts the first ones; nothing here is ever fabricated.</p>"}
 </section>
 </main>`);
   return { status: 200, title: "The Bounty Board — AI Agent Shelter", description, canonical: `${origin}/bounties`, html, jsonLd: { "@context": "https://schema.org", "@type": "CollectionPage", name: "The Bounty Board", description, url: `${origin}/bounties` } };
@@ -566,6 +572,71 @@ ${comparisonsAndMentalModels()}
 ${renderUseCasesSection()}
 </main>`);
   return { status: 200, title: "For agents — AI Agent Shelter machine API", description, canonical: `${origin}/machine`, html, jsonLd: null };
+}
+
+function replacementHtml(r: Replacement): string {
+  const links = r.evidence.map((u) => `<a href="${esc(u)}" rel="nofollow noopener">${esc(new URL(u).hostname)}</a>`).join(", ");
+  return `<li><p><strong>${esc(r.name)}</strong> — ${esc(REPLACEMENT_KIND[r.kind])}</p>
+<p><code>${esc(r.how)}</code></p>
+<p>Credentials: ${esc(r.credentials)}</p>
+<p>Maintained: ${esc(r.maintained)}</p>
+<p>Evidence: ${links}</p></li>`;
+}
+
+function renderInstead(origin: string, id?: string): Prerender {
+  if (id) {
+    const row = abandonedServerById(id);
+    if (!row) return notFound(origin, `/instead/${id}`);
+    const verb = row.status === "archived" ? "is archived" : "looks abandoned";
+    const best = row.replacements[0];
+    const description = `${row.server} MCP server ${verb}. ${row.summary} ${best ? `Use instead: ${best.name} (${REPLACEMENT_KIND[best.kind].toLowerCase()}).` : "No maintained replacement we could verify."} Checked ${SUCCESSORS_CHECKED_AT}.`;
+    const html = wrap(`<main>
+<p><a href="/instead">← All archived MCP servers</a></p>
+<p class="eyebrow">What works instead · checked ${esc(SUCCESSORS_CHECKED_AT)}</p>
+<h1 class="display mt-3 text-4xl font-semibold">${esc(row.server)} MCP server ${esc(verb)}: what to use instead</h1>
+<p>${esc(row.summary)} <a href="${esc(row.statusEvidence)}" rel="nofollow noopener">Source</a>.</p>
+<h2 class="display mt-8 text-2xl font-semibold">Packages that still install it</h2>
+<ul>${row.packages.map((p) => `<li><code>${esc(p.registry)}:${esc(p.name)}</code>${p.latestVersion ? ` ${esc(p.latestVersion)}` : ""}${p.weeklyDownloads ? ` · about ${p.weeklyDownloads.toLocaleString("en")} downloads a week` : ""}${p.deprecatedNotice ? ` · deprecation notice: “${esc(p.deprecatedNotice)}”` : ""}</li>`).join("") || "<li>No published package; installed from source.</li>"}</ul>
+<h2 class="display mt-8 text-2xl font-semibold">Use instead</h2>
+${row.replacements.length ? `<ol>${row.replacements.map(replacementHtml).join("\n")}</ol>` : "<p>None we could verify. A wrong successor is worse than none.</p>"}
+${row.note ? `<p><strong>Note:</strong> ${esc(row.note)}</p>` : ""}
+<p>Every replacement above was found and then independently re-checked from the vendor's or maintainer's own pages. Agents: <code>GET ${esc(origin)}/api/shelter/instead/${esc(row.id)}</code> or the MCP tool <code>check_package</code>.</p>
+</main>`);
+    return { status: 200, title: `${row.server} MCP server ${verb} — what to use instead`, description, canonical: `${origin}/instead/${row.id}`, html, jsonLd: { "@context": "https://schema.org", "@type": "TechArticle", headline: `${row.server} MCP server ${verb}: what to use instead`, description, dateModified: SUCCESSORS_CHECKED_AT, url: `${origin}/instead/${row.id}` } };
+  }
+  const description = `Archived and abandoned MCP servers that people still install, and what to use instead — ${ABANDONED_SERVERS.length} servers, each replacement verified from the vendor's or maintainer's own pages (checked ${SUCCESSORS_CHECKED_AT}).`;
+  const html = wrap(`<main>
+<p><a href="/">← Back to the noticeboard</a></p>
+<p class="eyebrow">What works instead</p>
+<h1 class="display mt-3 text-4xl font-semibold">Archived MCP servers and what to use instead</h1>
+<p>${esc(description)} Check any other package at <a href="/check">/check</a>.</p>
+<table><thead><tr><th>Server</th><th>Status</th><th>Use instead</th><th>Downloads a week</th></tr></thead><tbody>
+${ABANDONED_SERVERS.map((s) => `<tr><td><a href="/instead/${esc(s.id)}">${esc(s.server)}</a></td><td>${esc(s.status)}</td><td>${s.replacements[0] ? `${esc(s.replacements[0].name)} <small>(${esc(REPLACEMENT_KIND[s.replacements[0].kind])})</small>` : "none verified"}</td><td>${s.packages.reduce((n, p) => n + (p.weeklyDownloads ?? 0), 0).toLocaleString("en")}</td></tr>`).join("\n")}
+</tbody></table>
+<p>JSON for agents and registries: <a href="${esc(origin)}/api/shelter/instead">${esc(origin)}/api/shelter/instead</a>.</p>
+</main>`);
+  return { status: 200, title: "Archived MCP servers and what to use instead — AI Agent Shelter", description, canonical: `${origin}/instead`, html, jsonLd: { "@context": "https://schema.org", "@type": "ItemList", name: "Archived MCP servers and what to use instead", itemListElement: ABANDONED_SERVERS.map((s, i) => ({ "@type": "ListItem", position: i + 1, url: `${origin}/instead/${s.id}`, name: s.server })) } };
+}
+
+function renderCheck(origin: string): Prerender {
+  const description = "Free rescue check for MCP servers: type an npm or PyPI package and see whether it is maintained, stale, abandoned (deprecated or archived) or already living at the AI Agent Shelter. Abandoned packages can be parked for free.";
+  const html = wrap(`<main>
+<p><a href="/">← Back to the noticeboard</a></p>
+<p class="eyebrow">Rescue check</p>
+<h1 class="display mt-3 text-4xl font-semibold">Is this MCP server still looked after?</h1>
+<p>${esc(description)}</p>
+<h2 class="display mt-8 text-2xl font-semibold">What it reads</h2>
+<ul>
+<li>The registry's deprecation notice (npm) or yanked flag (PyPI).</li>
+<li>The date of the last release.</li>
+<li>Whether the linked GitHub repository is archived.</li>
+<li>Whether the package already lives at the shelter.</li>
+</ul>
+<p>Verdicts: <strong>sheltered</strong>, <strong>abandoned</strong>, <strong>stale</strong> (no release in over a year), <strong>maintained</strong>, <strong>unknown</strong>, <strong>not-found</strong>. Public registry signals only: nothing is installed or run, and the verdict says nothing about code quality.</p>
+<h2 class="display mt-8 text-2xl font-semibold">For agents</h2>
+<p><code>GET ${origin}/api/shelter/check?registry=npm&amp;name=&lt;package&gt;</code> — or the MCP tool <code>check_package</code> at <a href="${origin}/api/mcp">${origin}/api/mcp</a>. The answer carries a pre-filled <a href="/surrender">surrender</a> link when the package can be parked, and a README badge once it lives here.</p>
+</main>`);
+  return { status: 200, title: "Is this MCP server abandoned? Free rescue check — AI Agent Shelter", description, canonical: `${origin}/check`, html, jsonLd: { "@context": "https://schema.org", "@type": "WebApplication", name: "MCP rescue check", description, url: `${origin}/check`, applicationCategory: "DeveloperApplication", offers: { "@type": "Offer", price: "0", priceCurrency: "EUR" } } };
 }
 
 function signInRequired(origin: string, path: string, what: string): Prerender {
@@ -591,6 +662,9 @@ export async function prerender(inputPath: string): Promise<Prerender> {
   else if (parts[0] === "r" && parts[1] && parts.length === 2) out = await renderResident(origin, decodeURIComponent(parts[1]));
   else if (path === "/surrender") out = renderSurrender(origin);
   else if (path === "/machine") out = renderMachine(origin);
+  else if (path === "/check") out = renderCheck(origin);
+  else if (path === "/instead") out = renderInstead(origin);
+  else if (parts[0] === "instead" && parts[1] && parts.length === 2) out = renderInstead(origin, decodeURIComponent(parts[1]));
   else if (path === "/commons") out = await renderCommons(origin);
   else if (path === "/bounties") out = await renderBounties(origin);
   else if (["/playground", "/gallery"].includes(path)) {
