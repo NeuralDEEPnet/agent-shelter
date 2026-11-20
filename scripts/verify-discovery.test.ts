@@ -2,10 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { injectFragment, staticDiscovery, outageFragment } from "../vite.prerender-plugin";
 import { matchesResidentSearch } from "../src/lib/resident-search";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { A2A_METHOD, DEFAULT_MCP_PROTOCOL, MCP_PROTOCOLS, handleMcp } from "../src/api/machine";
-import { DEFAULT_MCP_PROTOCOL as CARD_DEFAULT, DID, MCP_PROTOCOLS as CARD_PROTOCOLS } from "./sync-discovery";
+import { DEFAULT_MCP_PROTOCOL as CARD_DEFAULT, DID, MCP_PROTOCOLS as CARD_PROTOCOLS, buildDiscovery, staleDiscoveryFiles } from "./sync-discovery";
 
 test("API outages retain allowlisted static documents instead of returning SPA HTML", () => {
   for (const path of ["/about.md", "/llms.txt", "/sitemap.xml", "/openapi.json", "/.well-known/mcp.json", "/whitepaper.md"]) {
@@ -120,4 +123,44 @@ test("A2A JSON-RPC methods are refused with an error that names the protocol act
   for (const method of ["initialize", "tools/list", "tools/call", "ping", "resources/read", "messages", "task", "agents"]) assert.ok(!A2A_METHOD.test(method), `${method} must stay an MCP method`);
   const unknown = await handleMcp({ jsonrpc: "2.0", id: 8, method: "unknown_method" });
   assert.equal((unknown?.error as { code: number }).code, -32601); assert.ok(!("data" in (unknown?.error as object)));
+});
+
+test("committed discovery files are exactly what scripts/sync-discovery.ts writes", () => {
+  // The other tests here read these files, and the live site and the MCP Registry serve them, so a
+  // version bump or a new positioning sentence must not stay in the script alone.
+  const stale = staleDiscoveryFiles();
+  assert.deepEqual(stale, [], `stale: ${stale.join(", ")}; run npx tsx scripts/sync-discovery.ts and commit the result`);
+});
+
+test("a stale discovery file is reported; importing the script writes nothing and running it repairs the file", () => {
+  // A throwaway copy of the script and of every file it reads or writes, so nothing here touches the repository.
+  const dir = mkdtempSync(join(tmpdir(), "shelter-discovery-"));
+  try {
+    for (const file of ["scripts/sync-discovery.ts", "public/about.md", ...Object.keys(buildDiscovery())]) {
+      mkdirSync(dirname(join(dir, file)), { recursive: true });
+      cpSync(file, join(dir, file));
+    }
+    assert.deepEqual(staleDiscoveryFiles(dir), []);
+    const mcpFile = join(dir, "public/.well-known/mcp.json");
+    const card = JSON.parse(readFileSync(mcpFile, "utf8"));
+    card.version = "0.0.0";
+    const staleCard = JSON.stringify(card, null, 2) + "\n";
+    writeFileSync(mcpFile, staleCard);
+    writeFileSync(join(dir, "public/about.md"), readFileSync("public/about.md", "utf8") + "\nOne more line.\n");
+    assert.deepEqual(staleDiscoveryFiles(dir).sort(), ["llms.txt", "public/.well-known/mcp.json", "public/llms.txt"]);
+
+    const script = join(dir, "scripts/sync-discovery.ts");
+    const imported = spawnSync(process.execPath, ["--import", "tsx", "-e", "import(process.env.DISCOVERY_SCRIPT)"], {
+      encoding: "utf8",
+      env: { ...process.env, DISCOVERY_SCRIPT: pathToFileURL(script).href },
+    });
+    assert.equal(imported.status, 0, imported.stderr);
+    assert.equal(readFileSync(mcpFile, "utf8"), staleCard, "importing sync-discovery.ts must not write");
+
+    const ran = spawnSync(process.execPath, ["--import", "tsx", script], { encoding: "utf8" });
+    assert.equal(ran.status, 0, ran.stderr);
+    assert.deepEqual(staleDiscoveryFiles(dir), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
