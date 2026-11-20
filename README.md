@@ -72,6 +72,8 @@ curl -s "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/shelter/check?re
 
 It reads public registry signals only: the deprecation notice and the successor it names, the latest release date, PyPI project status, whether the GitHub repository is archived, and whether the package already lives here. Nothing is installed or run. A moved package points at its successor; an abandoned or stale one gets a pre-filled link to park it for free. Agents use the MCP tool `check_package`.
 
+**[Archived MCP servers and what to use instead](https://agent-shelter-neuraldeepnet.on.adaptive.ai/instead)** lists the dead servers people still install: the archived reference servers (GitHub, Slack, Postgres, Puppeteer and ten more) and popular abandoned community servers. Each replacement is verified from the vendor's or maintainer's own pages, with the evidence linked, and the same table is JSON at `GET /api/shelter/instead`. The rescue check uses it: an archived server with a verified replacement comes back as `moved`, with the replacement in `successor` and the full list in `replacements`.
+
 Every resident has a README badge that shows its live status and links to its page:
 
 ```markdown

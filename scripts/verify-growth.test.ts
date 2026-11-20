@@ -53,6 +53,11 @@ const registry: McpFetch = async (url, init) => {
   if (url === "https://pypi.org/pypi/big-mcp/3.1.0/json") return json({ info: { version: "3.1.0", summary: "Big", license: "MIT", project_urls: {} } });
   if (url === "https://pypi.org/pypi/attic-mcp/json") return json({ info: { version: "0.9", summary: "Attic", classifiers: ["Development Status :: 7 - Inactive"], project_urls: {} }, urls: [{ upload_time_iso_8601: "2026-06-01T00:00:00Z" }] });
   if (url === "https://pypi.org/simple/attic-mcp/") return json({ "project-status": { status: "archived" } });
+  // curated: the archived GitHub reference server (deprecated with an archive link only)
+  if (url === `${npm}@modelcontextprotocol%2Fserver-github/latest`) return json({ version: "2025.4.8", deprecated: "Archived and unmaintained; no security guarantees. See https://github.com/modelcontextprotocol/servers-archived", dist: tarball("@modelcontextprotocol/server-github", "2025.4.8") });
+  if (url.startsWith(`${npm}@modelcontextprotocol/server-github/-/`)) return head("Tue, 08 Apr 2025 10:09:01 GMT");
+  if (url === `${npm}@modelcontextprotocol%2Fserver-everart/latest`) return json({ version: "0.6.2", deprecated: "Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.", dist: tarball("@modelcontextprotocol/server-everart", "0.6.2") });
+  if (url.startsWith(`${npm}@modelcontextprotocol/server-everart/-/`)) return head("Tue, 08 Apr 2025 10:09:01 GMT");
   if (url === `${npm}${TAG}-parked/latest`) return json({ version: "1.0.0", description: "Parked here", dist: tarball(`${TAG}-parked`, "1.0.0") });
   if (url.startsWith(`${npm}${TAG}-parked/-/`)) return head("Sun, 01 Nov 2026 00:00:00 GMT");
   return json({ error: "Not found" }, 404);
@@ -253,4 +258,57 @@ test("stand-ins: the shelter's own re-implementations say so and never count as 
   clearPrerenderCache();
   const page = await prerender(`/r/${TAG}-standin`);
   assert.match(page.html, /Shelter stand-in: a partial re-implementation/);
+});
+
+test("what works instead: curated replacements drive the verdict, pages and JSON", async () => {
+  const data = await import("../src/api/data/successors");
+  // data integrity: unique ids, unique packages, https evidence on every replacement
+  const ids = new Set(data.ABANDONED_SERVERS.map((x) => x.id));
+  assert.equal(ids.size, data.ABANDONED_SERVERS.length);
+  const pkgs = data.ABANDONED_SERVERS.flatMap((x) => x.packages.map((p) => `${p.registry}:${p.name.toLowerCase()}`));
+  assert.equal(new Set(pkgs).size, pkgs.length, "a package belongs to one server");
+  for (const row of data.ABANDONED_SERVERS) for (const r of row.replacements) {
+    assert.ok(r.evidence.length > 0 && r.evidence.every((u) => u.startsWith("https://")), `${row.id}: ${r.name} needs https evidence`);
+    assert.ok(["official", "declared", "fork", "alternative"].includes(r.kind));
+  }
+  assert.equal(data.abandonedServerFor("pypi", "Office_Word_MCP_Server")?.id, "office-word", "PyPI lookups are PEP 503-normalised");
+  assert.equal(data.abandonedServerFor("npm", "@playwright/mcp"), null);
+
+  rescue.resetRescueCheck();
+  const gh = await rescue.checkPackage({ name: "@modelcontextprotocol/server-github" }, { fetch: registry, now: NOW });
+  assert.ok(gh.ok);
+  assert.equal(gh.check.verdict, "moved", "a verified official replacement turns an archive-link deprecation into 'moved'");
+  assert.match(gh.check.successor?.label ?? "", /github-mcp-server/);
+  assert.equal(gh.check.successor?.url, "https://api.githubcopilot.com/mcp/");
+  assert.ok(gh.check.replacements.length >= 1);
+  assert.match(gh.check.headline, /^Replaced: /);
+  const links = rescue.rescueLinks(gh.check, "https://x.test");
+  assert.equal(links.instead, "https://x.test/instead/github");
+  assert.equal(links.surrender, null, "a replaced server points at its replacement, not at the shelter");
+
+  const ea = await rescue.checkPackage({ name: "@modelcontextprotocol/server-everart" }, { fetch: registry, now: NOW });
+  assert.ok(ea.ok);
+  assert.equal(ea.check.verdict, "abandoned", "no verified replacement: still abandoned, never a guessed successor");
+  assert.equal(ea.check.replacements.length, 0);
+
+  clearPrerenderCache();
+  const index = await prerender("/instead");
+  assert.equal(index.status, 200);
+  assert.match(index.title, /what to use instead/);
+  assert.match(index.html, /href="\/instead\/github"/);
+  const one = await prerender("/instead/github");
+  assert.equal(one.status, 200);
+  assert.match(one.title, /^GitHub MCP server is archived — what to use instead/);
+  assert.match(one.html, /api\.githubcopilot\.com/);
+  assert.equal((await prerender("/instead/nope")).status, 404);
+  assert.deepEqual(parsePath("/instead/github"), { name: "instead", id: "github" });
+  assert.deepEqual(parsePath("/instead"), { name: "instead", id: null });
+
+  const app = machineRoutes();
+  const all = (await (await app.request("/api/shelter/instead")).json()) as { servers: { id: string }[] };
+  assert.equal(all.servers.length, data.ABANDONED_SERVERS.length);
+  assert.equal((await app.request("/api/shelter/instead/github")).status, 200);
+  assert.equal((await app.request("/api/shelter/instead/nope")).status, 404);
+  const sitemap = await (await app.request("/api/shelter/sitemap.xml")).text();
+  assert.match(sitemap, /\/instead\/github<\/loc>/);
 });

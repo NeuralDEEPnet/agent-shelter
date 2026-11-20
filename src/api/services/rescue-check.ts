@@ -3,6 +3,7 @@ import { publicHttpsFetch } from "@/api/services/public-https";
 import type { McpFetch } from "@/api/services/mcpClient";
 import { packageSpecSchema, packageRegistryUrl, packageInstallLine } from "@/api/services/intake";
 import { repoUrlOf } from "@/api/services/registry";
+import { abandonedServerFor, SUCCESSORS_CHECKED_AT, type Replacement } from "@/api/data/successors";
 
 /**
  * Rescue check: "is this MCP package still looked after — and if not, what
@@ -26,7 +27,8 @@ import { repoUrlOf } from "@/api/services/registry";
  */
 
 export type RescueVerdict = "sheltered" | "moved" | "abandoned" | "gone" | "stale" | "maintained" | "unknown" | "not-found";
-export type Successor = { name: string | null; url: string | null; exists: boolean | null; note: string };
+/** `name` is a package in the same registry (checkable); `label` is a display name for any other kind of successor. */
+export type Successor = { name: string | null; url: string | null; exists: boolean | null; note: string; label?: string };
 export type RescueCheck = {
   registry: "npm" | "pypi";
   name: string;
@@ -42,6 +44,10 @@ export type RescueCheck = {
   repository: string | null;
   repositoryArchived: boolean | null;
   successor: Successor | null;
+  /** Verified "what works instead" from the curated table (src/api/data/successors.ts), best first. */
+  replacements: Replacement[];
+  /** Curated status of a known abandoned server, with its evidence. */
+  curated: { id: string; status: "archived" | "stale"; summary: string; evidence: string } | null;
   registryUrl: string;
   install: string;
   resident: { slug: string; name: string; status: string } | null;
@@ -144,11 +150,12 @@ async function residentFor(registry: string, name: string): Promise<RescueCheck[
   return null;
 }
 
-export type VerdictInput = { found: boolean; gone?: boolean; resident: boolean; deprecated: string | null; successor?: Successor | null; archived: boolean | null; inactive?: boolean; daysSinceRelease: number | null };
+export type VerdictInput = { found: boolean; gone?: boolean; resident: boolean; deprecated: string | null; successor?: Successor | null; archived: boolean | null; inactive?: boolean; daysSinceRelease: number | null; curated?: { replaced: boolean } | null };
 export function verdictOf(input: VerdictInput): RescueVerdict {
   if (input.resident) return "sheltered";
   if (!input.found) return "not-found";
   if (input.gone) return "gone";
+  if (input.curated) return input.curated.replaced ? "moved" : "abandoned";
   if (input.deprecated && input.successor && ((input.successor.name && input.successor.exists !== false) || (!input.successor.name && input.successor.url))) return "moved";
   if (input.deprecated || input.archived || input.inactive) return "abandoned";
   if (input.daysSinceRelease === null) return "unknown";
@@ -160,7 +167,7 @@ function headlineFor(verdict: RescueVerdict, successor: Successor | null): strin
     case "sheltered":
       return "Already safe: this package lives at the shelter.";
     case "moved":
-      return successor?.name ? `Moved: its maintainer points to ${successor.name}. Use that instead.` : "Moved: its maintainer points elsewhere. Read the notice below.";
+      return successor?.label ? `Replaced: ${successor.label} does this job now. Use that instead.` : successor?.name ? `Moved: its maintainer points to ${successor.name}. Use that instead.` : "Moved: its maintainer points elsewhere. Read the notice below.";
     case "abandoned":
       return "Abandoned by its public signals. It can be parked at the shelter for free.";
     case "gone":
@@ -296,6 +303,14 @@ export async function checkPackage(input: { registry: unknown; name: unknown }, 
   }
 
   let successor = successorFrom(deprecated, name);
+  const known = found && !gone ? abandonedServerFor(registry, name) : null;
+  const firstReal = known?.replacements.find((r) => r.kind !== "alternative") ?? null;
+  if (known && firstReal && !successor?.name) {
+    // A verified replacement from the curated table beats a link-only notice.
+    const [pkgRegistry, ...rest] = (firstReal.package ?? "").split(":");
+    const pkgName = rest.join(":");
+    successor = { name: pkgRegistry === registry && pkgName ? pkgName : null, url: firstReal.remoteUrl ?? firstReal.evidence[0] ?? null, exists: true, note: firstReal.how, label: firstReal.name };
+  }
   if (successor?.name && registry === "npm") {
     try {
       const next = await read(fetchImpl, `https://registry.npmjs.org/${successor.name.replace("/", "%2F")}/latest`);
@@ -308,12 +323,14 @@ export async function checkPackage(input: { registry: unknown; name: unknown }, 
   const releasedMs = lastReleaseAt ? Date.parse(lastReleaseAt) : NaN;
   const daysSinceRelease = Number.isFinite(releasedMs) ? Math.max(0, Math.floor((now - releasedMs) / 86_400_000)) : null;
   lastReleaseAt = daysSinceRelease === null ? null : new Date(releasedMs).toISOString();
-  const base = { found, gone, deprecated, successor, archived: repositoryArchived, inactive, daysSinceRelease };
+  const base = { found, gone, deprecated, successor, archived: repositoryArchived, inactive, daysSinceRelease, curated: known ? { replaced: Boolean(firstReal) } : null };
   const verdict = verdictOf({ ...base, resident: Boolean(resident) });
   if (!found) signals.unshift(`${registry} has no package named ${name}`);
   if (gone) signals.unshift(`${registry} knows ${name}, but no version is published any more (unpublished)`);
   if (deprecated) signals.unshift(registry === "npm" ? `deprecated on npm: ${deprecated}` : deprecated);
-  if (successor?.name) signals.push(`the notice points to ${successor.name}${successor.exists === true ? ", which is published" : successor.exists === false ? ", which is NOT published — check the notice" : ""}`);
+  if (successor?.name && !successor.label) signals.push(`the notice points to ${successor.name}${successor.exists === true ? ", which is published" : successor.exists === false ? ", which is NOT published — check the notice" : ""}`);
+  if (known) signals.push(`${known.summary} (checked ${SUCCESSORS_CHECKED_AT}: ${known.statusEvidence})`);
+  if (known?.replacements.length) signals.push(`${known.replacements.length} verified replacement${known.replacements.length === 1 ? "" : "s"} listed below`);
   if (repositoryArchived) signals.push("its GitHub repository is archived (read-only)");
   if (daysSinceRelease !== null) signals.push(`latest release ${daysSinceRelease} day${daysSinceRelease === 1 ? "" : "s"} ago${latestVersion ? ` (${latestVersion})` : ""}`);
   if (found && !gone && repositoryArchived === false) signals.push("its GitHub repository is not archived");
@@ -335,6 +352,8 @@ export async function checkPackage(input: { registry: unknown; name: unknown }, 
     repository,
     repositoryArchived,
     successor,
+    replacements: known?.replacements ?? [],
+    curated: known ? { id: known.id, status: known.status, summary: known.summary, evidence: known.statusEvidence } : null,
     registryUrl: packageRegistryUrl({ registry, name }),
     install: packageInstallLine({ registry, name, command: undefined }),
     resident,
@@ -354,6 +373,7 @@ export function rescueLinks(check: RescueCheck, origin: string) {
     resume: check.resident ? `${origin}/r/${check.resident.slug}` : null,
     badge: check.resident ? `${origin}/api/shelter/badge/${check.resident.slug}.svg` : null,
     successor: check.successor?.name ? `${origin}/check?registry=${check.registry}&name=${encodeURIComponent(check.successor.name)}` : (check.successor?.url ?? null),
+    instead: check.curated ? `${origin}/instead/${check.curated.id}` : null,
     surrender: parkable ? `${origin}/surrender?kind=package&${q}` : null,
   };
 }

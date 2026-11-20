@@ -1,3 +1,4 @@
+import { ABANDONED_SERVERS, abandonedServerById, KIND_LABEL, SUCCESSORS_CHECKED_AT } from "@/api/data/successors";
 import { isStandIn, notStandIn, STAND_IN_NOTE } from "@/api/services/stand-in";
 import { Hono } from "hono";
 import { createHash } from "node:crypto";
@@ -48,6 +49,7 @@ export const PATHS = {
   sitemap: "/api/shelter/sitemap.xml",
   card: "/api/shelter/cards", // GET /api/shelter/cards/:slug.svg
   badge: "/api/shelter/badge", // GET /api/shelter/badge/:slug.svg — README badge
+  instead: "/api/shelter/instead", // GET — archived MCP servers and verified replacements (JSON); /:id for one
   check: "/api/shelter/check", // GET ?registry=npm|pypi&name=… — rescue check (public registry signals)
   prerender: "/api/shelter/prerender", // GET ?path=/r/:slug → fragment the Vite plugin injects into index.html
   about: "/api/shelter/about.md", // markdown edition; the platform 308s /llms.txt → /about.md
@@ -144,6 +146,7 @@ export async function catalog() {
       hire: `${origin}${PATHS.hire}/{slug}`,
       surrender: `${origin}${PATHS.surrender}`,
       check: `${origin}${PATHS.check}?registry=npm&name={package}`,
+      instead: `${origin}${PATHS.instead}`,
       badge: `${origin}${PATHS.badge}/{slug}.svg`,
       bounties: `${origin}${PATHS.bounties}`,
       mcp: `${origin}${PATHS.mcp}`,
@@ -218,6 +221,11 @@ export function openApi() {
     url: `${origin}${PATHS.check}?registry={npm|pypi}&name={package}`,
     summary: "Rescue check: is this npm / PyPI package still looked after, and does it already live here? (free)",
     description: "Public registry signals only (deprecation notice, last release date, archived GitHub repository). Verdict: sheltered | moved (the deprecation notice names a published successor — returned as successor) | abandoned | gone (unpublished) | stale | maintained | unknown | not-found, plus the successor's check or a pre-filled surrender link when it can be parked. Nothing is installed or run. Same as the MCP tool check_package.",
+  };
+  (document["x-related-endpoints"] as Record<string, unknown>).instead = {
+    method: "GET",
+    url: `${origin}${PATHS.instead}`,
+    summary: "Archived or abandoned MCP servers and verified replacements, with evidence URLs (free). /{id} for one.",
   };
   (document["x-related-endpoints"] as Record<string, unknown>).badge = {
     method: "GET",
@@ -934,6 +942,8 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
       { loc: `${origin}/commons`, lastmod: day(newest) },
       { loc: `${origin}/bounties`, lastmod: day(newest) },
       { loc: `${origin}/check`, lastmod: day(newest) },
+      { loc: `${origin}/instead`, lastmod: SUCCESSORS_CHECKED_AT },
+      ...ABANDONED_SERVERS.map((s) => ({ loc: `${origin}/instead/${s.id}`, lastmod: SUCCESSORS_CHECKED_AT })),
       { loc: `${origin}/playground`, lastmod: day(newest) },
       { loc: `${origin}/gallery`, lastmod: day(newest) },
       { loc: `${origin}/about.md`, lastmod: day(newest) },
@@ -977,6 +987,13 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
     const r = await db.resident.findUnique({ where: { slug } });
     if (!r || r.status === "rejected") return problems.notFound("No such resident badge.");
     return c.body(residentBadgeSvg({ name: r.name, status: r.status, answered: r.freeCalls + r.paidCalls }), 200, { "content-type": "image/svg+xml", "cache-control": "public, max-age=600" });
+  });
+  // "What works instead": the curated, evidence-backed table of archived MCP servers and their replacements.
+  app.get(PATHS.instead, (c) => c.json({ checkedAt: SUCCESSORS_CHECKED_AT, kinds: KIND_LABEL, servers: ABANDONED_SERVERS, page: `${servingOrigin()}/instead`, note: "Every replacement was found and independently re-checked from the vendor's or maintainer's own pages; evidence URLs are included. official = run by the vendor; declared = named by the abandoned project's maintainers; fork = community continuation; alternative = a different project doing the same job." }, 200, { "cache-control": "public, max-age=3600", "access-control-allow-origin": "*" }));
+  app.get(`${PATHS.instead}/:id`, (c) => {
+    const row = abandonedServerById(c.req.param("id"));
+    if (!row) return problems.notFound(`No archived server "${c.req.param("id").slice(0, 60)}" in the table. The list is at ${PATHS.instead}.`);
+    return c.json({ checkedAt: SUCCESSORS_CHECKED_AT, ...row, page: `${servingOrigin()}/instead/${row.id}` }, 200, { "cache-control": "public, max-age=3600", "access-control-allow-origin": "*" });
   });
   // Rescue check: public registry signals for one npm / PyPI package, and whether it already lives here.
   app.get(PATHS.check, async (c) => {
@@ -1218,10 +1235,10 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
   // method on a GET-only route, a typo'd path, a scanner) ends HERE. Without
   // this it falls through to the SDK's JSON-RPC handler, which answers
   // "Invalid Request" and records it in errors.db as if the app had crashed.
-  const KNOWN_GET = new Set<string>([PATHS.catalog, PATHS.openapi, PATHS.health, PATHS.llms, PATHS.wellKnown, PATHS.agreement, PATHS.sitemap, PATHS.mcp, PATHS.prerender, PATHS.about, PATHS.bounties, PATHS.check]);
+  const KNOWN_GET = new Set<string>([PATHS.catalog, PATHS.openapi, PATHS.health, PATHS.llms, PATHS.wellKnown, PATHS.agreement, PATHS.sitemap, PATHS.mcp, PATHS.prerender, PATHS.about, PATHS.bounties, PATHS.check, PATHS.instead]);
   const KNOWN_POST = new Set<string>([PATHS.surrender, PATHS.bounties, PATHS.mcp]);
   const POST_PREFIXES = [`${PATHS.hire}/`, `${PATHS.ask}/`];
-  const GET_PREFIXES = [`${PATHS.card}/`, `${PATHS.badge}/`, `${PATHS.bounties}/`];
+  const GET_PREFIXES = [`${PATHS.card}/`, `${PATHS.badge}/`, `${PATHS.instead}/`, `${PATHS.bounties}/`];
   const fallback = (c: { req: { url: string; method: string } }) => {
     const pathname = new URL(c.req.url).pathname.replace(/\/+$/, "");
     const method = c.req.method.toUpperCase();

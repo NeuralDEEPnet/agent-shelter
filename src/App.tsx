@@ -15,6 +15,7 @@ const MachinePage = lazy(() => import("@/pages/me-page").then(m => ({ default: m
 const CommonsPage = lazy(() => import("@/pages/commons-page").then(m => ({ default: m.CommonsPage })));
 const BountiesPage = lazy(() => import("@/pages/bounties-page").then(m => ({ default: m.BountiesPage })));
 const CheckPage = lazy(() => import("@/pages/check-page").then(m => ({ default: m.CheckPage })));
+const InsteadPage = lazy(() => import("@/pages/instead-page").then(m => ({ default: m.InsteadPage })));
 const MePage = lazy(() => import("@/pages/me-page").then(m => ({ default: m.MePage })));
 const SponsorReturnPage = lazy(() => import("@/pages/me-page").then(m => ({ default: m.SponsorReturnPage })));
 
@@ -50,6 +51,8 @@ function RoutePage() {
       return <BountiesPage />;
     case "check":
       return <CheckPage />;
+    case "instead":
+      return <InsteadPage key={route.id ?? "all"} id={route.id} />;
     case "sponsor-return":
       return <SponsorReturnPage sessionId={route.sessionId} />;
     default:
