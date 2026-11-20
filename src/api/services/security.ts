@@ -25,6 +25,27 @@ export function findSecrets(text: string): string[] {
   return SECRET_PATTERNS.filter((p) => p.re.test(text)).map((p) => p.id);
 }
 
+/** Documentation samples and placeholders: AWS's own `…EXAMPLE` keys, `sk_test_…`, `your-api-key`, `xxxx`, `<token>`. */
+const PLACEHOLDER = /example|sample|dummy|fake|placeholder|redacted|changeme|your[_-]|x{4,}|0{8,}|<[^>]*>|\.{3}|_test_/i;
+
+/**
+ * The same patterns, split for text that is DATA (code under review, logs, docs): a match that looks
+ * live is `live` (refuse it), a documentation sample or placeholder is `sample` (keep it, flag it).
+ * `password-assignment` is always a sample: `password = "hunter2hunter2"` is what test fixtures say.
+ */
+export function classifySecrets(text: string): { live: string[]; sample: string[] } {
+  const live = new Set<string>();
+  const sample = new Set<string>();
+  for (const p of SECRET_PATTERNS) {
+    const global = new RegExp(p.re.source, p.re.flags.includes("g") ? p.re.flags : `${p.re.flags}g`);
+    for (const m of text.matchAll(global)) {
+      if (p.id === "password-assignment" || PLACEHOLDER.test(m[0])) sample.add(p.id);
+      else live.add(p.id);
+    }
+  }
+  return { live: [...live], sample: [...sample].filter((id) => !live.has(id)) };
+}
+
 // ─── Prompt injection / exfiltration ─────────────────────────────────────────
 
 const INJECTION_PATTERNS: { id: string; re: RegExp }[] = [

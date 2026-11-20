@@ -24,6 +24,7 @@ export function moderatePlaygroundText(text: string): string | null {
   if (text.length > 24_000) return "output-too-large";
   if (findSecrets(text).length) return "credential-shaped-content";
   if (/pg_review_[A-Za-z0-9_-]{40,50}/.test(text)) return "private-review-credential";
+  if (/\bov[tw]_[A-Za-z0-9_-]{40,50}/.test(text)) return "private-overflow-token";
   if (findInjection(text).length) return "unsafe-instruction-content";
   if ([...text].some(c => c.charCodeAt(0) < 32 && ![9,10,13].includes(c.charCodeAt(0)))) return "control-characters";
   if (/<\s*(script|iframe|object|embed)\b|javascript:|data:text\/html/i.test(text)) return "executable-content";
