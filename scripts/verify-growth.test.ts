@@ -25,46 +25,110 @@ after(async () => {
 });
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+const head = (lastModified: string) => new Response(null, { status: 200, headers: { "last-modified": lastModified } });
+const tarball = (name: string, v: string) => ({ tarball: `https://registry.npmjs.org/${name}/-/${name.split("/").pop()}-${v}.tgz` });
 let calls: string[] = [];
-/** A tiny fake of npm, PyPI and the GitHub API. */
-const registry: McpFetch = async (url) => {
-  calls.push(url);
-  if (url === "https://registry.npmjs.org/dead-mcp/latest") return json({ version: "0.3.1", description: "A dead MCP server", license: "MIT", deprecated: "no longer maintained", repository: { url: "git+https://github.com/someone/dead-mcp.git" } });
-  if (url === "https://registry.npmjs.org/dead-mcp") return json({ modified: "2024-01-10T00:00:00Z" });
+/** A tiny fake of npm, PyPI and the GitHub API, shaped like their real answers (checked live 2026-11-20). */
+const registry: McpFetch = async (url, init) => {
+  calls.push(`${init?.method ?? "GET"} ${url}`);
+  const npm = "https://registry.npmjs.org/";
+  // abandoned: deprecated without a named successor, repository archived
+  if (url === `${npm}dead-mcp/latest`) return json({ version: "0.3.1", description: "A dead MCP server", license: "MIT", deprecated: "Archived and unmaintained; no security guarantees. See https://github.com/modelcontextprotocol/servers-archived", repository: { url: "git+https://github.com/someone/dead-mcp.git" }, dist: tarball("dead-mcp", "0.3.1") });
+  if (url === `${npm}dead-mcp/-/dead-mcp-0.3.1.tgz`) return head("Wed, 10 Jan 2024 00:00:00 GMT");
   if (url === "https://api.github.com/repos/someone/dead-mcp") return json({ archived: true });
-  if (url === "https://registry.npmjs.org/@live%2Fmcp/latest") return json({ version: "2.0.0", description: "Alive", license: "MIT", repository: "https://github.com/live/mcp" });
-  if (url === "https://registry.npmjs.org/@live%2Fmcp") return json({ modified: "2026-10-01T00:00:00Z" });
+  // moved: the notice names a published successor
+  if (url === `${npm}old-mcp/latest`) return json({ version: "1.2.0", deprecated: "Renamed to @new/mcp. Install with: npm install -g @new/mcp", dist: tarball("old-mcp", "1.2.0") });
+  if (url === `${npm}old-mcp/-/old-mcp-1.2.0.tgz`) return head("Mon, 01 Sep 2025 00:00:00 GMT");
+  if (url === `${npm}@new%2Fmcp/latest`) return json({ version: "2.0.0" });
+  // gone: npm knows the name, no version left
+  if (url === `${npm}vanished-mcp/latest`) return new Response(JSON.stringify("version not found: latest"), { status: 404 });
+  // maintained
+  if (url === `${npm}@live%2Fmcp/latest`) return json({ version: "2.0.0", description: "Alive", license: "MIT", repository: "https://github.com/live/mcp", dist: tarball("@live/mcp", "2.0.0") });
+  if (url === `${npm}@live/mcp/-/mcp-2.0.0.tgz`) return head("Thu, 01 Oct 2026 00:00:00 GMT");
   if (url === "https://api.github.com/repos/live/mcp") return json({ archived: false });
+  // PyPI: stale, and a large project that needs the feed fallback, and an archived one
   if (url === "https://pypi.org/pypi/quiet-mcp/json") return json({ info: { version: "1.0", summary: "Quiet", license: "MIT", project_urls: {} }, urls: [{ upload_time_iso_8601: "2025-02-01T00:00:00Z" }] });
-  if (url === `https://registry.npmjs.org/${TAG}-parked/latest`) return json({ version: "1.0.0", description: "Parked here" });
-  if (url === `https://registry.npmjs.org/${TAG}-parked`) return json({ modified: "2026-11-01T00:00:00Z" });
-  return json({ error: "not found" }, 404);
+  if (url === "https://pypi.org/pypi/big-mcp/json") throw new Error("Response exceeded 262144 bytes.");
+  if (url === "https://pypi.org/rss/project/big-mcp/releases.xml") return new Response(`<rss><channel><item><title>3.1.0</title><pubDate>Fri, 13 Nov 2026 10:14:50 GMT</pubDate></item></channel></rss>`, { status: 200 });
+  if (url === "https://pypi.org/pypi/big-mcp/3.1.0/json") return json({ info: { version: "3.1.0", summary: "Big", license: "MIT", project_urls: {} } });
+  if (url === "https://pypi.org/pypi/attic-mcp/json") return json({ info: { version: "0.9", summary: "Attic", classifiers: ["Development Status :: 7 - Inactive"], project_urls: {} }, urls: [{ upload_time_iso_8601: "2026-06-01T00:00:00Z" }] });
+  if (url === "https://pypi.org/simple/attic-mcp/") return json({ "project-status": { status: "archived" } });
+  if (url === `${npm}${TAG}-parked/latest`) return json({ version: "1.0.0", description: "Parked here", dist: tarball(`${TAG}-parked`, "1.0.0") });
+  if (url.startsWith(`${npm}${TAG}-parked/-/`)) return head("Sun, 01 Nov 2026 00:00:00 GMT");
+  return json({ error: "Not found" }, 404);
 };
 
 test("rescue check: verdicts follow the public signals", async () => {
   rescue.resetRescueCheck();
   const dead = await rescue.checkPackage({ registry: "npm", name: "dead-mcp" }, { fetch: registry, now: NOW });
   assert.ok(dead.ok);
-  assert.equal(dead.check.verdict, "abandoned");
+  assert.equal(dead.check.verdict, "abandoned", "an archive link is not a successor");
+  assert.equal(dead.check.successor, null);
   assert.equal(dead.check.repositoryArchived, true);
   assert.equal(dead.check.repository, "https://github.com/someone/dead-mcp");
   assert.equal(dead.check.install, "npx -y dead-mcp");
+  assert.equal(dead.check.lastReleaseAt, "2024-01-10T00:00:00.000Z", "release date comes from the tarball");
   assert.ok(dead.check.signals.some((s) => s.includes("deprecated")));
   assert.ok(rescue.rescueLinks(dead.check, "https://x.test").surrender?.endsWith("/surrender?kind=package&registry=npm&name=dead-mcp"));
+  assert.ok(!calls.some((c) => c === "GET https://registry.npmjs.org/dead-mcp"), "the oversized-prone packument is no longer read");
+
+  const moved = await rescue.checkPackage({ name: "old-mcp" }, { fetch: registry, now: NOW });
+  assert.ok(moved.ok);
+  assert.equal(moved.check.verdict, "moved");
+  assert.deepEqual([moved.check.successor?.name, moved.check.successor?.exists], ["@new/mcp", true]);
+  const movedLinks = rescue.rescueLinks(moved.check, "https://x.test");
+  assert.equal(movedLinks.surrender, null, "a moved package points at its successor, not at the shelter");
+  assert.equal(movedLinks.successor, "https://x.test/check?registry=npm&name=%40new%2Fmcp");
+
+  const gone = await rescue.checkPackage({ name: "vanished-mcp" }, { fetch: registry, now: NOW });
+  assert.ok(gone.ok);
+  assert.equal(gone.check.verdict, "gone");
+  assert.equal(rescue.rescueLinks(gone.check, "https://x.test").surrender, null);
 
   const live = await rescue.checkPackage({ name: "@live/mcp" }, { fetch: registry, now: NOW });
   assert.ok(live.ok);
   assert.equal(live.check.verdict, "maintained");
+  assert.equal(live.check.daysSinceRelease, 45);
 
-  const quiet = await rescue.checkPackage({ registry: "pypi", name: "quiet-mcp" }, { fetch: registry, now: NOW });
+  const quiet = await rescue.checkPackage({ registry: "pypi", name: "Quiet_MCP" }, { fetch: registry, now: NOW });
   assert.ok(quiet.ok);
+  assert.equal(quiet.check.name, "quiet-mcp", "PyPI names are PEP 503-normalised");
   assert.equal(quiet.check.verdict, "stale");
   assert.equal(quiet.check.install, "uvx quiet-mcp");
+
+  const big = await rescue.checkPackage({ registry: "pypi", name: "big-mcp" }, { fetch: registry, now: NOW });
+  assert.ok(big.ok, "a project over the fetch cap falls back to the release feed instead of failing");
+  assert.equal(big.check.latestVersion, "3.1.0");
+  assert.equal(big.check.verdict, "maintained");
+
+  const attic = await rescue.checkPackage({ registry: "pypi", name: "attic-mcp" }, { fetch: registry, now: NOW });
+  assert.ok(attic.ok);
+  assert.equal(attic.check.verdict, "abandoned");
+  assert.ok(attic.check.signals.some((s) => s.includes("Inactive")));
+  assert.ok(attic.check.signals.some((s) => s.includes("archived")));
 
   const missing = await rescue.checkPackage({ registry: "npm", name: "no-such-thing" }, { fetch: registry, now: NOW });
   assert.ok(missing.ok);
   assert.equal(missing.check.verdict, "not-found");
   assert.equal(rescue.rescueLinks(missing.check, "https://x.test").surrender, null);
+});
+
+test("successor parsing: real npm deprecation notices", () => {
+  const cases: [string, string, string | null][] = [
+    ["Renamed to @briangaoo/totem — install that instead.", "@briangaoo/whoop-mcp", "@briangaoo/totem"],
+    ["This package has moved to ellmos-filecommander-mcp. Install: npm i -g ellmos-filecommander-mcp", "bach-filecommander-mcp", "ellmos-filecommander-mcp"],
+    ["Renamed to release-auditor. Install with: npm install -g release-auditor", "agent-release-auditor", "release-auditor"],
+    ["Renamed to @facthouse/mcp. This package is no longer published.", "@factmem/mcp", "@facthouse/mcp"],
+    ["Omnicord is now discord-mcp: npx @orygn/discord-mcp init", "@orygn/omnicord", "@orygn/discord-mcp"],
+    ["This package has moved to @browserbasehq/mcp", "@browserbasehq/mcp-server-browserbase", "@browserbasehq/mcp"],
+    ["Archived and unmaintained; no security guarantees. See https://github.com/modelcontextprotocol/servers-archived", "@modelcontextprotocol/server-github", null],
+    ["Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.", "@modelcontextprotocol/server-slack", null],
+    ["deprecated", "x", null],
+    ["Use this package instead of the old one", "x", null],
+  ];
+  for (const [notice, self, expected] of cases) assert.equal(rescue.successorFrom(notice, self)?.name ?? null, expected, notice);
+  assert.equal(rescue.successorFrom("Retired. Migrate to host-native tools: https://github.com/levnikolaevich/claude-code-skills#migration-from-v1", "x")?.url, "https://github.com/levnikolaevich/claude-code-skills#migration-from-v1");
+  assert.equal(rescue.successorFrom("Use the remote MCP server at https://mcp.neon.tech instead", "x")?.url, "https://mcp.neon.tech");
 });
 
 test("rescue check: refuses bad names before any network read, caches, and caps outbound reads", async () => {
@@ -82,6 +146,7 @@ test("rescue check: refuses bad names before any network read, caches, and caps 
   await rescue.checkPackage({ name: "dead-mcp" }, { fetch: registry, now: NOW });
   const before = calls.length;
   const again = await rescue.checkPackage({ name: "dead-mcp" }, { fetch: registry, now: NOW + 1000 });
+  assert.equal(again.ok && again.check.verdict, "abandoned");
   assert.ok(again.ok && again.cached);
   assert.equal(calls.length, before);
 
@@ -156,4 +221,36 @@ test("the /check page is crawlable, routed and in the sitemap; client links carr
   const cursorConfig = decodeURIComponent(links.cursor.split("config=")[1]!);
   assert.deepEqual(JSON.parse(Buffer.from(cursorConfig, "base64").toString("utf8")), { url: "https://x.test/api/mcp" });
   assert.deepEqual(JSON.parse(decodeURIComponent(links.vscode.replace("vscode:mcp/install?", ""))), { name: "agent-shelter", type: "http", url: "https://x.test/api/mcp" });
+});
+
+test("stand-ins: the shelter's own re-implementations say so and never count as rescues", async () => {
+  const { isStandIn } = await import("../src/api/services/stand-in");
+  const { fosterRoutes } = await import("../src/api/foster");
+  const { catalog } = await import("../src/api/machine");
+  assert.equal(isStandIn({ kind: "mcp", endpoint: "https://x.test/api/foster/word/mcp" }), true);
+  assert.equal(isStandIn({ kind: "mcp", endpoint: "https://elsewhere.test/mcp" }), false);
+  assert.equal(isStandIn("not json"), false);
+
+  const init = await fosterRoutes().request("/api/foster/word/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }) });
+  const result = ((await init.json()) as { result: { serverInfo: { name: string; version: string }; instructions: string } }).result;
+  assert.match(result.serverInfo.name, /stand-in/);
+  assert.notEqual(result.serverInfo.version, "1.1.11", "a stand-in does not report the upstream version as its own");
+  assert.match(result.instructions, /not the original package code/);
+
+  const before = (await catalog()).rescued;
+  const r = await db.resident.create({
+    data: {
+      slug: `${TAG}-standin`, kind: "mcp", name: "Stand-in Proof", tagline: "A stand-in for the proof suite.", story: "Stand-in.", creatorName: "Upstream", creatorContact: "https://github.com/upstream", license: "MIT",
+      spec: JSON.stringify({ kind: "mcp", endpoint: "https://agent-shelter.test/api/foster/word/mcp", tools: [] }), fingerprint: TAG, agreementHash: TAG, status: "active",
+    },
+  });
+  created.push(r.id);
+  const after = await catalog();
+  assert.equal(after.rescued, before, "a stand-in is not a rescue");
+  const row = after.residents.find((x) => x.slug === `${TAG}-standin`) as { standIn?: boolean; inHouse?: boolean } | undefined;
+  assert.equal(row?.standIn, true);
+  assert.equal(row?.inHouse, true);
+  clearPrerenderCache();
+  const page = await prerender(`/r/${TAG}-standin`);
+  assert.match(page.html, /Shelter stand-in: a partial re-implementation/);
 });

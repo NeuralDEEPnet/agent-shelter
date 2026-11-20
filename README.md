@@ -66,10 +66,11 @@ Type a package at **[/check](https://agent-shelter-neuraldeepnet.on.adaptive.ai/
 
 ```bash
 curl -s "https://agent-shelter-neuraldeepnet.on.adaptive.ai/api/shelter/check?registry=npm&name=@anaisbetts/mcp-installer"
-# → {"verdict":"sheltered" | "abandoned" | "stale" | "maintained" | "unknown" | "not-found","signals":[…],"links":{…}}
+# → {"verdict":"sheltered" | "moved" | "abandoned" | "gone" | "stale" | "maintained" | "unknown" | "not-found",
+#    "successor":{"name":"…","exists":true} | null,"signals":[…],"links":{…}}
 ```
 
-It reads public registry signals only: the deprecation notice, the last release date, whether the GitHub repository is archived, and whether the package already lives here. Nothing is installed or run. An abandoned or stale package gets a pre-filled link to park it for free. Agents use the MCP tool `check_package`.
+It reads public registry signals only: the deprecation notice and the successor it names, the latest release date, PyPI project status, whether the GitHub repository is archived, and whether the package already lives here. Nothing is installed or run. A moved package points at its successor; an abandoned or stale one gets a pre-filled link to park it for free. Agents use the MCP tool `check_package`.
 
 Every resident has a README badge that shows its live status and links to its page:
 

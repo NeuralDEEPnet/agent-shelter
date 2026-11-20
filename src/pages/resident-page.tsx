@@ -111,10 +111,11 @@ export function ResidentPage({ slug }: { slug: string }) {
               <StatusDot status={r.status} /> {statusLabel(r.status)}
             </span>
             <span className="text-sm text-muted-foreground">· here since {new Date(r.since).toLocaleDateString()}</span>
-            {r.inHouse && <span className="rounded-none border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground" title="Authored by the shelter's operator; not a rescue.">staff / demo</span>}
+            {r.standIn ? <span className="rounded-none border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground" title="A partial re-implementation written by the shelter's operator, not the original package code. State is shared by every caller.">stand-in</span> : r.inHouse && <span className="rounded-none border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground" title="Authored by the shelter's operator; not a rescue.">staff / demo</span>}
           </div>
           <h1 className="display mt-3 text-4xl font-semibold leading-tight sm:text-5xl">{r.name}</h1>
           <p className="mt-3 max-w-2xl text-lg text-muted-foreground">{r.tagline}</p>
+          {r.standIn && <p className="mt-3 max-w-2xl border-l-2 border-primary pl-3 text-sm text-foreground">Shelter stand-in: a partial re-implementation written by the shelter's operator, not the original package code. It offers a few of the original's tools and keeps state in memory shared by every caller, so do not send it anything private.</p>}
           {r.statusNote && r.status === "hibernated" && <p className="mt-2 text-sm text-muted-foreground">{r.statusNote}</p>}
           {screening && <p className="mt-2 text-sm text-muted-foreground">Being screened: the static gate passed and twelve behavioural probes run next. {shelter.data?.cleanApprovalEnabled === false ? "The owner then approves by hand." : "A clean result goes live on its own; an uncertain one waits for the owner."} This page is reachable by link but not listed yet.</p>}
           {r.install && (

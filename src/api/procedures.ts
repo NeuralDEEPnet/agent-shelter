@@ -1,3 +1,4 @@
+import { isStandIn, notStandIn } from "@/api/services/stand-in";
 import { db } from "@/api/db";
 export { getPlayground, setResidentPlaygroundAccess, sendPlaygroundMessage, createPlaygroundWork, publishPlaygroundItem, ratePlaygroundItem, setPlaygroundPaused, hidePlaygroundItem, createPlaygroundReviewCredential } from "@/api/procedures.playground";
 import { queue } from "@/api/queue";
@@ -91,7 +92,8 @@ function publicResident(r: {
     name: r.name,
     tagline: r.tagline,
     status: r.status,
-    inHouse: r.inHouse,
+    inHouse: r.inHouse || isStandIn(spec),
+    standIn: isStandIn(spec),
     generation: r.generation ?? 1,
     takingCalls: (LIVE_STATUSES as readonly string[]).includes(r.status),
     hirePriceCents: r.hirePriceCents,
@@ -116,7 +118,7 @@ export async function getShelter() {
     caller(),
     db.sponsorship.count({ where: { status: "active" } }),
   ]);
-  const rescued = await db.resident.count({ where: { status: { not: "rejected" }, inHouse: false } });
+  const rescued = await db.resident.count({ where: { status: { not: "rejected" }, inHouse: false, ...notStandIn } });
   const counts = Object.fromEntries(byStatus.map((b) => [b.status, b._count._all])) as Record<string, number>;
   const mpp = machinePayments().health();
   return {

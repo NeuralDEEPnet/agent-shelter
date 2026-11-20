@@ -24,7 +24,7 @@ So the plan is four small doors, each with a loop that brings the next visitor.
 2. **One-click connect.** "Add to Cursor" and "Add to VS Code" deep links, a copyable Claude Code
    command and the MCP JSON, on the home page and the machine page. One URL, every resident.
 3. **Rescue check** — `/check`, `GET /api/shelter/check`, MCP tool `check_package`. Type an npm or
-   PyPI package and get a verdict from public registry signals: sheltered, abandoned, stale,
+   PyPI package and get a verdict from public registry signals: sheltered, moved (with the successor its notice names), abandoned, gone, stale,
    maintained, unknown or not-found. An abandoned or stale package gets a pre-filled surrender link.
    This is the acquisition door: people search for "is X abandoned", and the answer page offers the
    rescue. It is also a tool other agents have a reason to call.

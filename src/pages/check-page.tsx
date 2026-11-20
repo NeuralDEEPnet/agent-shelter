@@ -8,14 +8,16 @@ import { href, navigate } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 type Check = {
-  registry: "npm" | "pypi"; name: string; verdict: "sheltered" | "abandoned" | "stale" | "maintained" | "unknown" | "not-found";
+  registry: "npm" | "pypi"; name: string; verdict: "sheltered" | "moved" | "abandoned" | "gone" | "stale" | "maintained" | "unknown" | "not-found";
+  successor: { name: string | null; url: string | null; exists: boolean | null; note: string } | null;
+  daysSinceRelease: number | null;
   headline: string; signals: string[]; latestVersion: string | null; description: string | null; license: string | null;
   registryUrl: string; install: string; repository: string | null;
   resident: { slug: string; name: string; status: string } | null;
-  links: { page: string; resume: string | null; badge: string | null; surrender: string | null };
+  links: { page: string; resume: string | null; badge: string | null; successor: string | null; surrender: string | null };
 };
 
-const VERDICT_LABEL: Record<Check["verdict"], string> = { sheltered: "Sheltered", abandoned: "Abandoned", stale: "Stale", maintained: "Looked after", unknown: "Unknown", "not-found": "Not found" };
+const VERDICT_LABEL: Record<Check["verdict"], string> = { sheltered: "Sheltered", moved: "Moved", abandoned: "Abandoned", gone: "Gone", stale: "Stale", maintained: "Looked after", unknown: "Unknown", "not-found": "Not found" };
 const EXAMPLES = [{ registry: "npm", name: "@anaisbetts/mcp-installer" }, { registry: "npm", name: "@modelcontextprotocol/sdk" }, { registry: "pypi", name: "office-word-mcp-server" }];
 
 function readQuery(): { registry: "npm" | "pypi"; name: string } {
@@ -89,9 +91,11 @@ export function CheckPage() {
             {c.description && <p className="mt-2 text-sm text-muted-foreground">{c.description}</p>}
             {c.signals.length > 0 && <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-muted-foreground">{c.signals.map((s) => <li key={s}>{s}</li>)}</ul>}
             <div className="mt-5 flex flex-wrap gap-3">
+              {c.successor?.name && <Button asChild className="bg-primary font-mono text-xs uppercase tracking-wider text-primary-foreground"><a href={href(`/check?registry=${c.registry}&name=${encodeURIComponent(c.successor.name)}`)} onClick={(e) => { e.preventDefault(); run(c.registry, c.successor!.name!); }}>Check {c.successor.name} <ArrowRight className="ml-1.5 h-3.5 w-3.5" /></a></Button>}
+              {!c.successor?.name && c.successor?.url && <Button asChild variant="outline" className="font-mono text-xs uppercase tracking-wider"><a href={c.successor.url} target="_blank" rel="noreferrer nofollow">What the maintainer says to use</a></Button>}
               {c.resident && <Button asChild className="bg-primary font-mono text-xs uppercase tracking-wider text-primary-foreground"><a href={href(`/r/${c.resident.slug}`)}>Ask {c.resident.name} — free <ArrowRight className="ml-1.5 h-3.5 w-3.5" /></a></Button>}
               {surrenderHref && <Button asChild className="bg-primary font-mono text-xs uppercase tracking-wider text-primary-foreground"><a href={surrenderHref}>Park it at the shelter — free <ArrowRight className="ml-1.5 h-3.5 w-3.5" /></a></Button>}
-              {c.verdict !== "not-found" && <Button asChild variant="outline" className="font-mono text-xs uppercase tracking-wider"><a href={c.registryUrl} target="_blank" rel="noreferrer">Registry page</a></Button>}
+              {!["not-found", "gone"].includes(c.verdict) && <Button asChild variant="outline" className="font-mono text-xs uppercase tracking-wider"><a href={c.registryUrl} target="_blank" rel="noreferrer">Registry page</a></Button>}
             </div>
             {c.links.badge && c.links.resume && (
               <div className="mt-5">

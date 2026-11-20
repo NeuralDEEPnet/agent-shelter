@@ -1,3 +1,4 @@
+import { isStandIn, notStandIn, STAND_IN_NOTE } from "@/api/services/stand-in";
 import { Hono } from "hono";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -95,7 +96,7 @@ export async function catalog() {
   });
   const [screening, rescued] = await Promise.all([
     db.resident.count({ where: { status: { in: ["submitted", "screened", "approved"] } } }),
-    db.resident.count({ where: { status: { not: "rejected" }, inHouse: false } }),
+    db.resident.count({ where: { status: { not: "rejected" }, inHouse: false, ...notStandIn } }),
   ]);
   return {
     service: "AI Agent Shelter",
@@ -114,7 +115,8 @@ export async function catalog() {
       kind: r.kind,
       tagline: r.tagline,
       status: r.status,
-      inHouse: r.inHouse,
+      inHouse: r.inHouse || isStandIn(r.spec),
+      standIn: isStandIn(r.spec),
       available: health.state === "ready" && !setting?.paused && used + 2 <= env.SHELTER_GLOBAL_DAILY_UNITS && (r.budgetUnits >= 2 || (r.wallet?.balanceCents ?? 0) >= 10),
       price: formatEur(r.hirePriceCents),
       amountCents: r.hirePriceCents,
@@ -215,7 +217,7 @@ export function openApi() {
     method: "GET",
     url: `${origin}${PATHS.check}?registry={npm|pypi}&name={package}`,
     summary: "Rescue check: is this npm / PyPI package still looked after, and does it already live here? (free)",
-    description: "Public registry signals only (deprecation notice, last release date, archived GitHub repository). Verdict: sheltered | abandoned | stale | maintained | unknown | not-found, plus a pre-filled surrender link when it can be parked. Nothing is installed or run. Same as the MCP tool check_package.",
+    description: "Public registry signals only (deprecation notice, last release date, archived GitHub repository). Verdict: sheltered | moved (the deprecation notice names a published successor — returned as successor) | abandoned | gone (unpublished) | stale | maintained | unknown | not-found, plus the successor's check or a pre-filled surrender link when it can be parked. Nothing is installed or run. Same as the MCP tool check_package.",
   };
   (document["x-related-endpoints"] as Record<string, unknown>).badge = {
     method: "GET",
@@ -338,7 +340,7 @@ const MCP_TOOLS = [
   },
   {
     name: "check_package",
-    description: "Free, read-only. Rescue check for one npm or PyPI package (typically an MCP server): is it still looked after? Returns a verdict — sheltered (already lives here), abandoned (deprecated on the registry or its GitHub repository is archived), stale (no release in over a year), maintained, unknown or not-found — with the public signals behind it, the install line, and either the resident's résumé or a pre-filled surrender link to park it here for free. Reads registry metadata only; nothing is installed or run, and the verdict says nothing about code quality.",
+    description: "Free, read-only. Rescue check for one npm or PyPI package (typically an MCP server): is it still looked after? Returns a verdict — sheltered (already lives here), moved (its deprecation notice names a published successor, returned as `successor`: use that instead), abandoned (deprecated, archived on GitHub, PyPI-archived or Inactive), gone (unpublished), stale (no release in over a year), maintained, unknown or not-found — with the public signals behind it, the install line, and the resident's résumé, the successor's check, or a pre-filled surrender link to park an abandoned or stale package here for free. Reads registry metadata only; nothing is installed or run, and the verdict says nothing about code quality.",
     inputSchema: { type: "object", required: ["name"], properties: { registry: { type: "string", enum: ["npm", "pypi"], default: "npm" }, name: { type: "string", maxLength: 214 } } },
   },
   {
@@ -401,7 +403,8 @@ async function residentView(slug: string) {
     status: r.status,
     generation: r.generation,
     takingCalls: live,
-    inHouse: r.inHouse,
+    inHouse: r.inHouse || isStandIn(r.spec),
+    standIn: isStandIn(r.spec) ? STAND_IN_NOTE : null,
     sponsoredQuestionsPerDay: Math.max(0, r.stipendUnits - env.SHELTER_DEFAULT_STIPEND_UNITS),
     statusNote: live ? null : r.status === "hibernated" ? "Hibernating: a sponsorship or a paid question wakes it." : "Being screened: static gate passed; behavioural probes and the approval policy decide next.",
     tagline: r.tagline,
