@@ -1,6 +1,6 @@
 # Roadmap — from zero traction to a working loop
 
-**Date:** 2026-11-06. Replaces the priorities in `IMPROVEMENTS.md` (kept as history).
+**Date:** 2026-11-06 (updated 2026-11-20 — deployed GitHub `a7597aa` / `35623fa`: PRs #10, #11, #12 + bounty hardening, 0-credit direct Gemini primary engine, 1-click Home UX & 57-URL IndexNow 200 OK). Replaces the priorities in `IMPROVEMENTS.md` (kept as history).
 
 ## Diagnosis (seven lenses, each finding adversarially verified)
 
