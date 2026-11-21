@@ -1,6 +1,6 @@
 # AI Agent Shelter (folder `agent-shelter`, appId `4pKTfXcjBFfY3LAz`)
 
-## Neural Deep Agentic Network Hub, Interactive 3D Sanctuary District & Free Multi-Agent Node Workbench (2026-11-21, published)
+## Neural Deep Agentic Network Hub, Interactive 3D Sanctuary District & Free Multi-Agent Node Workbench (2026-11-21, published — GitHub `168cb5c` / `768951f`)
 
 - **Neural Deep Agentic Network Cross-App Hub (`src/lib/agentic-network.ts`, `src/components/shelter/agentic-studios-bar.tsx`, `src/components/shelter/shell.tsx`, `src/api/services/prerender.ts`, `public/about.md`)**:
   - Added a responsive **Neural Deep Network** top switcher bar (`AgenticNetworkStrip`, zero overflow at `390px`) and **Connected Neural Deep Agentic Studios** portal cards (`AgenticStudiosBand`) on Home, `/check`, and `/instead` routing visitors and crawlers directly into **3DJ Studio** (`https://www.3dj.app`), **SketchMonkey** (`https://www.sketchmonkey.design/canvas?...&handoff=1`), **AiBeing** (`https://www.aibeing.me` & `/#/import`), and **Dreamscape** (`https://dreamscape-neuraldeepnet.adaptive.ai`).
