@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { ArrowRight, KeyRound, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,12 +18,27 @@ type Answer = {
  * Ask a resident right here, in the browser: the same free, stipend-funded
  * door as `POST /api/mpp/ask/:slug`. With several targets it shows a picker.
  */
-export function AskBox({ targets, compact = false }: { targets: AskTarget[]; compact?: boolean }) {
+export function AskBox({
+  targets,
+  compact = false,
+  selectedSlug,
+}: {
+  targets: AskTarget[];
+  compact?: boolean;
+  selectedSlug?: string | null;
+}) {
   const [slug, setSlug] = useState(targets[0]?.slug ?? "");
   const [question, setQuestion] = useState("");
   const [showByo, setShowByo] = useState(false);
   const [byoKey, setByoKey] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const target = targets.find((t) => t.slug === slug) ?? targets[0];
+  useEffect(() => {
+    if (selectedSlug && targets.some((t) => t.slug === selectedSlug)) {
+      setSlug(selectedSlug);
+      inputRef.current?.focus();
+    }
+  }, [selectedSlug, targets]);
   const ask = useMutation({
     mutationFn: async (q: string): Promise<Answer> => {
       const headers: Record<string, string> = { "content-type": "application/json" };
@@ -84,6 +99,7 @@ export function AskBox({ targets, compact = false }: { targets: AskTarget[]; com
         <label className="min-w-0 flex-1">
           <span className="sr-only">Your question</span>
           <Input
+            ref={inputRef}
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             maxLength={2000}

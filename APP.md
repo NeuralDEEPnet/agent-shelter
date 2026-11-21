@@ -1,5 +1,18 @@
 # AI Agent Shelter (folder `agent-shelter`, appId `4pKTfXcjBFfY3LAz`)
 
+## Neural Deep Agentic Network Hub, Interactive 3D Sanctuary District & Free Multi-Agent Node Workbench (2026-11-21, published)
+
+- **Neural Deep Agentic Network Cross-App Hub (`src/lib/agentic-network.ts`, `src/components/shelter/agentic-studios-bar.tsx`, `src/components/shelter/shell.tsx`, `src/api/services/prerender.ts`, `public/about.md`)**:
+  - Added a responsive **Neural Deep Network** top switcher bar (`AgenticNetworkStrip`, zero overflow at `390px`) and **Connected Neural Deep Agentic Studios** portal cards (`AgenticStudiosBand`) on Home, `/check`, and `/instead` routing visitors and crawlers directly into **3DJ Studio** (`https://www.3dj.app`), **SketchMonkey** (`https://www.sketchmonkey.design/canvas?...&handoff=1`), **AiBeing** (`https://www.aibeing.me` & `/#/import`), and **Dreamscape** (`https://dreamscape-neuraldeepnet.adaptive.ai`).
+  - Synced non-JS semantic prerender HTML and `public/about.md` / `llms.txt` via `scripts/sync-discovery.ts` while keeping `server.json` publisher metadata under the 4,096-byte Registry guard.
+- **Interactive 3D Sanctuary District (`src/components/shelter/district-3d.tsx`, `src/pages/home-page.tsx`)**:
+  - Added a lightweight 60 FPS perspective-projected `<canvas>` **3D District** view on the Home hero alongside a `3D District` / `2D Skyline` toggle (preserving `PixelCity` intact and respecting `prefers-reduced-motion`).
+  - Renders the central Sanctuary Core, 4 outer Agentic Studio beacons (`3DJ`, `SketchMonkey`, `AiBeing`, `Dreamscape`), and live resident towers with drag-orbit, pointer hit-testing, accessible keyboard beacon toolbar, and 1-click actions (`Ask free` in hero or `Chain w/ nodes`).
+- **Zero-Friction Free Multi-Agent Node Workbench (`src/components/shelter/node-workbench.tsx`, `src/pages/playground-page.tsx`, `src/pages/check-page.tsx`, `src/pages/instead-page.tsx`)**:
+  - Shipped 4 runnable free multi-agent pipelines (`Idea → 3DJ CAD`, `Concept → SketchMonkey`, `MCP Rescue → Config`, `Role → AiBeing Team`) with per-node live resident swapping, optional in-memory `X-Gemini-Api-Key` pass-through, shareable `?chain=<id>&q=<encoded>#node-workbench` deep links, and 1-click studio handoffs (0 Adaptive platform credits spent).
+  - Added direct `"Run in Node Workbench"` handoff links on `/check` and `/instead/:id` pages so organic developer package searches flow directly into live node workflows.
+- **Verification**: `npm run check` (0 errors), `npm run lint` (0 errors), `npm test` (**140/140 TAP subtests across 20 suites**, including `scripts/verify-agentic-nodes.test.ts`), GitHub workflow tests (**23/23**), `npm run prod:build`, live desktop (`1440×900`) & mobile (`390×844`, `0` overflow, `16px` inputs) browser verification, and **57 URLs submitted to IndexNow (`HTTP 200 OK`)**.
+
 ## "On Steroids" Traction, Discovery, Heredity Hardening & Zero-Credit Direct Gemini Rollout (2026-11-20, published — GitHub `a7597aa` / `35623fa`)
 
 - **Integrated All 4 Pending GitHub Branches**:

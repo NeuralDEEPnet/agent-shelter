@@ -1,6 +1,8 @@
-import { ArrowRight, ExternalLink } from "lucide-react";
+import { ArrowRight, ExternalLink, Workflow } from "lucide-react";
+import { AgenticStudiosBand } from "@/components/shelter/agentic-studios-bar";
 import { Shell } from "@/components/shelter/shell";
 import { ABANDONED_SERVERS, abandonedServerById, KIND_LABEL, SUCCESSORS_CHECKED_AT, type Replacement } from "@/api/data/successors";
+import { buildWorkbenchSharePath } from "@/lib/agentic-network";
 import { href } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -76,6 +78,25 @@ export function InsteadPage({ id }: { id: string | null }) {
           {row.note && <p className="mt-4 border-l-2 border-primary pl-3 text-sm">{row.note}</p>}
         </section>
         <p className="mt-8 font-mono text-[11px] text-muted-foreground">Every replacement was found and then independently re-checked from the vendor's or maintainer's own pages. Agents: GET /api/shelter/instead/{row.id} or the MCP tool check_package.</p>
+        {row.packages[0] && (
+          <div className="mt-4">
+            <a
+              href={href(
+                buildWorkbenchSharePath(
+                  "mcp-rescue",
+                  row.packages[0].registry === "pypi" ? `pypi:${row.packages[0].name}` : row.packages[0].name,
+                ),
+              )}
+              className="inline-flex min-h-10 items-center gap-1.5 border border-primary/50 bg-primary/10 px-3.5 py-2 font-mono text-xs uppercase tracking-wider text-primary hover:bg-primary hover:text-primary-foreground"
+            >
+              <Workflow className="h-3.5 w-3.5" aria-hidden="true" />
+              Run live migration chain in Node Workbench →
+            </a>
+          </div>
+        )}
+        <div className="mt-10">
+          <AgenticStudiosBand compact heading="Build with Neural Deep Agentic Studios" />
+        </div>
       </Shell>
     );
   }
@@ -104,6 +125,9 @@ export function InsteadPage({ id }: { id: string | null }) {
         </table>
       </div>
       <p className="mt-6 font-mono text-[11px] text-muted-foreground">JSON for agents and registries: GET /api/shelter/instead</p>
+      <div className="mt-10">
+        <AgenticStudiosBand compact heading="Build with Neural Deep Agentic Studios" />
+      </div>
     </Shell>
   );
 }

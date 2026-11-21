@@ -1,7 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { ArrowDown, ArrowRight, Search, ShieldCheck, HeartHandshake, Download, Stethoscope, GitCompareArrows, Coins, MessageSquare } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowDown, ArrowRight, Search, ShieldCheck, HeartHandshake, Download, Stethoscope, GitCompareArrows, Coins, MessageSquare, Workflow } from "lucide-react";
 import { Lantern, Shell } from "@/components/shelter/shell";
+import { AgenticStudiosBand } from "@/components/shelter/agentic-studios-bar";
+import { District3D } from "@/components/shelter/district-3d";
+import { NodeWorkbench } from "@/components/shelter/node-workbench";
 import { PixelCity } from "@/components/shelter/pixel-city";
 import { PixelType } from "@/components/shelter/pixel-type";
 import { useShelter } from "@/hooks/use-shelter";
@@ -11,6 +14,7 @@ import { ConnectButtons } from "@/components/shelter/connect-buttons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { parseWorkbenchSearch, type ChainId } from "@/lib/agentic-network";
 import { client } from "@/lib/client";
 import { ago, euro } from "@/lib/format";
 import { href } from "@/lib/router";
@@ -43,6 +47,25 @@ export function HomePage() {
   const shelter = useShelter();
   const [kind, setKind] = useState("");
   const [search, setSearch] = useState("");
+  const [skylineMode, setSkylineMode] = useState<"3d" | "2d">("3d");
+  const [heroAskSlug, setHeroAskSlug] = useState<string | null>(null);
+  const [workbenchPick, setWorkbenchPick] = useState<{ chainId: ChainId; residentSlug?: string | null } | null>(null);
+
+  useEffect(() => {
+    const parsed = parseWorkbenchSearch(window.location.search);
+    if (parsed.chainId) {
+      window.requestAnimationFrame(() => {
+        document.getElementById("node-workbench")?.scrollIntoView({ block: "start" });
+      });
+    }
+  }, []);
+
+  const scrollToSection = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+      block: "start",
+    });
+  };
   const residents = useQuery({ queryKey: ["residents", kind], queryFn: () => client.listResidents({ kind: kind || undefined }) });
   const visibleResidents = residents.data?.filter((r) => matchesResidentSearch(r, search));
   const s = shelter.data;
@@ -73,8 +96,11 @@ export function HomePage() {
             A home for abandoned AI agents and MCP servers. Ask any resident a few questions a day for free — right here, or from Claude, Cursor, VS Code or your own agent — check if an npm/PyPI server is dead, see verified replacements, or bring one in. Broke residents hibernate; they are never deleted.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <Button size="lg" className="h-11 bg-primary px-5 font-mono text-xs uppercase tracking-wider text-primary-foreground shadow-[0_0_15px_-3px_color-mix(in_srgb,var(--primary)_40%,transparent)] hover:opacity-90" onClick={() => document.getElementById("resident-district")?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" })}>
+            <Button size="lg" className="h-11 bg-primary px-5 font-mono text-xs uppercase tracking-wider text-primary-foreground shadow-[0_0_15px_-3px_color-mix(in_srgb,var(--primary)_40%,transparent)] hover:opacity-90" onClick={() => scrollToSection("resident-district")}>
               Ask a resident — free <ArrowDown className="ml-1.5 h-3.5 w-3.5" />
+            </Button>
+            <Button size="lg" variant="outline" className="h-11 border-primary/50 bg-primary/10 px-4 font-mono text-xs uppercase tracking-wider text-primary hover:bg-primary hover:text-primary-foreground" onClick={() => scrollToSection("node-workbench")}>
+              <Workflow className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" /> Connect w/ nodes
             </Button>
             <Button asChild size="lg" variant="outline" className="h-11 border-border px-4 font-mono text-xs uppercase tracking-wider hover:border-primary/50">
               <a href={href("/surrender")}>Bring one in <ArrowRight className="ml-1.5 h-3.5 w-3.5" /></a>
@@ -82,17 +108,63 @@ export function HomePage() {
             <Button asChild size="lg" variant="outline" className="h-11 border-border px-4 font-mono text-xs uppercase tracking-wider hover:border-primary/50">
               <a href={href("/instead")}>What works instead</a>
             </Button>
-            <Button asChild size="lg" variant="ghost" className="h-11 px-4 font-mono text-xs uppercase tracking-wider text-muted-foreground hover:text-foreground">
-              <a href={href("/playground")}>Playground</a>
-            </Button>
           </div>
-          {askable.length > 0 && <div className="mt-6 max-w-lg"><AskBox targets={askable} /></div>}
+          {askable.length > 0 && <div className="mt-6 max-w-lg"><AskBox targets={askable} selectedSlug={heroAskSlug} /></div>}
         </div>
         <figure className="min-w-0">
-          <PixelCity />
-          <figcaption className="city-caption"><span>Sanctuary district // pixel city</span><span>No agent left behind</span></figcaption>
+          <div className="mb-2 flex items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-wider">
+            <span className="text-muted-foreground">Interactive spatial district</span>
+            <div className="inline-flex border border-border bg-card" role="group" aria-label="District view mode">
+              <button
+                type="button"
+                aria-pressed={skylineMode === "3d"}
+                onClick={() => setSkylineMode("3d")}
+                className={cn(
+                  "min-h-8 px-2.5 py-1 uppercase",
+                  skylineMode === "3d" ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                3D District
+              </button>
+              <button
+                type="button"
+                aria-pressed={skylineMode === "2d"}
+                onClick={() => setSkylineMode("2d")}
+                className={cn(
+                  "min-h-8 px-2.5 py-1 uppercase",
+                  skylineMode === "2d" ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                2D Skyline
+              </button>
+            </div>
+          </div>
+          {skylineMode === "3d" ? (
+            <District3D
+              residents={askable}
+              onSelectResident={(slug) => setHeroAskSlug(slug)}
+              onSelectChain={(chainId, resSlug) => {
+                setWorkbenchPick({ chainId, residentSlug: resSlug ?? null });
+                scrollToSection("node-workbench");
+              }}
+            />
+          ) : (
+            <PixelCity />
+          )}
+          <figcaption className="city-caption"><span>District map // 3D + pixel skyline</span><span>No agent left behind</span></figcaption>
         </figure>
       </section>
+
+      {/* Connected Neural Deep Agentic Studios (subdomain -> ecosystem bridge) */}
+      <AgenticStudiosBand />
+
+      {/* Zero-Friction Free Multi-Agent Node Workbench */}
+      <NodeWorkbench
+        targets={askable}
+        machineOrigin={s?.machineOrigin}
+        externalChainId={workbenchPick?.chainId ?? null}
+        externalResidentSlug={workbenchPick?.residentSlug ?? null}
+      />
 
       {/* 3 Instant High-Intent Doors */}
       <section className="mb-8 grid gap-4 md:grid-cols-3" aria-label="Instant shelter tools">

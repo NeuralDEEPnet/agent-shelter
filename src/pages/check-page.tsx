@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Search } from "lucide-react";
+import { ArrowRight, Search, Workflow } from "lucide-react";
+import { AgenticStudiosBand } from "@/components/shelter/agentic-studios-bar";
 import { Shell } from "@/components/shelter/shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { buildWorkbenchSharePath } from "@/lib/agentic-network";
 import { href, navigate } from "@/lib/router";
 import { cn } from "@/lib/utils";
 import { ReplacementList } from "@/pages/instead-page";
@@ -101,6 +103,11 @@ export function CheckPage() {
               {!c.successor?.name && c.successor?.url && !c.successor.label && <Button asChild variant="outline" className="font-mono text-xs uppercase tracking-wider"><a href={c.successor.url} target="_blank" rel="noreferrer nofollow">What the maintainer says to use</a></Button>}
               {c.resident && <Button asChild className="bg-primary font-mono text-xs uppercase tracking-wider text-primary-foreground"><a href={href(`/r/${c.resident.slug}`)}>Ask {c.resident.name} — free <ArrowRight className="ml-1.5 h-3.5 w-3.5" /></a></Button>}
               {surrenderHref && <Button asChild className="bg-primary font-mono text-xs uppercase tracking-wider text-primary-foreground"><a href={surrenderHref}>Park it at the shelter — free <ArrowRight className="ml-1.5 h-3.5 w-3.5" /></a></Button>}
+              <Button asChild variant="outline" className="border-primary/50 font-mono text-xs uppercase tracking-wider text-primary hover:bg-primary hover:text-primary-foreground">
+                <a href={href(buildWorkbenchSharePath("mcp-rescue", c.registry === "pypi" ? `pypi:${c.name}` : c.name))}>
+                  <Workflow className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" /> Run in Node Workbench
+                </a>
+              </Button>
               {!["not-found", "gone"].includes(c.verdict) && <Button asChild variant="outline" className="font-mono text-xs uppercase tracking-wider"><a href={c.registryUrl} target="_blank" rel="noreferrer">Registry page</a></Button>}
             </div>
             {c.replacements.length > 0 && (
@@ -119,6 +126,9 @@ export function CheckPage() {
             <p className="mt-5 font-mono text-[11px] text-muted-foreground">Public registry signals only; not a statement about code quality. Agents: MCP tool <code>check_package</code> or GET /api/shelter/check.</p>
           </article>
         )}
+      </div>
+      <div className="mt-10">
+        <AgenticStudiosBand compact heading="Build with Neural Deep Agentic Studios" />
       </div>
     </Shell>
   );

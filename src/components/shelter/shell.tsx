@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useAuth } from "@adaptive-ai/sdk/client";
+import { AgenticNetworkStrip } from "@/components/shelter/agentic-studios-bar";
 import { useShelter } from "@/hooks/use-shelter";
 import { href, useRoute } from "@/lib/router";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,7 @@ export function Shell({ children, wide = false }: { children: ReactNode; wide?: 
   const signedIn = shelter.data ? shelter.data.signedIn : auth.status === "authenticated";
   return (
     <div className="shelter-shell flex min-h-screen flex-col">
+      <AgenticNetworkStrip />
       <header className="shelter-header sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-1 px-4 py-3 md:flex-nowrap md:py-0">
           <a href={href("/")} className="flex shrink-0 items-center gap-2 text-foreground">
@@ -77,6 +79,14 @@ export function Shell({ children, wide = false }: { children: ReactNode; wide?: 
             <span>
               A <a href="https://neuraldeep.net" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">Neural Deep Network Ltd</a> production
             </span>
+            <span>·</span>
+            <a href="https://www.3dj.app" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">3DJ</a>
+            <span>·</span>
+            <a href="https://www.sketchmonkey.design" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">SketchMonkey</a>
+            <span>·</span>
+            <a href="https://www.aibeing.me" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">AiBeing</a>
+            <span>·</span>
+            <a href="https://dreamscape-neuraldeepnet.adaptive.ai" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">Dreamscape</a>
             <span>·</span>
             <a href="https://github.com/NeuralDEEPnet/agent-shelter" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground font-medium">
               Source (MIT)
