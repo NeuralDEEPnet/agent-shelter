@@ -1,8 +1,8 @@
-import { ArrowUpRight, Box, Cpu, Globe, Palette } from "lucide-react";
-import { AGENTIC_STUDIOS, type AgenticStudio, type StudioId } from "@/lib/agentic-network";
+import { ArrowUpRight, Box, Coins, Cpu, Globe, Palette, Video } from "lucide-react";
+import { PUBLIC_ECOSYSTEM_APPS, type EcosystemApp, type EcosystemAppId, type StudioId } from "@/lib/agentic-network";
 import { cn } from "@/lib/utils";
 
-function StudioIcon({ id, className }: { id: StudioId; className?: string }) {
+function StudioIcon({ id, className }: { id: EcosystemAppId; className?: string }) {
   switch (id) {
     case "3dj":
       return <Box className={className} aria-hidden="true" />;
@@ -12,12 +12,16 @@ function StudioIcon({ id, className }: { id: StudioId; className?: string }) {
       return <Cpu className={className} aria-hidden="true" />;
     case "dreamscape":
       return <Globe className={className} aria-hidden="true" />;
+    case "launchstage":
+      return <Video className={className} aria-hidden="true" />;
+    case "bounties":
+      return <Coins className={className} aria-hidden="true" />;
   }
 }
 
 /**
- * Compact top-bar switcher linking Agent Shelter (`shelter.neuraldeep.net`) directly
- * to the live Neural Deep Agentic Studios without adding horizontal page overflow at 390px.
+ * Compact top-bar switcher linking Agent Shelter (`agent-shelter-neuraldeepnet.adaptive.ai`)
+ * directly to all public Neural Deep Agentic Studios & creator apps with zero overflow at 390px.
  */
 export function AgenticNetworkStrip() {
   return (
@@ -36,7 +40,7 @@ export function AgenticNetworkStrip() {
         <span className="border border-primary/45 bg-primary/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
           Agent Shelter
         </span>
-        {AGENTIC_STUDIOS.map((s) => (
+        {PUBLIC_ECOSYSTEM_APPS.map((s) => (
           <a
             key={s.id}
             href={s.baseUrl}
@@ -56,8 +60,8 @@ export function AgenticNetworkStrip() {
 }
 
 /**
- * Full 4-card portal band routing visitors, developers, and AI crawlers from
- * Agent Shelter straight into our connected production Agentic Studios.
+ * Portal band routing visitors, developers, and AI crawlers from
+ * Agent Shelter straight into our connected public Neural Deep apps.
  */
 export function AgenticStudiosBand({
   brief,
@@ -67,7 +71,7 @@ export function AgenticStudiosBand({
 }: {
   brief?: string;
   compact?: boolean;
-  selectedId?: StudioId | null;
+  selectedId?: StudioId | EcosystemAppId | null;
   heading?: string;
 }) {
   return (
@@ -79,7 +83,7 @@ export function AgenticStudiosBand({
           </h2>
           {!compact && (
             <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-              Draft specs and rescue tools here for free, then jump in one click to build CAD solids, industrial renders, AI employees, or 3D worlds.
+              Draft specs and rescue tools here for free, then jump in one click to build CAD solids, industrial renders, AI employees, 3D worlds, launch promos, or open bounties.
             </p>
           )}
         </div>
@@ -92,8 +96,8 @@ export function AgenticStudiosBand({
           neuraldeep.net ecosystem →
         </a>
       </div>
-      <div className={cn("grid gap-3 sm:grid-cols-2", compact ? "lg:grid-cols-4" : "xl:grid-cols-4")}>
-        {AGENTIC_STUDIOS.map((studio) => (
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {PUBLIC_ECOSYSTEM_APPS.map((studio) => (
           <StudioPortalCard key={studio.id} studio={studio} brief={brief} compact={compact} highlighted={selectedId === studio.id} />
         ))}
       </div>
@@ -107,7 +111,7 @@ function StudioPortalCard({
   compact,
   highlighted,
 }: {
-  studio: AgenticStudio;
+  studio: EcosystemApp;
   brief?: string;
   compact: boolean;
   highlighted: boolean;

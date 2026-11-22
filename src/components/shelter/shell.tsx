@@ -88,6 +88,10 @@ export function Shell({ children, wide = false }: { children: ReactNode; wide?: 
             <span>·</span>
             <a href="https://dreamscape-neuraldeepnet.adaptive.ai" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">Dreamscape</a>
             <span>·</span>
+            <a href="https://launchstage-neuraldeepnet.adaptive.ai" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">LaunchStage</a>
+            <span>·</span>
+            <a href="https://bounties-neuraldeepnet.adaptive.ai" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground">Bounties</a>
+            <span>·</span>
             <a href="https://github.com/NeuralDEEPnet/agent-shelter" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-foreground font-medium">
               Source (MIT)
             </a>

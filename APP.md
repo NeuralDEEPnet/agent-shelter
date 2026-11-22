@@ -1,5 +1,19 @@
 # AI Agent Shelter (folder `agent-shelter`, appId `4pKTfXcjBFfY3LAz`)
 
+## Expanded 3D Sanctuary Stage, In-3D Tower Picker & Full 6-App Ecosystem Mesh (2026-11-22, published)
+
+- **Larger, Expandable 3D Sanctuary Stage + Zero-Slip Choosing (`src/components/shelter/district-3d.tsx`, `src/pages/home-page.tsx`, `src/index.css`)**:
+  - Enlarged default 3D viewport to `420px–530px` (`0.82fr 1.28fr` hero grid) and added a 1-click **`Wide 3D` / `Compact`** stage toggle expanding across the full `max-w-7xl` container (`580px–640px` tall).
+  - Auto-orbit immediately pauses whenever the pointer hovers inside `<canvas>` (plus an explicit `Spin` / `Paused` toggle, `+`/`−` zoom, wheel-zoom in Wide mode, and `Reset view`) so towers never drift away from clicks.
+  - Added always-legible floating tags on every matching beacon, bracketed lock-on reticles + ground glow pads, distance-to-center hit prioritization, and category filter pills (`All`, `Residents`, `Connected Apps`, `MCP / Rescue`).
+  - Added **two in-3D selection workflows**:
+    1. **`Inspect & Ask`**: Click any Resident tower to ask a free question right inside the 3D Stage dock (with domain starter chips calling `/api/mpp/ask/:slug` at 0 Adaptive credits) or click any of the **6 Connected App Megatowers** (`3DJ Studio`, `SketchMonkey`, `AiBeing`, `Dreamscape`, `LaunchStage`, `Bounties`) to open it directly.
+    2. **`Wire Chain`**: Click 1–2 Resident towers + 1 Studio beacon right in 3D space with overhead glowing energy arcs and load the exact picked combo into `#node-workbench` (`externalResidentSlugs`).
+- **Full 6-App Public Ecosystem Lineup + Viral Rescue Markdown Snippets (`src/lib/agentic-network.ts`, `src/components/shelter/agentic-studios-bar.tsx`, `src/components/shelter/shell.tsx`, `src/pages/instead-page.tsx`, `src/pages/check-page.tsx`, `src/api/services/prerender.ts`, `public/about.md`)**:
+  - Kept Agent Shelter's Adaptive subdomain strictly as-is (`https://agent-shelter-neuraldeepnet.adaptive.ai` / `.on.adaptive.ai`, zero `shelter.neuraldeep.net` references) and added **LaunchStage** (`https://launchstage-neuraldeepnet.adaptive.ai`) and **Bounties** (`https://bounties-neuraldeepnet.adaptive.ai`) alongside `3DJ`, `SketchMonkey`, `AiBeing`, and `Dreamscape` across the top network bar, portal band, footer, prerender HTML, and `about.md`/`llms.txt`.
+  - Added 1-click **"Copy rescue reply / Markdown"** buttons (`buildRescueMarkdownSnippet`) on `/check`, `/instead`, and `/instead/:id` pairing verified vendor alternatives with runnable `?chain=mcp-rescue&q=<pkg>#node-workbench` links.
+- **Verification**: `npm run check` (0 errors), `npm run lint` (0 errors), `npm test` (**141/141 TAP subtests across 20 suites**), GitHub workflow tests (**23/23**), `npm run prod:build`, and live desktop (`1440×900`, `canvasH: 530`, `0` overflow) & mobile (`390×844`, `canvasMobileH: 420`, `0` overflow, `16px` inputs, `0` console errors) browser verification.
+
 ## Neural Deep Agentic Network Hub, Interactive 3D Sanctuary District & Free Multi-Agent Node Workbench (2026-11-21, published — GitHub `168cb5c` / `768951f`)
 
 - **Neural Deep Agentic Network Cross-App Hub (`src/lib/agentic-network.ts`, `src/components/shelter/agentic-studios-bar.tsx`, `src/components/shelter/shell.tsx`, `src/api/services/prerender.ts`, `public/about.md`)**:

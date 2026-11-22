@@ -48,8 +48,13 @@ export function HomePage() {
   const [kind, setKind] = useState("");
   const [search, setSearch] = useState("");
   const [skylineMode, setSkylineMode] = useState<"3d" | "2d">("3d");
+  const [wideDistrict, setWideDistrict] = useState<boolean>(false);
   const [heroAskSlug, setHeroAskSlug] = useState<string | null>(null);
-  const [workbenchPick, setWorkbenchPick] = useState<{ chainId: ChainId; residentSlug?: string | null } | null>(null);
+  const [workbenchPick, setWorkbenchPick] = useState<{
+    chainId: ChainId;
+    residentSlugs?: readonly string[] | null;
+    stamp: number;
+  } | null>(null);
 
   useEffect(() => {
     const parsed = parseWorkbenchSearch(window.location.search);
@@ -80,7 +85,7 @@ export function HomePage() {
     .map((r) => ({ slug: r.slug, name: r.name, tagline: r.tagline, kind: r.kind }));
   return (
     <Shell wide>
-      <section className="neo-hero" aria-labelledby="shelter-heading">
+      <section className={cn("neo-hero", skylineMode === "3d" && wideDistrict && "neo-hero-wide")} aria-labelledby="shelter-heading">
         <div>
           <span className="eyebrow inline-flex items-center gap-2">
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" aria-hidden="true" />
@@ -142,9 +147,15 @@ export function HomePage() {
           {skylineMode === "3d" ? (
             <District3D
               residents={askable}
+              expanded={wideDistrict}
+              onToggleExpanded={() => setWideDistrict((v) => !v)}
               onSelectResident={(slug) => setHeroAskSlug(slug)}
-              onSelectChain={(chainId, resSlug) => {
-                setWorkbenchPick({ chainId, residentSlug: resSlug ?? null });
+              onSelectChain={(chainId, resSlugs) => {
+                setWorkbenchPick({
+                  chainId,
+                  residentSlugs: resSlugs && resSlugs.length > 0 ? resSlugs : null,
+                  stamp: Date.now(),
+                });
                 scrollToSection("node-workbench");
               }}
             />
@@ -163,7 +174,8 @@ export function HomePage() {
         targets={askable}
         machineOrigin={s?.machineOrigin}
         externalChainId={workbenchPick?.chainId ?? null}
-        externalResidentSlug={workbenchPick?.residentSlug ?? null}
+        externalResidentSlugs={workbenchPick?.residentSlugs ?? null}
+        externalSelectionStamp={workbenchPick?.stamp}
       />
 
       {/* 3 Instant High-Intent Doors */}

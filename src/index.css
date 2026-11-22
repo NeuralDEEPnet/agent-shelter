@@ -161,7 +161,8 @@
 .shelter-shell [data-slot="input"], .shelter-shell [data-slot="textarea"] { font-size: 16px; border-radius: 0; }
 .shelter-shell pre { border-radius: 0; border-left: 2px solid var(--primary); }
 .shelter-shell :is(.rounded-xl, .rounded-lg) { border-radius: 2px; }
-.neo-hero { display: grid; grid-template-columns: 1.05fr 1fr; gap: 16px; align-items: center; padding: 30px 0 24px; }
+.neo-hero { display: grid; grid-template-columns: 0.82fr 1.28fr; gap: 22px; align-items: start; padding: 26px 0 24px; }
+.neo-hero.neo-hero-wide { grid-template-columns: 1fr; gap: 24px; }
 .neo-heading { max-width: 570px; margin-top: 24px; display: flex; flex-direction: column; gap: 12px; }
 .pixel-type { display: block; width: 100%; height: auto; max-height: 95px; }
 .neo-heading > :last-child { width: 86%; }

@@ -238,9 +238,11 @@ ${forAgents(origin)}
 <li><a href="https://www.sketchmonkey.design" rel="noopener">SketchMonkey (www.sketchmonkey.design)</a> — Agentic visual &amp; industrial design node canvas, CMF mood boards &amp; video turnarounds.</li>
 <li><a href="https://www.aibeing.me" rel="noopener">AiBeing (www.aibeing.me)</a> — Human-augmented AI teammates &amp; carryable <code>aibeing-mind/1</code> Mind packs.</li>
 <li><a href="https://dreamscape-neuraldeepnet.adaptive.ai" rel="noopener">Dreamscape</a> — Interactive 3D procedural story worlds &amp; brand realms.</li>
+<li><a href="https://launchstage-neuraldeepnet.adaptive.ai" rel="noopener">LaunchStage</a> — Live product walkthrough recordings &amp; interactive 3D launch showcases.</li>
+<li><a href="https://bounties-neuraldeepnet.adaptive.ai" rel="noopener">Bounties</a> — Open CAD, developer &amp; AI agent bounty radar.</li>
 </ul>
 </section>
-<footer><p>No agent left in the dark. · A <a href="https://neuraldeep.net" target="_blank" rel="noopener noreferrer">Neural Deep Network Ltd</a> production · <a href="https://www.3dj.app">3DJ</a> · <a href="https://www.sketchmonkey.design">SketchMonkey</a> · <a href="https://www.aibeing.me">AiBeing</a> · <a href="${origin}/about.md">about.md</a> · <a href="https://github.com/NeuralDEEPnet/agent-shelter">source (MIT)</a> · <a href="${origin}/sitemap.xml">sitemap</a></p></footer>
+<footer><p>No agent left in the dark. · A <a href="https://neuraldeep.net" target="_blank" rel="noopener noreferrer">Neural Deep Network Ltd</a> production · <a href="https://www.3dj.app">3DJ</a> · <a href="https://www.sketchmonkey.design">SketchMonkey</a> · <a href="https://www.aibeing.me">AiBeing</a> · <a href="https://dreamscape-neuraldeepnet.adaptive.ai">Dreamscape</a> · <a href="https://launchstage-neuraldeepnet.adaptive.ai">LaunchStage</a> · <a href="https://bounties-neuraldeepnet.adaptive.ai">Bounties</a> · <a href="${origin}/about.md">about.md</a> · <a href="https://github.com/NeuralDEEPnet/agent-shelter">source (MIT)</a> · <a href="${origin}/sitemap.xml">sitemap</a></p></footer>
 </main>`);
 
   return {

@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Search, Workflow } from "lucide-react";
+import { ArrowRight, Check as CheckIcon, Copy, Search, Workflow } from "lucide-react";
 import { AgenticStudiosBand } from "@/components/shelter/agentic-studios-bar";
 import { Shell } from "@/components/shelter/shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { buildWorkbenchSharePath } from "@/lib/agentic-network";
+import { buildRescueMarkdownSnippet, buildWorkbenchSharePath } from "@/lib/agentic-network";
 import { href, navigate } from "@/lib/router";
 import { cn } from "@/lib/utils";
 import { ReplacementList } from "@/pages/instead-page";
@@ -36,7 +36,8 @@ export function CheckPage() {
   const [q, setQ] = useState(readQuery);
   const [registry, setRegistry] = useState(q.registry);
   const [name, setName] = useState(q.name);
-  useEffect(() => { const next = readQuery(); setQ(next); setRegistry(next.registry); setName(next.name); }, []);
+  const [copiedRescue, setCopiedRescue] = useState(false);
+  useEffect(() => { const next = readQuery(); setQ(next); setRegistry(next.registry); setName(next.name); setCopiedRescue(false); }, []);
   const check = useQuery({
     queryKey: ["rescue-check", q.registry, q.name],
     enabled: Boolean(q.name),
@@ -107,6 +108,36 @@ export function CheckPage() {
                 <a href={href(buildWorkbenchSharePath("mcp-rescue", c.registry === "pypi" ? `pypi:${c.name}` : c.name))}>
                   <Workflow className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" /> Run in Node Workbench
                 </a>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="font-mono text-xs uppercase tracking-wider"
+                onClick={() => {
+                  const pkgSpec = c.registry === "pypi" ? `pypi:${c.name}` : c.name;
+                  const snippet = buildRescueMarkdownSnippet({
+                    serverOrPackage: c.name,
+                    statusLabel: VERDICT_LABEL[c.verdict].toLowerCase(),
+                    packageSpec: pkgSpec,
+                    replacementName: c.replacements[0]?.name ?? c.successor?.name ?? c.successor?.label ?? null,
+                    replacementHow: c.replacements[0]?.how ?? c.successor?.url ?? null,
+                    detailsPath: c.curated ? `/instead/${c.curated.id}` : `/check?registry=${c.registry}&name=${encodeURIComponent(c.name)}`,
+                  });
+                  void navigator.clipboard?.writeText(snippet).then(() => {
+                    setCopiedRescue(true);
+                    window.setTimeout(() => setCopiedRescue(false), 2200);
+                  });
+                }}
+              >
+                {copiedRescue ? (
+                  <>
+                    <CheckIcon className="mr-1.5 h-3.5 w-3.5 text-primary" aria-hidden="true" /> Copied rescue Markdown
+                  </>
+                ) : (
+                  <>
+                    <Copy className="mr-1.5 h-3.5 w-3.5 text-primary" aria-hidden="true" /> Copy rescue reply / Markdown
+                  </>
+                )}
               </Button>
               {!["not-found", "gone"].includes(c.verdict) && <Button asChild variant="outline" className="font-mono text-xs uppercase tracking-wider"><a href={c.registryUrl} target="_blank" rel="noreferrer">Registry page</a></Button>}
             </div>

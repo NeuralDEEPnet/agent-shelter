@@ -71,13 +71,17 @@ export function NodeWorkbench({
   machineOrigin,
   externalChainId,
   externalResidentSlug,
+  externalResidentSlugs,
   externalQuery,
+  externalSelectionStamp,
 }: {
   targets: readonly AskTarget[];
   machineOrigin?: string;
   externalChainId?: ChainId | null;
   externalResidentSlug?: string | null;
+  externalResidentSlugs?: readonly string[] | null;
   externalQuery?: string | null;
+  externalSelectionStamp?: number;
 }) {
   const initialFromUrl = useMemo(() => {
     if (typeof window === "undefined") return { chainId: null, query: null };
@@ -107,16 +111,26 @@ export function NodeWorkbench({
     const nextPreset = getNodeChainPreset(externalChainId);
     setInputValue(externalQuery?.trim() || nextPreset.defaultInput);
     setStepStates({});
-    if (externalResidentSlug) {
-      const firstResidentStep = nextPreset.steps.find((s) => s.kind === "resident");
-      if (firstResidentStep) {
-        setResidentOverrides((prev) => ({
-          ...prev,
-          [`${externalChainId}:${firstResidentStep.id}`]: externalResidentSlug,
-        }));
-      }
+    const pickedSlugs =
+      externalResidentSlugs && externalResidentSlugs.length > 0
+        ? externalResidentSlugs
+        : externalResidentSlug
+          ? [externalResidentSlug]
+          : [];
+    if (pickedSlugs.length > 0) {
+      const residentSteps = nextPreset.steps.filter((s) => s.kind === "resident");
+      setResidentOverrides((prev) => {
+        const next = { ...prev };
+        pickedSlugs.forEach((slug, idx) => {
+          const step = residentSteps[idx];
+          if (step && slug) {
+            next[`${externalChainId}:${step.id}`] = slug;
+          }
+        });
+        return next;
+      });
     }
-  }, [externalChainId, externalQuery, externalResidentSlug]);
+  }, [externalChainId, externalQuery, externalResidentSlug, externalResidentSlugs, externalSelectionStamp]);
 
   const selectChain = (nextId: ChainId, customInput?: string) => {
     abortRef.current?.abort();

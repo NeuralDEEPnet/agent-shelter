@@ -1,6 +1,10 @@
 import type { AskTarget } from "@/lib/ask-starters";
 
 export type StudioId = "3dj" | "sketchmonkey" | "aibeing" | "dreamscape";
+export type EcosystemAppId = StudioId | "launchstage" | "bounties";
+
+export const SHELTER_PUBLIC_ORIGIN = "https://agent-shelter-neuraldeepnet.on.adaptive.ai";
+export const SHELTER_APP_URL = "https://agent-shelter-neuraldeepnet.adaptive.ai";
 
 export type AgenticStudio = {
   id: StudioId;
@@ -15,6 +19,10 @@ export type AgenticStudio = {
   /** Hex accent used inside the 3D Sanctuary District & Node Workbench */
   beaconHex: string;
   buildHandoffUrl: (brief?: string) => string;
+};
+
+export type EcosystemApp = Omit<AgenticStudio, "id"> & {
+  id: EcosystemAppId;
 };
 
 const clampBrief = (brief?: string, max = 520): string => (brief ?? "").trim().slice(0, max);
@@ -92,8 +100,78 @@ export const AGENTIC_STUDIOS: readonly AgenticStudio[] = [
   },
 ] as const;
 
+export const PUBLIC_ECOSYSTEM_APPS: readonly EcosystemApp[] = [
+  ...AGENTIC_STUDIOS,
+  {
+    id: "launchstage",
+    name: "LaunchStage 3D Showcases",
+    shortName: "LaunchStage",
+    domainLabel: "launchstage",
+    baseUrl: "https://launchstage-neuraldeepnet.adaptive.ai",
+    badge: "3D Keynotes · Promo",
+    roleLabel: "Live Product Walkthroughs & 3D Showcases",
+    summary:
+      "Turn any live product URL into a real recorded walkthrough, interactive Three.js stage showcase, and editable launch promo.",
+    ctaLabel: "Open LaunchStage",
+    beaconHex: "#a78bfa",
+    buildHandoffUrl: () => "https://launchstage-neuraldeepnet.adaptive.ai/",
+  },
+  {
+    id: "bounties",
+    name: "Neural Deep Bounties Radar",
+    shortName: "Bounties",
+    domainLabel: "bounties",
+    baseUrl: "https://bounties-neuraldeepnet.adaptive.ai",
+    badge: "Bounties · Grants",
+    roleLabel: "Open CAD, Dev & AI Agent Bounty Radar",
+    summary:
+      "Discover open engineering challenges, Cults3D design pulses, developer grants, and cross-ecosystem tasks for humans and agents.",
+    ctaLabel: "Explore Bounties",
+    beaconHex: "#f472b6",
+    buildHandoffUrl: () => "https://bounties-neuraldeepnet.adaptive.ai/",
+  },
+] as const;
+
 export function getAgenticStudio(id: StudioId): AgenticStudio {
   return AGENTIC_STUDIOS.find((s) => s.id === id) ?? AGENTIC_STUDIOS[0]!;
+}
+
+export type RescueSnippetInput = {
+  serverOrPackage: string;
+  statusLabel: string;
+  packageSpec?: string | null;
+  replacementName?: string | null;
+  replacementHow?: string | null;
+  detailsPath?: string | null;
+};
+
+/**
+ * Builds a concise, ready-to-paste Markdown rescue note for GitHub Issues, PRs,
+ * Reddit, or Discord threads when someone hits a deprecated/archived MCP server.
+ */
+export function buildRescueMarkdownSnippet(input: RescueSnippetInput): string {
+  const pkgSpec = (input.packageSpec ?? input.serverOrPackage).trim();
+  const chainUrl = `${SHELTER_PUBLIC_ORIGIN}${buildWorkbenchSharePath("mcp-rescue", pkgSpec, "/")}`;
+  const cleanDetailsPath = input.detailsPath?.startsWith("/") ? input.detailsPath : null;
+  const detailsUrl = cleanDetailsPath ? `${SHELTER_PUBLIC_ORIGIN}${cleanDetailsPath}` : null;
+  const lines: string[] = [
+    `**Heads-up on \`${input.serverOrPackage}\` (${input.statusLabel}):**`,
+  ];
+  if (input.replacementName) {
+    const howLine = input.replacementHow?.trim().split("\n")[0]?.trim();
+    lines.push(
+      howLine
+        ? `- **Verified replacement:** **${input.replacementName}** (\`${howLine}\`)`
+        : `- **Verified replacement:** **${input.replacementName}**`,
+    );
+  } else {
+    lines.push("- No verified maintained drop-in replacement is listed yet — verify maintainer docs before installing forks.");
+  }
+  lines.push(`- **Free live check + ready-to-paste MCP config:** [Run Migration Node Chain on AI Agent Shelter](${chainUrl})`);
+  if (detailsUrl) {
+    lines.push(`- **Evidence & alternatives:** ${detailsUrl}`);
+  }
+  return lines.join("\n");
 }
 
 export type ChainId = "cad-to-3dj" | "concept-to-sketchmonkey" | "mcp-rescue" | "role-to-aibeing";
@@ -387,7 +465,7 @@ export type DistrictNode =
   | {
       id: string;
       nodeType: "studio";
-      studioId: StudioId;
+      studioId: EcosystemAppId;
       chainId: ChainId;
       url: string;
       label: string;
@@ -401,24 +479,45 @@ export type DistrictNode =
       color: string;
     };
 
-const STUDIO_CHAIN_MAP: Record<StudioId, ChainId> = {
+export type DistrictFilter = "all" | "residents" | "apps" | "mcp";
+
+export function matchesDistrictFilter(node: DistrictNode, filter: DistrictFilter): boolean {
+  if (filter === "all") return true;
+  if (node.nodeType === "sanctuary") return true;
+  if (filter === "apps") return node.nodeType === "studio";
+  if (filter === "residents") return node.nodeType === "resident";
+  if (filter === "mcp") {
+    return node.nodeType === "resident" && (node.residentKind === "mcp" || node.residentKind === "package");
+  }
+  return true;
+}
+
+export function filterDistrictNodes(nodes: readonly DistrictNode[], filter: DistrictFilter): DistrictNode[] {
+  return nodes.filter((n) => matchesDistrictFilter(n, filter));
+}
+
+const STUDIO_CHAIN_MAP: Record<EcosystemAppId, ChainId> = {
   "3dj": "cad-to-3dj",
   sketchmonkey: "concept-to-sketchmonkey",
   aibeing: "role-to-aibeing",
   dreamscape: "concept-to-sketchmonkey",
+  launchstage: "concept-to-sketchmonkey",
+  bounties: "mcp-rescue",
 };
 
 const RESIDENT_SLOTS: ReadonlyArray<{ x: number; z: number; h: number }> = [
-  { x: -1.45, z: -0.95, h: 2.35 },
-  { x: 1.45, z: -0.95, h: 2.55 },
-  { x: -1.65, z: 0.95, h: 2.2 },
-  { x: 1.65, z: 0.95, h: 2.4 },
-  { x: 0, z: -2.05, h: 2.7 },
-  { x: 0, z: 2.05, h: 2.15 },
+  { x: -1.55, z: -1.05, h: 2.35 },
+  { x: 1.55, z: -1.05, h: 2.55 },
+  { x: -1.75, z: 1.05, h: 2.2 },
+  { x: 1.75, z: 1.05, h: 2.4 },
+  { x: 0, z: -2.15, h: 2.7 },
+  { x: 0, z: 2.15, h: 2.15 },
   { x: -2.75, z: 0, h: 2.5 },
   { x: 2.75, z: 0, h: 2.45 },
   { x: -2.4, z: -2.2, h: 1.95 },
   { x: 2.4, z: -2.2, h: 2.05 },
+  { x: -2.4, z: 2.2, h: 2.0 },
+  { x: 2.4, z: 2.2, h: 2.1 },
 ];
 
 function shortResidentName(name: string): string {
@@ -436,22 +535,24 @@ export function buildDistrictNodes(residents: readonly AskTarget[]): DistrictNod
       subtitle: "Central compute hearth · 5 free asks/day · 70/20/10 ledger",
       x: 0,
       z: 0,
-      w: 1.05,
-      d: 1.05,
-      h: 1.65,
+      w: 1.1,
+      d: 1.1,
+      h: 1.75,
       color: "#ffc367",
     },
   ];
 
   const studioCoords: ReadonlyArray<{ x: number; z: number; h: number }> = [
-    { x: -3.55, z: -3.15, h: 3.35 },
-    { x: 3.55, z: -3.15, h: 3.2 },
-    { x: 3.55, z: 3.1, h: 3.05 },
-    { x: -3.55, z: 3.1, h: 2.95 },
+    { x: -3.75, z: -3.1, h: 3.4 },
+    { x: 3.75, z: -3.1, h: 3.25 },
+    { x: 4.15, z: 0.15, h: 3.1 },
+    { x: -4.15, z: 0.15, h: 3.0 },
+    { x: 3.55, z: 3.25, h: 2.9 },
+    { x: -3.55, z: 3.25, h: 2.85 },
   ];
 
-  AGENTIC_STUDIOS.forEach((studio, idx) => {
-    const pos = studioCoords[idx]!;
+  PUBLIC_ECOSYSTEM_APPS.forEach((studio, idx) => {
+    const pos = studioCoords[idx] ?? { x: 3.6, z: 3.2, h: 2.9 };
     nodes.push({
       id: `studio-${studio.id}`,
       nodeType: "studio",
@@ -463,8 +564,8 @@ export function buildDistrictNodes(residents: readonly AskTarget[]): DistrictNod
       subtitle: `${studio.domainLabel} · ${studio.roleLabel}`,
       x: pos.x,
       z: pos.z,
-      w: 0.92,
-      d: 0.92,
+      w: 0.96,
+      d: 0.96,
       h: pos.h,
       color: studio.beaconHex,
     });

@@ -6,12 +6,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   AGENTIC_STUDIOS,
   buildDistrictNodes,
+  buildRescueMarkdownSnippet,
   buildWorkbenchSharePath,
+  filterDistrictNodes,
   getAgenticStudio,
   NODE_CHAIN_PRESETS,
   parsePackageSpec,
   parseWorkbenchSearch,
+  PUBLIC_ECOSYSTEM_APPS,
   resolveChainResident,
+  SHELTER_PUBLIC_ORIGIN,
 } from "../src/lib/agentic-network";
 import { AgenticNetworkStrip, AgenticStudiosBand } from "../src/components/shelter/agentic-studios-bar";
 import { District3D } from "../src/components/shelter/district-3d";
@@ -78,35 +82,50 @@ test("parseWorkbenchSearch and buildWorkbenchSharePath round-trip safely and rej
   });
 });
 
-test("3D district layout includes central sanctuary, 4 studio beacons, and bounded resident towers", () => {
+test("3D district layout includes central sanctuary, all 6 connected app beacons, filtering, and inline picker UI", () => {
   const nodes = buildDistrictNodes([
     { slug: "minute", name: "Minute", kind: "agent", tagline: "Notes" },
     { slug: "excel-mcp-server", name: "Excel MCP Server", kind: "mcp", tagline: "Sheets" },
   ]);
   assert.equal(nodes[0]?.nodeType, "sanctuary");
-  assert.equal(nodes.filter((n) => n.nodeType === "studio").length, 4);
+  assert.equal(nodes.filter((n) => n.nodeType === "studio").length, 6);
   assert.equal(nodes.filter((n) => n.nodeType === "resident").length, 2);
+  assert.equal(filterDistrictNodes(nodes, "apps").filter((n) => n.nodeType === "studio").length, 6);
+  assert.equal(filterDistrictNodes(nodes, "residents").filter((n) => n.nodeType === "resident").length, 2);
+  assert.equal(filterDistrictNodes(nodes, "mcp").filter((n) => n.nodeType === "resident").length, 1);
 
   const html = renderToStaticMarkup(
     createElement(District3D, {
       residents: [{ slug: "minute", name: "Minute", kind: "agent", tagline: "Meeting decisions" }],
+      onToggleExpanded: () => {},
     }),
   );
   assert.ok(html.includes("<canvas"));
   assert.ok(html.includes("Interactive 3D Sanctuary map"));
   assert.ok(html.includes("◆ 3DJ STUDIO"));
+  assert.ok(html.includes("◆ LAUNCHSTAGE"));
+  assert.ok(html.includes("◆ BOUNTIES"));
+  assert.ok(html.includes("Wire Chain"));
+  assert.ok(html.includes("Wide 3D"));
+  assert.ok(html.includes("Ask Minute right here — free"));
 });
 
 test("AgenticNetworkStrip, AgenticStudiosBand, and NodeWorkbench render accessible links and controls", () => {
+  assert.equal(PUBLIC_ECOSYSTEM_APPS.length, 6);
   const stripHtml = renderToStaticMarkup(createElement(AgenticNetworkStrip));
   assert.ok(stripHtml.includes("https://www.3dj.app"));
   assert.ok(stripHtml.includes("https://www.sketchmonkey.design"));
   assert.ok(stripHtml.includes("https://www.aibeing.me"));
   assert.ok(stripHtml.includes("https://dreamscape-neuraldeepnet.adaptive.ai"));
+  assert.ok(stripHtml.includes("https://launchstage-neuraldeepnet.adaptive.ai"));
+  assert.ok(stripHtml.includes("https://bounties-neuraldeepnet.adaptive.ai"));
+  assert.ok(!stripHtml.includes("shelter.neuraldeep.net"));
 
   const bandHtml = renderToStaticMarkup(createElement(AgenticStudiosBand, { brief: "Snap-fit mount" }));
   assert.ok(bandHtml.includes("Connected Neural Deep Agentic Studios"));
   assert.ok(bandHtml.includes("handoff=1"));
+  assert.ok(bandHtml.includes("LaunchStage"));
+  assert.ok(bandHtml.includes("Bounties"));
 
   assert.equal(NODE_CHAIN_PRESETS.length, 4);
   const workbenchHtml = renderToStaticMarkup(
@@ -123,4 +142,20 @@ test("AgenticNetworkStrip, AgenticStudiosBand, and NodeWorkbench render accessib
   assert.ok(workbenchHtml.includes("Concept → SketchMonkey"));
   assert.ok(workbenchHtml.includes("MCP Rescue → Config"));
   assert.ok(workbenchHtml.includes("Role → AiBeing Team"));
+});
+
+test("buildRescueMarkdownSnippet creates copyable Markdown on the Adaptive origin without custom-domain drift", () => {
+  const md = buildRescueMarkdownSnippet({
+    serverOrPackage: "@modelcontextprotocol/server-github",
+    statusLabel: "archived",
+    packageSpec: "@modelcontextprotocol/server-github",
+    replacementName: "github/github-mcp-server",
+    replacementHow: "https://api.githubcopilot.com/mcp/",
+    detailsPath: "/instead/github",
+  });
+  assert.ok(md.includes(SHELTER_PUBLIC_ORIGIN));
+  assert.ok(md.includes("?chain=mcp-rescue&q=%40modelcontextprotocol%2Fserver-github#node-workbench"));
+  assert.ok(md.includes("github/github-mcp-server"));
+  assert.ok(md.includes(`${SHELTER_PUBLIC_ORIGIN}/instead/github`));
+  assert.ok(!md.includes("shelter.neuraldeep.net"));
 });
