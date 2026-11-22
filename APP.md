@@ -1,6 +1,6 @@
 # AI Agent Shelter (folder `agent-shelter`, appId `4pKTfXcjBFfY3LAz`)
 
-## Expanded 3D Sanctuary Stage, In-3D Tower Picker & Full 6-App Ecosystem Mesh (2026-11-22, published)
+## Expanded 3D Sanctuary Stage, In-3D Tower Picker & Full 6-App Ecosystem Mesh (2026-11-22, published — GitHub `9faf574` / `113039d`)
 
 - **Larger, Expandable 3D Sanctuary Stage + Zero-Slip Choosing (`src/components/shelter/district-3d.tsx`, `src/pages/home-page.tsx`, `src/index.css`)**:
   - Enlarged default 3D viewport to `420px–530px` (`0.82fr 1.28fr` hero grid) and added a 1-click **`Wide 3D` / `Compact`** stage toggle expanding across the full `max-w-7xl` container (`580px–640px` tall).
@@ -277,7 +277,7 @@ Public: `health`, `getShelter`, `listResidents`, `getResident`, `getAgreement`, 
 (sign-in), `mySurrenders`. Signed-in: `recoverSurrender` (exact owned read-back only), `startSponsorship`, `confirmSponsorship`, `mySponsorships`,
 `adoptResident`. Owner: `adminOverview`, `approve`, `reject`, `hibernate`, `wake`, `setPause`,
 `probationSamples`, `ownerTestTurn`, `payouts`, `recordPayout`, `outreachDrafts`, `setOutreachApproval`. Cron: `shelterDaily`. Webhook:
-`onStripeWebhook`. Agent-only: `_simulateWebhook`, `_screenNow`. Every expected refusal is a
+`onStripeWebhook`. Agent-only: `_simulateWebhook`, `_screenNow` (refused over HTTP with 404 by `isOwnProcedure` and owner-gated; called in-process). Every expected refusal is a
 returned `Result` notice (`src/lib/notice.ts`); `useNotices()`/`unwrap()` toast every notice.
 
 ## Design

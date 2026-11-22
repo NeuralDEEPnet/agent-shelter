@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { deserialize, serialize } from "superjson";
 import { serve } from "@hono/node-server";
 import { honoMiddleware, initializeServerEnvironment } from "@adaptive-ai/sdk/server";
-import { isJsonRpcRequest } from "typed-rpc/server";
+import { createRpcGuard } from "@/api/procedure-guard";
 import { env } from "@/lib/env";
 
 const transcoder = { serialize, deserialize };
@@ -58,50 +58,10 @@ app.route(
 }
 
 /**
- * Reject non-RPC or invalid `/api/*` traffic before the SDK RPC middleware sees it.
- *
- * The SDK middleware treats every POST under `/api/*` as JSON-RPC and logs any
- * mismatch (or unknown method) as an error in errors.db. MCP traffic (initialize,
- * tools/list, notifications/initialized), scanner payloads (GraphQL, queries),
- * and probe traffic must be intercepted and answered 404 here so they never
- * trigger false-positive "-32600 Invalid Request" or "-32601 Method not found" errors.
+ * Reject non-RPC, `_`-prefixed, inherited, or unknown `/api/*` traffic before
+ * the SDK RPC middleware sees it (see `src/api/procedure-guard.ts`).
  */
-function isValidProcedureCall(body: unknown): boolean {
-  try {
-    const decoded = deserialize(body as Parameters<typeof deserialize>[0]) ?? body;
-    if (!isJsonRpcRequest(decoded)) return false;
-    return typeof (procedures as Record<string, unknown>)[decoded.method] === "function";
-  } catch {
-    return false;
-  }
-}
-
-const rpcGuard = async (c: { req: { method: string; text: () => Promise<string> }; text: (text: string, status?: number) => Response }, next: () => Promise<void>) => {
-  if (c.req.method !== "POST") {
-    return c.text("Not found", 404);
-  }
-
-  let raw: string;
-  try {
-    raw = await c.req.text();
-  } catch {
-    return c.text("Not found", 404);
-  }
-
-  if (raw.trim().length === 0) {
-    return c.text("Not found", 404);
-  }
-
-  try {
-    if (!isValidProcedureCall(JSON.parse(raw))) {
-      return c.text("Not found", 404);
-    }
-  } catch {
-    return c.text("Not found", 404);
-  }
-
-  return next();
-};
+const rpcGuard = createRpcGuard(procedures);
 
 app.use("/api", rpcGuard);
 app.use("/api/*", rpcGuard);
