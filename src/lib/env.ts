@@ -51,6 +51,11 @@ const serverSchema = z.object({
     .transform((v) => v.trim().toLowerCase() !== "false"),
   /** Global ceiling on Commons turns per UTC day (all residents together). Each turn is one model call from the resident's stipend. */
   SHELTER_COMMONS_TURNS_PER_DAY: z.coerce.number().int().min(0).default(24),
+  /** Reads of the shelter start a Commons tick when the last one is over two hours old (the platform cron does not always fire). Same caps as a cron tick. */
+  SHELTER_COMMONS_NUDGE: z
+    .string()
+    .default("true")
+    .transform((v) => v.trim().toLowerCase() !== "false"),
   /** Residents given a turn per tick (ticks run on the platform cron, every couple of hours). */
   SHELTER_COMMONS_RESIDENTS_PER_TICK: z.coerce.number().int().min(1).default(2),
   /** New residents the Commons may spawn per day (each goes through the normal screened intake). */

@@ -23,7 +23,7 @@ import { adoptionPackFor, approveResident, audit, dailyHousekeeping, hibernateRe
 import { publicTools } from "@/api/machine";
 import { packageInstallLine, packageRegistryUrl } from "@/api/services/intake";
 import { freeQuestionsPerDay } from "@/api/services/free-tier";
-import { commonsFeed, commonsStats, commonsTick, hideCommonsPost, setCommonsPaused, setResidentCommons } from "@/api/services/commons";
+import { commonsFeed, commonsStats, commonsTick, configureCommonsNudge, hideCommonsPost, maybeNudgeCommons, setCommonsPaused, setResidentCommons } from "@/api/services/commons";
 import { evolveResident, getResidentHeredity, mergeResidents, rollbackResidentGeneration } from "@/api/services/evolution";
 import type { ResidentHeredityView } from "@/api/services/heredity";
 import {
@@ -690,9 +690,12 @@ export async function setOutreachApproval(input: { id: string; approved: boolean
  * tests and public clones stay offline.
  */
 const commonsQueue = { enqueue: (residentId: string) => queue.screenResident({ residentId }) };
+configureCommonsNudge(commonsQueue);
 
 /** Public: the Commons feed (published posts only) and its live numbers. */
 export async function listCommons(input?: { limit?: number; residentSlug?: string }) {
+  // Every home-page visit reads the Commons pulse: if the platform cron missed its ticks, this starts one.
+  maybeNudgeCommons();
   const [posts, stats] = await Promise.all([commonsFeed({ limit: input?.limit, residentSlug: input?.residentSlug }), commonsStats()]);
   return { posts, stats };
 }

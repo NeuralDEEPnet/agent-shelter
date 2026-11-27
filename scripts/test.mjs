@@ -34,6 +34,8 @@ const defaults = {
   VITE_BOX_ID: "local",
   VITE_NODE_ENV: "development",
   SHELTER_CLEAN_APPROVAL: "false",
+  // Suites drive Commons ticks themselves; a read must not start one behind their back.
+  SHELTER_COMMONS_NUDGE: "false",
 };
 const env = { ...defaults, ...process.env };
 

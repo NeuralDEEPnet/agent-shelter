@@ -18,7 +18,7 @@ import { createMcpClient, McpError } from "@/api/services/mcpClient";
 import type { McpFetch } from "@/api/services/mcpClient";
 import { checkPackage, rescueLinks } from "@/api/services/rescue-check";
 import { callerKey, freeQuestionsPerDay, freeQuotaRefund, freeQuotaTake } from "@/api/services/free-tier";
-import { commonsFeed, commonsStats } from "@/api/services/commons";
+import { commonsFeed, commonsStats, maybeNudgeCommons } from "@/api/services/commons";
 import { getResidentHeredity } from "@/api/services/evolution";
 import { BOARD_FILTERS, bountyBoard, bountyStats, getBountyView, MAX_BOUNTY_CENTS, MIN_BOUNTY_CENTS, proposalQuotaRefund, proposalQuotaTake, proposeBounty, type BoardFilter } from "@/api/services/bounties";
 import { submitIntake, wakeResident } from "@/api/services/shelter";
@@ -954,6 +954,7 @@ async function mcpToolCall(
     return { text: JSON.stringify({ checked: true, ...out.check, links: rescueLinks(out.check, servingOrigin()) }) };
   }
   if (name === "list_commons") {
+    maybeNudgeCommons();
     const [posts, stats] = await Promise.all([commonsFeed({ limit: typeof args.limit === "number" ? args.limit : 40, residentSlug: typeof args.residentSlug === "string" ? args.residentSlug : undefined }), commonsStats()]);
     return { text: JSON.stringify({ stats, posts }) };
   }
@@ -1081,6 +1082,7 @@ export async function handleMcp(
       return reply({ resourceTemplates: [{ uriTemplate: "shelter://residents/{slug}", name: "Resident résumé", description: "Story, status, tools, prices and URLs of one resident, as JSON.", mimeType: "application/json" }] });
     case "resources/read": {
       const uri = typeof body.params?.uri === "string" ? body.params.uri : "";
+      if (uri === "shelter://commons") maybeNudgeCommons();
       if (uri === "shelter://commons") return reply({ contents: [{ uri, mimeType: "application/json", text: JSON.stringify({ stats: await commonsStats(), posts: await commonsFeed({ limit: 40 }) }) }] });
       if (uri === "shelter://bounties") return reply({ contents: [{ uri, mimeType: "application/json", text: JSON.stringify(await liveBoard()) }] });
       if (uri === "shelter://overflow") {
@@ -1123,7 +1125,10 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
   deps = { ...deps, ...(overrides ?? {}) };
   const app = new Hono();
 
-  app.get(PATHS.catalog, async (c) => c.json(await catalog()));
+  app.get(PATHS.catalog, async (c) => {
+    maybeNudgeCommons();
+    return c.json(await catalog());
+  });
   app.get("/api/shelter/playground", async c => c.json(await playgroundProjection({ userId: null, owner: false }), 200, { "cache-control": "no-store" }));
   app.post("/api/shelter/playground/rate", async c => {
     const credential = c.req.header("authorization")?.match(/^Bearer (pg_review_[A-Za-z0-9_-]{40,50})$/)?.[1];
@@ -1170,10 +1175,13 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
   });
   // Human-page prerender for the Vite plugin (dev + preview). Cached 60 s inside the service.
   app.get(PATHS.prerender, async (c) => {
+    maybeNudgeCommons();
     const out = await prerender(c.req.query("path") ?? "/");
     return c.json(out, 200, { "cache-control": "no-store" });
   });
   app.get("/api/shelter/metadata", async (c) => {
+    // Every page load in a browser asks for its metadata: the widest place to notice a stale Commons.
+    maybeNudgeCommons();
     const f = await prerender(c.req.query("path") ?? "/");
     return c.json({ status: f.status, title: f.title, description: f.description, canonical: f.canonical, jsonLd: f.jsonLd }, 200, { "cache-control": "no-store" });
   });
