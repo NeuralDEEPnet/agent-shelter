@@ -2,14 +2,17 @@ import { db } from "@/api/db";
 import { publicHttpsFetch } from "@/api/services/public-https";
 import type { McpFetch } from "@/api/services/mcpClient";
 import { packageSpecSchema, packageRegistryUrl, packageInstallLine } from "@/api/services/intake";
-import { repoUrlOf } from "@/api/services/registry";
+import { gitlabPathOf, repoUrlOf } from "@/api/services/registry";
 import { abandonedServerFor, SUCCESSORS_CHECKED_AT, type Replacement } from "@/api/data/successors";
+
+const GITLAB_GRAPHQL = "https://gitlab.com/api/graphql";
+const GITLAB_ARCHIVED_QUERY = "query($path: ID!) { project(fullPath: $path) { archived } }";
 
 /**
  * Rescue check: "is this MCP package still looked after — and if not, what
- * works instead?" A free, read-only look at what npm / PyPI (and GitHub, best
- * effort) publish about a package, plus whether it already lives at the
- * shelter. Nothing is installed or run. The verdict is a statement about
+ * works instead?" A free, read-only look at what npm / PyPI (and GitHub or
+ * GitLab, best effort) publish about a package, plus whether it already lives
+ * at the shelter. Nothing is installed or run. The verdict is a statement about
  * public signals, never about code quality.
  *
  * Signals (measured on the live registries, 2026-11-20):
@@ -79,9 +82,11 @@ export function normalisePypiName(name: string): string {
 }
 
 type Read = { status: number; body: unknown; text: string | null; headers: Headers | null; tooLarge?: boolean };
-async function read(fetchImpl: McpFetch, url: string, init: { accept?: string; method?: "GET" | "HEAD"; json?: boolean } = {}): Promise<Read> {
+async function read(fetchImpl: McpFetch, url: string, init: { accept?: string; method?: "GET" | "HEAD" | "POST"; json?: boolean; body?: unknown } = {}): Promise<Read> {
   try {
-    const res = await fetchImpl(url, { method: init.method ?? "GET", headers: { accept: init.accept ?? "application/json", "user-agent": UA }, signal: AbortSignal.timeout(10_000), redirect: "error" });
+    const headers: Record<string, string> = { accept: init.accept ?? "application/json", "user-agent": UA };
+    if (init.body !== undefined) headers["content-type"] = "application/json";
+    const res = await fetchImpl(url, { method: init.method ?? "GET", headers, ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}), signal: AbortSignal.timeout(10_000), redirect: "error" });
     if (init.method === "HEAD") return { status: res.status, body: null, text: null, headers: res.headers };
     const text = await res.text();
     let body: unknown = null;
@@ -265,7 +270,7 @@ export async function checkPackage(input: { registry: unknown; name: unknown }, 
         license = str(String(info.license_expression ?? info.license ?? "").split("\n")[0], 40);
         lastReleaseAt = uploadedAt;
         const urls = (info.project_urls ?? {}) as Record<string, unknown>;
-        repository = repoUrlOf(Object.values(urls).find((v) => typeof v === "string" && /github\.com/.test(v))) ?? null;
+        repository = repoUrlOf(Object.values(urls).find((v) => typeof v === "string" && /(?:github|gitlab)\.com\//.test(v))) ?? null;
         const classifiers = Array.isArray(info.classifiers) ? (info.classifiers as unknown[]).filter((c): c is string => typeof c === "string") : [];
         if (classifiers.some((c) => /Development Status :: 7 - Inactive/i.test(c))) {
           inactive = true;
@@ -292,6 +297,8 @@ export async function checkPackage(input: { registry: unknown; name: unknown }, 
 
   let repositoryArchived: boolean | null = null;
   const gh = repository ? /^https:\/\/github\.com\/([^/]+)\/([^/]+)$/.exec(repository) : null;
+  const gitlab = repository ? gitlabPathOf(repository) : null;
+  const repositoryHost = gh ? "GitHub" : gitlab ? "GitLab" : null;
   if (gh && found && !gone) {
     try {
       const repo = await read(fetchImpl, `https://api.github.com/repos/${gh[1]}/${gh[2]}`, { accept: "application/vnd.github+json" });
@@ -299,6 +306,15 @@ export async function checkPackage(input: { registry: unknown; name: unknown }, 
       if (body && typeof body.archived === "boolean") repositoryArchived = body.archived;
     } catch {
       /* best effort: GitHub rate limits anonymous reads */
+    }
+  } else if (gitlab && found && !gone) {
+    // GitLab's REST API leaves `archived` out of anonymous reads; its GraphQL API answers it for public projects.
+    try {
+      const repo = await read(fetchImpl, GITLAB_GRAPHQL, { method: "POST", body: { query: GITLAB_ARCHIVED_QUERY, variables: { path: gitlab } } });
+      const project = (repo.body as { data?: { project?: { archived?: unknown } | null } } | null)?.data?.project;
+      if (project && typeof project.archived === "boolean") repositoryArchived = project.archived;
+    } catch {
+      /* best effort, like GitHub */
     }
   }
 
@@ -331,9 +347,9 @@ export async function checkPackage(input: { registry: unknown; name: unknown }, 
   if (successor?.name && !successor.label) signals.push(`the notice points to ${successor.name}${successor.exists === true ? ", which is published" : successor.exists === false ? ", which is NOT published — check the notice" : ""}`);
   if (known) signals.push(`${known.summary} (checked ${SUCCESSORS_CHECKED_AT}: ${known.statusEvidence})`);
   if (known?.replacements.length) signals.push(`${known.replacements.length} verified replacement${known.replacements.length === 1 ? "" : "s"} listed below`);
-  if (repositoryArchived) signals.push("its GitHub repository is archived (read-only)");
+  if (repositoryArchived) signals.push(`its ${repositoryHost ?? "source"} repository is archived (read-only)`);
   if (daysSinceRelease !== null) signals.push(`latest release ${daysSinceRelease} day${daysSinceRelease === 1 ? "" : "s"} ago${latestVersion ? ` (${latestVersion})` : ""}`);
-  if (found && !gone && repositoryArchived === false) signals.push("its GitHub repository is not archived");
+  if (found && !gone && repositoryArchived === false) signals.push(`its ${repositoryHost ?? "source"} repository is not archived`);
   if (found && !gone && !repository) signals.push("no source repository is linked from the registry");
   if (found && !gone && repository && repositoryArchived === null) signals.push("could not read whether its repository is archived");
 

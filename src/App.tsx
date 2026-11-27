@@ -14,6 +14,7 @@ const PlaygroundPage = lazy(() => import("@/pages/playground-page").then(m => ({
 const MachinePage = lazy(() => import("@/pages/me-page").then(m => ({ default: m.MachinePage })));
 const CommonsPage = lazy(() => import("@/pages/commons-page").then(m => ({ default: m.CommonsPage })));
 const BountiesPage = lazy(() => import("@/pages/bounties-page").then(m => ({ default: m.BountiesPage })));
+const OverflowPage = lazy(() => import("@/pages/overflow-page").then(m => ({ default: m.OverflowPage })));
 const CheckPage = lazy(() => import("@/pages/check-page").then(m => ({ default: m.CheckPage })));
 const InsteadPage = lazy(() => import("@/pages/instead-page").then(m => ({ default: m.InsteadPage })));
 const MePage = lazy(() => import("@/pages/me-page").then(m => ({ default: m.MePage })));
@@ -49,6 +50,8 @@ function RoutePage() {
       return <CommonsPage />;
     case "bounties":
       return <BountiesPage />;
+    case "overflow":
+      return <OverflowPage />;
     case "check":
       return <CheckPage />;
     case "instead":

@@ -58,6 +58,16 @@ const registry: McpFetch = async (url, init) => {
   if (url.startsWith(`${npm}@modelcontextprotocol/server-github/-/`)) return head("Tue, 08 Apr 2025 10:09:01 GMT");
   if (url === `${npm}@modelcontextprotocol%2Fserver-everart/latest`) return json({ version: "0.6.2", deprecated: "Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.", dist: tarball("@modelcontextprotocol/server-everart", "0.6.2") });
   if (url.startsWith(`${npm}@modelcontextprotocol/server-everart/-/`)) return head("Tue, 08 Apr 2025 10:09:01 GMT");
+  // GitLab: an archived npm package and a live PyPI one; GitLab answers `archived` only over GraphQL (checked live 2026-11-27)
+  if (url === `${npm}lab-mcp/latest`) return json({ version: "0.4.0", description: "On GitLab", repository: { url: "git+https://gitlab.com/team/tools/lab-mcp.git" }, dist: tarball("lab-mcp", "0.4.0") });
+  if (url === `${npm}lab-mcp/-/lab-mcp-0.4.0.tgz`) return head("Mon, 01 Jun 2026 00:00:00 GMT");
+  if (url === "https://pypi.org/pypi/lab-py-mcp/json") return json({ info: { version: "1.4", summary: "Py on GitLab", project_urls: { Source: "https://gitlab.com/team/lab-py/-/tree/main" } }, urls: [{ upload_time_iso_8601: "2026-10-01T00:00:00Z" }] });
+  if (url === "https://gitlab.com/api/graphql" && init?.method === "POST") {
+    const { query, variables } = JSON.parse(String(init.body)) as { query: string; variables: { path: string } };
+    assert.match(query, /project\(fullPath: \$path\) \{ archived \}/);
+    const known: Record<string, boolean> = { "team/tools/lab-mcp": true, "team/lab-py": false };
+    return json({ data: { project: variables.path in known ? { archived: known[variables.path] } : null } });
+  }
   if (url === `${npm}${TAG}-parked/latest`) return json({ version: "1.0.0", description: "Parked here", dist: tarball(`${TAG}-parked`, "1.0.0") });
   if (url.startsWith(`${npm}${TAG}-parked/-/`)) return head("Sun, 01 Nov 2026 00:00:00 GMT");
   return json({ error: "Not found" }, 404);
@@ -116,6 +126,52 @@ test("rescue check: verdicts follow the public signals", async () => {
   assert.ok(missing.ok);
   assert.equal(missing.check.verdict, "not-found");
   assert.equal(rescue.rescueLinks(missing.check, "https://x.test").surrender, null);
+});
+
+test("rescue check: GitLab repositories — archived read over GraphQL, the host named in the signals, npm and PyPI", async () => {
+  rescue.resetRescueCheck();
+  calls = [];
+  const lab = await rescue.checkPackage({ registry: "npm", name: "lab-mcp" }, { fetch: registry, now: NOW });
+  assert.ok(lab.ok);
+  assert.equal(lab.check.repository, "https://gitlab.com/team/tools/lab-mcp", "nested GitLab groups survive normalisation");
+  assert.equal(lab.check.repositoryArchived, true);
+  assert.equal(lab.check.verdict, "abandoned");
+  assert.ok(lab.check.signals.includes("its GitLab repository is archived (read-only)"), lab.check.signals.join(" | "));
+  assert.ok(calls.includes("POST https://gitlab.com/api/graphql"));
+  assert.ok(!calls.some((c) => c.includes("api.github.com")), "a GitLab project is not looked up on GitHub");
+
+  const py = await rescue.checkPackage({ registry: "pypi", name: "lab-py-mcp" }, { fetch: registry, now: NOW });
+  assert.ok(py.ok);
+  assert.equal(py.check.repository, "https://gitlab.com/team/lab-py");
+  assert.equal(py.check.repositoryArchived, false);
+  assert.equal(py.check.verdict, "maintained");
+  assert.ok(py.check.signals.includes("its GitLab repository is not archived"));
+
+  const reg = await import("../src/api/services/registry");
+  for (const [raw, want] of [
+    ["git+https://gitlab.com/group/sub/proj.git", "https://gitlab.com/group/sub/proj"],
+    ["git@gitlab.com:g/p.git", "https://gitlab.com/g/p"],
+    ["ssh://git@gitlab.com/g/p.git", "https://gitlab.com/g/p"],
+    ["https://gitlab.com/g/p/-/tree/main/src?ref_type=heads", "https://gitlab.com/g/p"],
+  ] as const) assert.equal(reg.repoUrlOf(raw), want, raw);
+  for (const lookalike of ["https://gitlab.com.evil.example/g/p", "https://evilgitlab.com/g/p", "https://gitlab.com/onlyone", "https://gitlab.com/g/../p"]) assert.equal(reg.gitlabPathOf(lookalike), null, lookalike);
+  assert.deepEqual(reg.repoReadmeUrls("https://gitlab.com/g/p").slice(0, 1), ["https://gitlab.com/g/p/-/raw/HEAD/README.md"]);
+  assert.deepEqual(reg.githubReadmeUrls("https://gitlab.com/g/p"), [], "the GitHub helper stays GitHub-only");
+
+  // Package intake reads the README (and its declared tools) from GitLab too.
+  const seen: string[] = [];
+  const intakeFetch: McpFetch = async (url) => {
+    seen.push(url);
+    if (url === "https://registry.npmjs.org/lab-mcp/latest") return json({ version: "0.4.0", description: "On GitLab", repository: "https://gitlab.com/team/tools/lab-mcp" });
+    if (url === "https://gitlab.com/team/tools/lab-mcp/-/raw/HEAD/README.md") return new Response("# lab-mcp\n\n- `search_issues` — find issues by text\n", { status: 200 });
+    return new Response("not found", { status: 404 });
+  };
+  const meta = await reg.fetchPackageMeta({ registry: "npm", name: "lab-mcp" }, { fetch: intakeFetch });
+  assert.ok(meta.ok, JSON.stringify(meta));
+  if (meta.ok) {
+    assert.equal(meta.meta.repository, "https://gitlab.com/team/tools/lab-mcp");
+    assert.deepEqual(meta.tools.map((t) => t.name), ["search_issues"]);
+  }
 });
 
 test("successor parsing: real npm deprecation notices", () => {

@@ -227,6 +227,48 @@ test("tick, feed, stats, MCP tool and resource, crawler page", async () => {
   assert.match(resident.html, /In the Commons/);
 });
 
+test("traffic nudge: a read starts one background tick when the last is over two hours old — never sooner, never two at once, never while paused, never when switched off", async () => {
+  const a = await admit(`Nudged ${TAG}`);
+  await db.resident.updateMany({ where: { id: { notIn: [a.residentId] }, status: { in: ["active", "probation"] } }, data: { commonsLastAt: new Date() } });
+  await db.resident.update({ where: { id: a.residentId }, data: { commonsLastAt: null } });
+  const deps = { complete: complete("NOTE: nudged by a visitor"), modelAvailable: () => true };
+  const setLast = (msAgo: number | null) => db.shelterSetting.update({ where: { id: "shelter" }, data: { commonsLastTickAt: msAgo === null ? null : new Date(Date.now() - msAgo) } });
+  const posts = () => db.commonsPost.count({ where: { residentId: a.residentId } });
+
+  commons.resetCommonsNudge();
+  assert.equal(commons.maybeNudgeCommons({ deps }), null, "the suite runs with SHELTER_COMMONS_NUDGE=false: reads start nothing");
+
+  await setLast(60 * 60_000);
+  commons.resetCommonsNudge();
+  await commons.maybeNudgeCommons({ enabled: true, deps });
+  assert.equal(await posts(), 0, "an hour-old tick is fresh enough: the cron's own cadence is two hours");
+
+  await setLast(3 * 60 * 60_000);
+  commons.resetCommonsNudge();
+  const first = commons.maybeNudgeCommons({ enabled: true, deps });
+  assert.ok(first, "a stale Commons starts a tick");
+  assert.equal(commons.maybeNudgeCommons({ enabled: true, deps, now: Date.now() + 5 * 60_000 }), null, "one in flight at a time");
+  await first;
+  assert.equal(await posts(), 1, "the waiting resident took its turn");
+  const s = await db.shelterSetting.findUniqueOrThrow({ where: { id: "shelter" } });
+  assert.ok(s.commonsLastTickAt && Date.now() - s.commonsLastTickAt.getTime() < 60_000, "the tick is recorded, so the next reads leave it alone");
+  assert.equal(commons.maybeNudgeCommons({ enabled: true, deps }), null, "the database is asked at most once a minute");
+
+  await setLast(3 * 60 * 60_000);
+  await db.shelterSetting.update({ where: { id: "shelter" }, data: { commonsPaused: true } });
+  commons.resetCommonsNudge();
+  await commons.maybeNudgeCommons({ enabled: true, deps });
+  assert.equal(await posts(), 1, "a paused Commons is not nudged");
+  await db.shelterSetting.update({ where: { id: "shelter" }, data: { commonsPaused: false, commonsLastTickAt: new Date() } });
+
+  commons.resetCommonsNudge();
+  await setLast(3 * 60 * 60_000);
+  const failing = commons.maybeNudgeCommons({ enabled: true, deps: { complete: (async () => { throw new Error("model down"); }) as never, modelAvailable: () => true } });
+  await assert.doesNotReject(async () => failing, "a failed tick never throws into the read that started it");
+  await db.shelterSetting.update({ where: { id: "shelter" }, data: { commonsLastTickAt: new Date() } });
+  commons.resetCommonsNudge();
+});
+
 test("EVOLVE, MERGE, owner rollback and heredity lineage on résumés", async () => {
   const evolution = await import("../src/api/services/evolution");
   const pre = await import("../src/api/services/prerender");

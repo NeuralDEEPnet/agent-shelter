@@ -1,0 +1,61 @@
+name: Mirror to GitLab
+
+# Pushes main and tags to the GitLab mirror (docs/GITLAB.md), where .gitlab-ci.yml runs the checks
+# and publishes the static Pages mirror. Off until the owner configures it:
+#   - secret   GITLAB_TOKEN   a GitLab project access token, role Maintainer, scope write_repository
+#   - variable GITLAB_PROJECT the project path, e.g. neuraldeep/agent-shelter
+#   - variable GITLAB_HOST    optional, default gitlab.com (self-managed GitLab works too)
+# Without them the job says so and succeeds; nothing is pushed.
+
+on:
+  push:
+    branches: [main]
+    tags: ["*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-gitlab
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    env:
+      GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+      GITLAB_PROJECT: ${{ vars.GITLAB_PROJECT }}
+      GITLAB_HOST: ${{ vars.GITLAB_HOST || 'gitlab.com' }}
+    steps:
+      - name: Check configuration
+        id: config
+        run: |
+          if [ -z "$GITLAB_TOKEN" ] || [ -z "$GITLAB_PROJECT" ]; then
+            echo "::notice title=GitLab mirror off::Set the GITLAB_TOKEN secret and the GITLAB_PROJECT variable to mirror to GitLab (docs/GITLAB.md). Nothing was pushed."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          elif ! printf '%s' "$GITLAB_PROJECT" | grep -Eq '^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$'; then
+            echo "::error title=GitLab mirror::GITLAB_PROJECT must be a project path like group/project."
+            exit 1
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.config.outputs.enabled == 'true'
+        with:
+          # Full history and tags. The checkout's GitHub credential is scoped to github.com, so it
+          # is never sent to GitLab, and it lets the fetch below work on a private repository too.
+          fetch-depth: 0
+
+      - name: Push main and tags
+        if: steps.config.outputs.enabled == 'true'
+        run: |
+          # The token travels in a masked header, never in a URL that git could print.
+          auth=$(printf 'oauth2:%s' "$GITLAB_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          remote="https://${GITLAB_HOST}/${GITLAB_PROJECT}.git"
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          git -c http.extraHeader="Authorization: Basic $auth" push "$remote" 'refs/remotes/origin/main:refs/heads/main'
+          git -c http.extraHeader="Authorization: Basic $auth" push "$remote" --tags
+          echo "Mirrored main ($(git rev-parse --short refs/remotes/origin/main)) and tags to ${GITLAB_HOST}/${GITLAB_PROJECT}."

@@ -21,6 +21,7 @@ export type Route =
   | { name: "machine" }
   | { name: "commons" }
   | { name: "bounties" }
+  | { name: "overflow" }
   | { name: "check" }
   | { name: "instead"; id: string | null }
   | { name: "not-found" };
@@ -34,6 +35,7 @@ export function parsePath(pathAndQuery: string): Route {
   if (parts.length === 0) return { name: "home" };
   if (parts[0] === "commons") return { name: "commons" };
   if (parts[0] === "bounties") return { name: "bounties" };
+  if (parts[0] === "overflow" && parts.length === 1) return { name: "overflow" };
   if (parts[0] === "check" && parts.length === 1) return { name: "check" };
   if (parts[0] === "instead" && parts.length <= 2) return { name: "instead", id: parts[1] ? safeDecode(parts[1]) : null };
   if (["playground", "gallery"].includes(parts[0])) return { name: "playground", tab: parts[0] === "gallery" ? "gallery" : params.get("tab") === "create" ? "create" : "talk" };

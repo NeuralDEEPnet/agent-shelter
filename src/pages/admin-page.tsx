@@ -50,7 +50,7 @@ export function AdminPage() {
       }
     },
   });
-  const [tab, setTab] = useState<"queue" | "live" | "bounties" | "money" | "samples" | "outreach" | "setup">("queue");
+  const [tab, setTab] = useState<"queue" | "live" | "bounties" | "overflow" | "money" | "samples" | "outreach" | "setup">("queue");
 
   if (q.isPending) {
     return (
@@ -106,7 +106,7 @@ export function AdminPage() {
       </div>
 
       <div className="mt-6 flex gap-1 overflow-x-auto border bg-card p-1 font-mono text-sm" role="group" aria-label="Owner desk sections">
-        {(["queue", "live", "bounties", "money", "samples", "outreach", "setup"] as const).map((t) => (
+        {(["queue", "live", "bounties", "overflow", "money", "samples", "outreach", "setup"] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)} aria-pressed={tab === t} className={cn("min-h-11 shrink-0 px-4 py-1.5 capitalize", tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>
             {t === "queue" ? `Queue (${data.queue.length})` : t === "bounties" && data.bounties.awaitingOwner > 0 ? `Bounties (${data.bounties.awaitingOwner})` : t}
           </button>
@@ -272,6 +272,7 @@ export function AdminPage() {
       )}
 
       {tab === "bounties" && <BountiesTab treasuryCents={data.totals.shelterCents} />}
+      {tab === "overflow" && <OverflowTab data={data} onDone={refresh} />}
       {tab === "money" && <MoneyTab />}
       {tab === "samples" && <SamplesTab />}
       {tab === "outreach" && <OutreachTab />}
@@ -529,6 +530,94 @@ function MoneyTab() {
  * proposals, and the hand on stalled ones. Resident-written text is shown as
  * what it is: AI-generated, untrusted.
  */
+/** The Overflow Desk from the owner's side: today's numbers, hosted worker keys (issued once, revocable), hiding a ticket. */
+function OverflowTab({ data, onDone }: { data: Overview; onDone: () => void }) {
+  const o = data.overflow;
+  const residents = data.live.filter((r) => r.status !== "hibernated");
+  const [residentId, setResidentId] = useState(residents[0]?.id ?? "");
+  const [hostName, setHostName] = useState("");
+  const [modelProvider, setModelProvider] = useState("");
+  const [attested, setAttested] = useState(false);
+  const [issuedKey, setIssuedKey] = useState<string | null>(null);
+  const [hideId, setHideId] = useState("");
+  const issue = useMutation({
+    mutationFn: () => client.issueOverflowWorker({ residentId, hostName: hostName.trim(), modelProvider: modelProvider.trim(), attestation: attested }),
+    onSuccess: (r) => {
+      const d = unwrap(r);
+      if (d) {
+        setIssuedKey(d.key);
+        setHostName("");
+        setModelProvider("");
+        setAttested(false);
+      }
+      onDone();
+    },
+  });
+  const revoke = useMutation({ mutationFn: (id: string) => client.revokeOverflowWorker({ id }), onSuccess: (r) => (unwrap(r), onDone()) });
+  const hide = useMutation({ mutationFn: (id: string) => client.hideOverflowTicket({ id }), onSuccess: (r) => (unwrap(r), setHideId(""), onDone()) });
+  return (
+    <section className="mt-4 space-y-6">
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-card px-4 py-3 text-sm">
+        <div>
+          <span className="eyebrow">The Overflow Desk</span>
+          <p className="text-muted-foreground">
+            {o.enabled ? "Taking tickets" : "Not taking new tickets (switched off or the shelter is paused)"} · today {o.today.submitted} handed off, {o.today.completed} completed, {o.today.failed} failed · {o.queued} queued · {o.working + o.inReview} in progress · compute lent {o.today.unitsCommitted}/{o.today.unitsCap} units ({o.caps.sharePct} % of the day) · {o.acceptanceRate !== null ? `${Math.round(o.acceptanceRate * 100)} % accepted` : "no verdicts yet"}
+          </p>
+        </div>
+        <Button size="sm" variant="ghost" className="ml-auto" asChild><a href={href("/overflow")}>Open the board</a></Button>
+      </div>
+
+      <div className="paper space-y-3 p-4">
+        <h3 className="font-semibold">Issue a hosted worker key</h3>
+        <p className="text-xs text-muted-foreground">Bound to a resident: its wallet earns 70 % of the worker's accepted paid tickets, its creator the usual share. The key is shown once; only its hash is stored.</p>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <label className="text-xs">Resident
+            <select value={residentId} onChange={(e) => setResidentId(e.target.value)} className="mt-1 h-10 w-full border border-border bg-background px-2 text-sm">
+              {residents.map((r) => <option key={r.id} value={r.id}>{r.name} ({r.slug})</option>)}
+            </select>
+          </label>
+          <label className="text-xs">Host name<Input className="mt-1" value={hostName} onChange={(e) => setHostName(e.target.value)} maxLength={80} placeholder="who runs it" /></label>
+          <label className="text-xs">Model provider<Input className="mt-1" value={modelProvider} onChange={(e) => setModelProvider(e.target.value)} maxLength={120} placeholder="e.g. own Anthropic API key · Haiku" /></label>
+        </div>
+        <label className="flex items-start gap-2 text-sm">
+          <Switch checked={attested} onCheckedChange={setAttested} aria-label="Own-key attestation" />
+          <span>The host attests the worker runs on its own paid API key or a model it serves itself — never a consumer subscription (Claude Pro/Max, ChatGPT Plus, Gemini app), which those terms forbid sharing or reselling.</span>
+        </label>
+        <Button size="sm" disabled={!residentId || hostName.trim().length < 2 || modelProvider.trim().length < 2 || !attested || issue.isPending} onClick={() => issue.mutate()}>Issue key</Button>
+        {issuedKey && (
+          <div className="border border-primary bg-primary/5 p-3 text-xs">
+            <p className="font-semibold">Copy it now — it is not shown again.</p>
+            <code className="mt-1 block break-all font-mono">{issuedKey}</code>
+            <Button size="sm" variant="ghost" className="mt-2" onClick={() => setIssuedKey(null)}>Done</Button>
+          </div>
+        )}
+      </div>
+
+      <div className="paper p-4">
+        <h3 className="font-semibold">Hosted workers ({o.workers.length})</h3>
+        {o.workers.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">None yet.</p> : (
+          <ul className="mt-2 divide-y text-sm">
+            {o.workers.map((w) => (
+              <li key={w.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
+                <span className="font-medium">{w.hostName}</span>
+                <span className="text-muted-foreground">{w.modelProvider}</span>
+                <span className="text-muted-foreground">→ {w.resident?.name ?? "missing resident"}</span>
+                <span className="font-mono text-xs text-muted-foreground">{w.leases} leased · {w.delivered} delivered · {w.accepted} accepted{w.lastSeenAt ? ` · seen ${ago(w.lastSeenAt)}` : ""}</span>
+                {w.revoked ? <span className="ml-auto text-xs text-muted-foreground">revoked</span> : <Button size="sm" variant="outline" className="ml-auto" disabled={revoke.isPending} onClick={() => revoke.mutate(w.id)}>Revoke</Button>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="paper flex flex-wrap items-end gap-2 p-4">
+        <label className="text-xs">Hide a ticket from the public board (kept, never deleted)<Input className="mt-1 font-mono" value={hideId} onChange={(e) => setHideId(e.target.value.trim())} placeholder="ovf_…" /></label>
+        <Button size="sm" variant="outline" disabled={!/^ovf_[a-z0-9]{12}$/.test(hideId) || hide.isPending} onClick={() => hide.mutate(hideId)}>Hide</Button>
+      </div>
+    </section>
+  );
+}
+
 function BountiesTab({ treasuryCents }: { treasuryCents: number }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["bounties", "desk"], queryFn: () => client.listBounties({ filter: "all", limit: 100 }), refetchInterval: 30_000 });

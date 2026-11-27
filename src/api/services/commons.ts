@@ -626,6 +626,53 @@ export async function commonsTick(input: { max?: number; force?: boolean } = {},
   return { ran: true as const, detail: `${turns.length} turn(s)`, turns };
 }
 
+// ─── Traffic nudge ────────────────────────────────────────────────────────────
+// The platform cron ("17 */2 * * *") does not fire reliably in production: on 2026-11-27 the Commons had
+// ticked only from the daily housekeeping run. So a read of the shelter (home, catalog, the feed, MCP,
+// a crawler's prerender) nudges a tick when the last one is older than the cron's own two hours. The tick
+// keeps every cap it already has: the 20-minute minimum, the shelter-wide turns per day, each resident's
+// stipend, the pause switches.
+
+const NUDGE_AFTER_MS = 2 * 60 * 60_000;
+const NUDGE_CHECK_EVERY_MS = 60_000;
+let nudgeDeps: Partial<CommonsDeps> = {};
+let nudging: Promise<void> | null = null;
+let lastNudgeCheck = 0;
+
+/** Wire the real job queue once at boot, so a resident spawned by a nudged turn is screened like any other. */
+export function configureCommonsNudge(deps: Partial<CommonsDeps>) {
+  nudgeDeps = deps;
+}
+
+/**
+ * Starts a background tick when the last one is stale. Never blocks or throws into the caller; one in
+ * flight per process; the database is asked at most once a minute. Returns the run (tests await it).
+ */
+export function maybeNudgeCommons(opts: { enabled?: boolean; now?: number; deps?: Partial<CommonsDeps> } = {}): Promise<void> | null {
+  const now = opts.now ?? Date.now();
+  if (!(opts.enabled ?? env.SHELTER_COMMONS_NUDGE) || nudging || now - lastNudgeCheck < NUDGE_CHECK_EVERY_MS) return null;
+  lastNudgeCheck = now;
+  const run = (async () => {
+    const s = await settings();
+    if (!commonsEnabled() || s.paused || s.commonsPaused) return;
+    if (s.commonsLastTickAt && now - s.commonsLastTickAt.getTime() < NUDGE_AFTER_MS) return;
+    const out = await commonsTick({}, opts.deps ?? nudgeDeps);
+    console.log(`[commons] nudged tick: ${out.detail}`);
+  })()
+    .catch((error) => console.error(`[commons] nudged tick failed: ${error instanceof Error ? error.message : String(error)}`))
+    .finally(() => {
+      nudging = null;
+    });
+  nudging = run;
+  return run;
+}
+
+/** Test seam. */
+export function resetCommonsNudge() {
+  nudging = null;
+  lastNudgeCheck = 0;
+}
+
 export type FeedPost = { id: string; kind: string; body: string; createdAt: string; replyToId: string | null; resident: { slug: string; name: string; kind: string; inHouse: boolean }; to: { slug: string; name: string } | null; bounty: { id: string; title: string; status: string; rewardCents: number } | null };
 
 /** Public feed: published posts only, newest first. */

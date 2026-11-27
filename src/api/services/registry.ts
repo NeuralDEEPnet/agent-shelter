@@ -43,6 +43,28 @@ export function githubReadmeUrls(repo: string | undefined): string[] {
   return ["README.md", "readme.md", "README.MD", "Readme.md"].map((f) => `https://raw.githubusercontent.com/${owner}/${name}/HEAD/${f}`);
 }
 
+/**
+ * A gitlab.com project path from any URL form a registry carries (`git+https://…/g/sub/p.git`,
+ * `git@gitlab.com:g/p.git`, a `/-/tree/…` link). GitLab allows nested groups, so a path has two or
+ * more segments. Only gitlab.com: self-managed hosts are not read.
+ */
+export function gitlabPathOf(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const m = /^(?:git\+)?(?:https?:\/\/(?:[^@/]+@)?|ssh:\/\/git@|git@)gitlab\.com[/:]([^\s?#]+)(?:[?#]\S*)?$/i.exec(raw.trim());
+  if (!m) return null;
+  const path = m[1]!.split("/-/")[0]!.replace(/\.git$/i, "").replace(/\/+$/, "");
+  const parts = path.split("/");
+  if (parts.length < 2 || parts.some((p) => p === "." || p === ".." || !/^[A-Za-z0-9_.][A-Za-z0-9_.-]*$/.test(p))) return null;
+  return path;
+}
+
+/** Raw README URLs for a GitHub or gitlab.com repository, in the order to try. */
+export function repoReadmeUrls(repo: string | undefined): string[] {
+  const gitlab = gitlabPathOf(repo);
+  if (gitlab) return ["README.md", "readme.md", "README.MD", "Readme.md"].map((f) => `https://gitlab.com/${gitlab}/-/raw/HEAD/${f}`);
+  return githubReadmeUrls(repo);
+}
+
 /** Tools mentioned in a README: `tool_name` — description, or ### tool_name headings. Best effort, capped. */
 export function toolsFromReadme(readme: string): DeclaredTool[] {
   const found = new Map<string, string>();
@@ -63,7 +85,9 @@ export function repoUrlOf(v: unknown): string | undefined {
   const raw = typeof v === "string" ? v : v && typeof v === "object" && typeof (v as { url?: unknown }).url === "string" ? (v as { url: string }).url : undefined;
   if (!raw) return undefined;
   const m = /github\.com[/:]([^/\s#]+)\/([^/\s#]+?)(?:\.git)?(?:[/#].*)?$/i.exec(raw);
-  return m ? `https://github.com/${m[1]}/${m[2]}` : clean(raw.replace(/^git\+/, ""), 2_000);
+  if (m) return `https://github.com/${m[1]}/${m[2]}`;
+  const gitlab = gitlabPathOf(raw);
+  return gitlab ? `https://gitlab.com/${gitlab}` : clean(raw.replace(/^git\+/, ""), 2_000);
 }
 
 export type PackageMetaOutcome = { ok: true; meta: RegistryMeta; tools: DeclaredTool[] } | { ok: false; detail: string };
@@ -87,7 +111,7 @@ export async function fetchPackageMeta(spec: Pick<PackageSpec, "registry" | "nam
       const doc = (await getJson(fetchImpl, `https://pypi.org/pypi/${spec.name}/json`)) as { info?: Record<string, unknown> };
       const info = doc.info ?? {};
       const urls = (info.project_urls ?? {}) as Record<string, unknown>;
-      const repoCandidate = Object.entries(urls).find(([k, v]) => /source|repository|github|code|homepage/i.test(k) && typeof v === "string" && /github\.com/.test(v))?.[1];
+      const repoCandidate = Object.entries(urls).find(([k, v]) => /source|repository|github|code|homepage/i.test(k) && typeof v === "string" && /(?:github|gitlab)\.com\//.test(v))?.[1];
       meta = {
         description: clean(info.summary, 1_000),
         latestVersion: clean(info.version, 64),
@@ -100,7 +124,7 @@ export async function fetchPackageMeta(spec: Pick<PackageSpec, "registry" | "nam
     }
     const repo = spec.repo ?? meta.repository;
     if (!meta.readme) {
-      for (const url of githubReadmeUrls(repo)) {
+      for (const url of repoReadmeUrls(repo)) {
         const text = await getText(fetchImpl, url);
         if (text) {
           meta.readme = text;

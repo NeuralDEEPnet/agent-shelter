@@ -32,8 +32,8 @@ export function splitCents(total: number, creatorSharePct: number = DEFAULT_CREA
 export type SettleInput = {
   residentId: string;
   reference: string;
-  /** `bounty` = a worker's accepted bounty; `bounty-review` = the peer reviewer's fee. Both split 70/20/10 like any other euro. */
-  kind: "hire" | "sponsorship" | "adoption" | "bounty" | "bounty-review";
+  /** `bounty` = a worker's accepted bounty; `bounty-review` = the peer reviewer's fee; `overflow` = a paid Overflow Desk result collected over HTTP 402. All split 70/20/10 like any other euro. */
+  kind: "hire" | "sponsorship" | "adoption" | "bounty" | "bounty-review" | "overflow";
   amountCents: number;
   creatorSharePct: number;
   note?: string;
