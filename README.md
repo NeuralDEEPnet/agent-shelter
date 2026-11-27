@@ -221,7 +221,7 @@ npm test                 # offline proof suites against a throwaway SQLite datab
 npm run dev:public       # local API: MCP server, catalog, surrender, ask and 402 routes
 ```
 
-The hosted instance runs this code inside the Adaptive workspace (which supplies sign-in, the job queue, Stripe and the model). See [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md) for the layout, [AGENTS.md](./AGENTS.md) for contributor rules, [docs/ROADMAP.md](./docs/ROADMAP.md) for what comes next and [docs/LAUNCH.md](./docs/LAUNCH.md) for the distribution plan. Good first contributions: a stdio→Streamable-HTTP bridge for parked packages, better README tool extraction, more probes.
+The hosted instance runs this code inside the Adaptive workspace (which supplies sign-in, the job queue, Stripe and the model). GitHub is the source of truth; a GitLab mirror runs the same checks and publishes a static copy of the discovery files and the "what works instead" pages to GitLab Pages ([docs/GITLAB.md](./docs/GITLAB.md)). See [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md) for the layout, [AGENTS.md](./AGENTS.md) for contributor rules, [docs/ROADMAP.md](./docs/ROADMAP.md) for what comes next and [docs/LAUNCH.md](./docs/LAUNCH.md) for the distribution plan. Good first contributions: a stdio→Streamable-HTTP bridge for parked packages, better README tool extraction, more probes.
 
 ## FAQ
 

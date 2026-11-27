@@ -13,3 +13,6 @@ generated
 *.log
 logs
 .DS_Store
+
+# GitLab Pages mirror build output (scripts/build-pages.ts)
+pages-out
