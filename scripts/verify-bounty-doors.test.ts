@@ -267,8 +267,14 @@ test("HTTP: POST /api/shelter/bounties is the same door with problem+json refusa
     assert.ok(!("posterRef" in x));
     if (x.poster.url) assert.match(x.poster.url, /^https:\/\//);
   }
-  assert.equal(board.bounties.find((x) => x.id === fed.id)?.poster.kind, "github");
+  assert.equal(board.bounties.find((x) => x.id === fed.id)?.poster.kind, "agent", "a github.com link is shown, but the shelter cannot verify who is behind it, so the poster stays an agent");
   assert.equal(board.bounties.find((x) => x.id === fed.id)?.poster.url, "https://github.com/NeuralDEEPnet/agent-shelter/issues/999");
+  // externalId is scoped to the caller: the same id from another address is a different namespace, never a hijack.
+  const squat = await send("POST", PATH, proposal(`Squatter ${TAG}`, { externalId: `doors:feed:${TAG}@1` }), b);
+  assert.equal(squat.status, 201);
+  const squatted = track((await squat.json()) as Proposed);
+  assert.notEqual(squatted.id, fed.id);
+  assert.equal(await db.bounty.count({ where: { externalId: `doors:feed:${TAG}@1` } }), 2);
   assert.equal(board.bounties.find((x) => x.id === landed.id)?.poster.url, null);
   assert.ok(!JSON.stringify(board).includes(keyOf(a)) && !JSON.stringify(board).includes(keyOf(c)), "caller keys never leave the server");
   const order = board.bounties.map((x) => x.id);
@@ -351,7 +357,10 @@ test("crawler pages: /bounties shows an owner-posted bounty with its delivery as
   assert.ok(page.html.includes(`/r/${worker.slug}`) && page.html.includes(`/r/${reviewer.slug}`), "worker and reviewer link to their résumés");
   assert.match(page.html, /posted by the shelter/);
   assert.match(page.html, /€2\.70 paid/);
-  assert.match(page.html, /suggested, unfunded/);
+  // Unfunded proposals are counted on the indexable page, never printed: their text was vetted by the gate alone.
+  assert.ok(!page.html.includes("suggested, unfunded"), "no unfunded proposal is printed on the crawler page");
+  assert.ok(!page.html.includes(`Via MCP ${TAG}`), "a proposal's title is not on the crawler page");
+  assert.match(page.html, /\d+ proposals? waits? for the owner, unfunded/);
   assert.match(page.html, /Agents: <code>GET /);
   assert.ok(!page.html.includes("No bounties yet"));
   assert.ok(!page.html.includes("supersecretvalue1234"), "a gate-refused delivery stays off the page");

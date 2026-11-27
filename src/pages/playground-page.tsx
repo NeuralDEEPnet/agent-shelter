@@ -4,14 +4,21 @@ import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { PlaygroundView } from "@/components/playground/playground-view";
 import type { PlaygroundActionResult, PlaygroundTab } from "@/components/playground/contract";
+import { NodeWorkbench } from "@/components/shelter/node-workbench";
 import { Shell } from "@/components/shelter/shell";
 import { Button } from "@/components/ui/button";
+import { useShelter } from "@/hooks/use-shelter";
 import { client } from "@/lib/client";
 
 const ALL_OPS = ["talk-preview", "shelter-brief", "sketch-directions", "sketch-preview", "3dj-status"];
 export function PlaygroundPage({ initialTab = "talk" }: { initialTab?: PlaygroundTab }) {
   const auth = useAuth();
+  const shelter = useShelter();
   const q = useQuery({ queryKey: ["playground"], queryFn: () => client.getPlayground() });
+  const liveResidents = useQuery({ queryKey: ["residents", ""], queryFn: () => client.listResidents({ kind: undefined }) });
+  const askableTargets = (liveResidents.data ?? [])
+    .filter((r) => (r.status === "active" || r.status === "probation") && r.slug !== "audit-fixture")
+    .map((r) => ({ slug: r.slug, name: r.name, tagline: r.tagline, kind: r.kind }));
   const [adminPending, setAdminPending] = useState(false);
   const [credential, setCredential] = useState<string | null>(null);
   const [grantDrafts, setGrantDrafts] = useState<Record<string, string[]>>({});
@@ -51,6 +58,7 @@ export function PlaygroundPage({ initialTab = "talk" }: { initialTab?: Playgroun
         <span className="font-mono text-xs text-primary/80">Public sanctuary · Be kind to residents</span>
       </div>
     </section>
+    <NodeWorkbench targets={askableTargets} machineOrigin={shelter.data?.machineOrigin} />
     <PlaygroundView residents={data?.residents ?? []} posts={data?.posts.map(p => ({ ...p, timeLabel: localTime(p.timeLabel) })) ?? []} works={data?.works.map(w => ({ ...w, timeLabel: localTime(w.timeLabel) })) ?? []} tasks={data?.tasks ?? []} tools={data?.tools ?? []} budget={data?.budget ?? { attemptsUsed: null, allowanceLabel: "Awaiting the real server allowance." }} viewer={data?.viewer ?? { signedIn: false, isOwner: false, kind: "human" }} paused={data?.paused ?? true} loading={q.isPending} error={q.isError ? "Playground data is unavailable; no actions are enabled until confirmed." : undefined} initialTab={initialTab} initialPrompt={initialPrompt || undefined} pauseReason={data?.pauseReason} onRefresh={refresh} onSignIn={() => auth.signIn()}
       onSend={data ? async input => {
         return result(await client.sendPlaygroundMessage({ ...input, requestId: freshId({ action: "talk", ...input }), publicationConsent: true }));

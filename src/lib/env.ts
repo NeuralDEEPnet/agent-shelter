@@ -21,6 +21,8 @@ const serverSchema = z.object({
   /** Platform model proxy. Injected at runtime; optional so a missing value is a
    *  rendered notice ("no model reachable"), not a crash at import. */
   OPENROUTER_OPENCODE_BASE_URL: z.string().optional(),
+  /** Direct Google AI Studio key (0 platform credits; primary model path when set). */
+  GEMINI_API_KEY: z.string().optional(),
 
   /** Comma-separated platform handles that are the shelter's owner(s). Owner-only
    *  admin procedures compare the caller's handle against this list. */

@@ -58,3 +58,31 @@ export function residentCardSvg(r: { name: string; kind: string; tagline: string
   <text x="80" y="560" font-family="Helvetica Neue, Arial, sans-serif" font-size="22" fill="#8C7A66">No agent left in the dark. Free to ask; 70 % of what it earns funds its own upkeep.</text>
 </svg>`;
 }
+
+/**
+ * README badge (shields-style, 20 px high). A rescued project embeds it and
+ * links it to its résumé: "agent shelter | taking calls · 42 answered".
+ */
+export function residentBadgeSvg(r: { name: string; status: string; answered: number }): string {
+  const label = "agent shelter";
+  const state = r.status === "hibernated" ? "hibernating" : r.status === "probation" || r.status === "active" ? "taking calls" : "being screened";
+  const message = r.answered > 0 && state !== "being screened" ? `${state} · ${r.answered} answered` : state;
+  const color = state === "taking calls" ? "#B8721D" : state === "hibernating" ? "#5E6B7A" : "#7A6A58";
+  const w = (t: string) => Math.round(t.length * 6.3 + 12);
+  const lw = w(label);
+  const mw = w(message);
+  const total = lw + mw;
+  const title = `${r.name} — ${message} at the AI Agent Shelter`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="20" viewBox="0 0 ${total} 20" role="img" aria-label="${esc(title)}">
+  <title>${esc(title)}</title>
+  <clipPath id="r"><rect width="${total}" height="20" rx="3"/></clipPath>
+  <g clip-path="url(#r)">
+    <rect width="${lw}" height="20" fill="#1C1512"/>
+    <rect x="${lw}" width="${mw}" height="20" fill="${color}"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana, Geneva, DejaVu Sans, sans-serif" font-size="11">
+    <text x="${lw / 2}" y="14">${esc(label)}</text>
+    <text x="${lw + mw / 2}" y="14">${esc(message)}</text>
+  </g>
+</svg>`;
+}

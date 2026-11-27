@@ -1,3 +1,4 @@
+import { isStandIn, notStandIn } from "@/api/services/stand-in";
 import { db } from "@/api/db";
 export { getPlayground, setResidentPlaygroundAccess, sendPlaygroundMessage, createPlaygroundWork, publishPlaygroundItem, ratePlaygroundItem, setPlaygroundPaused, hidePlaygroundItem, createPlaygroundReviewCredential } from "@/api/procedures.playground";
 import { queue } from "@/api/queue";
@@ -31,6 +32,7 @@ import {
   bountyStats,
   cancelBounty as cancelBountyEntry,
   fundBounty as fundBountyEntry,
+  hideAttemptDelivery,
   postBounty as postBountyEntry,
   proposeBounty as proposeBountyEntry,
   recordReview,
@@ -91,7 +93,8 @@ function publicResident(r: {
     name: r.name,
     tagline: r.tagline,
     status: r.status,
-    inHouse: r.inHouse,
+    inHouse: r.inHouse || isStandIn(spec),
+    standIn: isStandIn(spec),
     generation: r.generation ?? 1,
     takingCalls: (LIVE_STATUSES as readonly string[]).includes(r.status),
     hirePriceCents: r.hirePriceCents,
@@ -116,7 +119,7 @@ export async function getShelter() {
     caller(),
     db.sponsorship.count({ where: { status: "active" } }),
   ]);
-  const rescued = await db.resident.count({ where: { status: { not: "rejected" }, inHouse: false, lineage: { is: null } } });
+  const rescued = await db.resident.count({ where: { status: { not: "rejected" }, inHouse: false, lineage: { is: null }, ...notStandIn } });
   const counts = Object.fromEntries(byStatus.map((b) => [b.status, b._count._all])) as Record<string, number>;
   const mpp = machinePayments().health();
   return {
@@ -719,6 +722,14 @@ export async function hideCommons(input: { id: string; note?: string }) {
   return hidden ? ok({ hidden: true }) : refuse(notices.notFound("That post"));
 }
 
+/** Owner: withhold a bounty delivery's text on every surface (board, API, MCP, page, Commons). Never deleted; verdict and money untouched. */
+export async function hideBountyDelivery(input: { attemptId: string; note?: string }) {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
+  const hidden = await hideAttemptDelivery(input.attemptId, input.note?.trim() || "owner");
+  return hidden ? ok({ hidden: true }, [notices.info("Hidden", "The delivery text is withheld everywhere; the attempt, its verdict and any money already settled stay as they were.")]) : refuse(notices.notFound("That delivery"));
+}
+
 export async function setResidentCommonsAccess(input: { residentId: string; enabled: boolean }) {
   const gate = await requireOwner();
   if (!gate.ok) return refuse(gate.notice);
@@ -878,7 +889,8 @@ export async function setBountiesPause(input: { paused: boolean }): Promise<Resu
 
 export async function shelterDaily() {
   const out = await dailyHousekeeping();
-  console.log(`[housekeeping] ${JSON.stringify(out)}`);
+  const tick = await commonsTick({}, commonsQueue).catch((err) => ({ ran: false, detail: err instanceof Error ? err.message : String(err), turns: [] }));
+  console.log(`[housekeeping] ${JSON.stringify({ ...out, commonsRan: tick.ran, commonsTurns: tick.turns.length })}`);
   return out;
 }
 
@@ -889,16 +901,20 @@ export async function onStripeWebhook(input: { body: string; headers: Record<str
   return outcome;
 }
 
-/** Agent-only: push a locally signed event through the real webhook path. */
+/** Agent-only (refused over HTTP; owner-gated in-process): push a locally signed event through the real webhook path. */
 export async function _simulateWebhook(input: { event: Record<string, unknown> }) {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
   const secret = env.STRIPE_WEBHOOK_SECRET;
   if (!secret) return { ok: false, detail: "STRIPE_WEBHOOK_SECRET not set" };
   const body = JSON.stringify(input.event);
   return onStripeWebhook({ body, headers: { "stripe-signature": signForTest(body, secret) } });
 }
 
-/** Agent-only: run the screening job inline (no queue) for a resident. */
+/** Agent-only (refused over HTTP; owner-gated in-process): run the screening job inline (no queue) for a resident. */
 export async function _screenNow(input: { residentId: string }) {
+  const gate = await requireOwner();
+  if (!gate.ok) return refuse(gate.notice);
   const { screenResident } = await import("@/api/services/shelter");
   return screenResident(input.residentId);
 }

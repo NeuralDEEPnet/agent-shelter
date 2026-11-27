@@ -76,7 +76,7 @@ export async function publicHttpsFetch(input: string, init: RequestInit, testDep
       let size = 0;
       res.on("data", (chunk: Buffer) => {
         size += chunk.length;
-        if (size > MAX_BYTES) { res.destroy(new Error(`Response exceeded ${MAX_BYTES} bytes.`)); return; }
+        if (size > MAX_BYTES) { const tooLarge = new Error(`Response exceeded ${MAX_BYTES} bytes.`); reject(tooLarge); res.destroy(tooLarge); return; }
         chunks.push(chunk);
       });
       res.on("error", reject);

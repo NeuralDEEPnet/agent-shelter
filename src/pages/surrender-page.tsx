@@ -30,7 +30,13 @@ export function SurrenderPage() {
   const signedIn = shelter.data ? shelter.data.signedIn : auth.status === "authenticated";
   const agreement = useQuery({ queryKey: ["agreement"], queryFn: () => client.getAgreement() });
   const draftKey = `shelter:intake:${env.VITE_APP_ID}:${env.VITE_NODE_ENV}`;
-  const [restored] = useState(() => readIntakeDraft(draftKey));
+  const [restored] = useState(() => {
+    // A rescue check hands over ?kind=package&registry=…&name=… — that beats an older draft.
+    const p = new URLSearchParams(window.location.search);
+    const name = (p.get("name") ?? "").trim().slice(0, 214);
+    if (p.get("kind") === "package" && name) return { kind: "package" as const, form: { ...EMPTY_INTAKE, registry: p.get("registry") === "pypi" ? "pypi" : "npm", packageName: name, name: name.replace(/^@[^/]+\//, "").slice(0, 60) } };
+    return readIntakeDraft(draftKey);
+  });
   const [kind, setKind] = useState<Kind>(restored?.kind ?? "agent");
   const [f, setF] = useState(restored?.form ?? { ...EMPTY_INTAKE });
   const set = (k: keyof typeof f) => (v: string | boolean) => setF((s) => ({ ...s, [k]: v }));

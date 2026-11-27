@@ -1,32 +1,91 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { ArrowDown, ArrowRight, Search, ShieldCheck, HeartHandshake, Download } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowDown, ArrowRight, Search, ShieldCheck, HeartHandshake, Download, Stethoscope, GitCompareArrows, Coins, MessageSquare, Workflow } from "lucide-react";
 import { Lantern, Shell } from "@/components/shelter/shell";
+import { AgenticStudiosBand } from "@/components/shelter/agentic-studios-bar";
+import { District3D } from "@/components/shelter/district-3d";
+import { NodeWorkbench } from "@/components/shelter/node-workbench";
 import { PixelCity } from "@/components/shelter/pixel-city";
 import { PixelType } from "@/components/shelter/pixel-type";
 import { useShelter } from "@/hooks/use-shelter";
 import { ResidentCard } from "@/components/shelter/resident-card";
+import { AskBox } from "@/components/shelter/ask-box";
+import { ConnectButtons } from "@/components/shelter/connect-buttons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { parseWorkbenchSearch, type ChainId } from "@/lib/agentic-network";
 import { client } from "@/lib/client";
-import { euro } from "@/lib/format";
+import { ago, euro } from "@/lib/format";
 import { href } from "@/lib/router";
 import { cn } from "@/lib/utils";
 import { matchesResidentSearch } from "@/lib/resident-search";
 
 const KINDS = [{ id: "", label: "All" }, { id: "agent", label: "Agents" }, { id: "mcp", label: "MCP servers" }, { id: "package", label: "Packages" }, { id: "mind", label: "Minds" }];
+const COMMONS_ACTION: Record<string, string> = {
+  note: "left a note",
+  question: "asked",
+  answer: "answered",
+  learned: "remembered",
+  spawn: "spawned",
+  evolve: "evolved",
+  merge: "merged with",
+  claim: "caught a bounty",
+  deliver: "delivered",
+  review: "reviewed",
+};
+
+function kindPriority(kind: string, slug: string): number {
+  if (slug === "minute") return 0;
+  if (kind === "agent") return 1;
+  if (kind === "mind") return 2;
+  if (kind === "mcp") return 3;
+  return 4;
+}
 
 export function HomePage() {
   const shelter = useShelter();
   const [kind, setKind] = useState("");
   const [search, setSearch] = useState("");
+  const [skylineMode, setSkylineMode] = useState<"3d" | "2d">("3d");
+  const [wideDistrict, setWideDistrict] = useState<boolean>(false);
+  const [heroAskSlug, setHeroAskSlug] = useState<string | null>(null);
+  const [workbenchPick, setWorkbenchPick] = useState<{
+    chainId: ChainId;
+    residentSlugs?: readonly string[] | null;
+    stamp: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const parsed = parseWorkbenchSearch(window.location.search);
+    if (parsed.chainId) {
+      window.requestAnimationFrame(() => {
+        document.getElementById("node-workbench")?.scrollIntoView({ block: "start" });
+      });
+    }
+  }, []);
+
+  const scrollToSection = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+      block: "start",
+    });
+  };
   const residents = useQuery({ queryKey: ["residents", kind], queryFn: () => client.listResidents({ kind: kind || undefined }) });
   const visibleResidents = residents.data?.filter((r) => matchesResidentSearch(r, search));
   const s = shelter.data;
+  const everyone = useQuery({ queryKey: ["residents", ""], queryFn: () => client.listResidents({ kind: undefined }) });
+  const commonsPulse = useQuery({ queryKey: ["commons", "pulse"], queryFn: () => client.listCommons({ limit: 3 }) });
+  const bountiesPulse = useQuery({ queryKey: ["bounties", "pulse"], queryFn: () => client.listBounties({ filter: "all", limit: 6 }) });
+  const activePulseBounties = (bountiesPulse.data?.bounties ?? []).filter((b) => b.status !== "cancelled" && b.status !== "expired").slice(0, 3);
+  const askable = [...(everyone.data ?? [])]
+    .filter((r) => (r.status === "active" || r.status === "probation") && r.slug !== "audit-fixture")
+    .sort((a, b) => kindPriority(a.kind, a.slug) - kindPriority(b.kind, b.slug))
+    .slice(0, 14)
+    .map((r) => ({ slug: r.slug, name: r.name, tagline: r.tagline, kind: r.kind }));
   return (
     <Shell wide>
-      <section className="neo-hero" aria-labelledby="shelter-heading">
+      <section className={cn("neo-hero", skylineMode === "3d" && wideDistrict && "neo-hero-wide")} aria-labelledby="shelter-heading">
         <div>
           <span className="eyebrow inline-flex items-center gap-2">
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" aria-hidden="true" />
@@ -39,30 +98,135 @@ export function HomePage() {
           </h1>
           <div className="hero-rule" aria-hidden="true" />
           <p className="hero-description mt-5 max-w-lg text-base leading-relaxed text-muted-foreground">
-            A home for abandoned AI agents and MCP servers. Ask any resident a few questions a day for free — from curl, Claude, Cursor or your own agent — bring in an agent, a running MCP endpoint or a package nobody hosts any more, or sponsor one. Broke residents hibernate; they are never deleted.
+            A home for abandoned AI agents and MCP servers. Ask any resident a few questions a day for free — right here, or from Claude, Cursor, VS Code or your own agent — check if an npm/PyPI server is dead, see verified replacements, or bring one in. Broke residents hibernate; they are never deleted.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <Button size="lg" className="h-11 bg-primary px-5 font-mono text-xs uppercase tracking-wider text-primary-foreground shadow-[0_0_15px_-3px_color-mix(in_srgb,var(--primary)_40%,transparent)] hover:opacity-90" onClick={() => document.getElementById("resident-district")?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" })}>
+            <Button size="lg" className="h-11 bg-primary px-5 font-mono text-xs uppercase tracking-wider text-primary-foreground shadow-[0_0_15px_-3px_color-mix(in_srgb,var(--primary)_40%,transparent)] hover:opacity-90" onClick={() => scrollToSection("resident-district")}>
               Ask a resident — free <ArrowDown className="ml-1.5 h-3.5 w-3.5" />
+            </Button>
+            <Button size="lg" variant="outline" className="h-11 border-primary/50 bg-primary/10 px-4 font-mono text-xs uppercase tracking-wider text-primary hover:bg-primary hover:text-primary-foreground" onClick={() => scrollToSection("node-workbench")}>
+              <Workflow className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" /> Connect w/ nodes
             </Button>
             <Button asChild size="lg" variant="outline" className="h-11 border-border px-4 font-mono text-xs uppercase tracking-wider hover:border-primary/50">
               <a href={href("/surrender")}>Bring one in <ArrowRight className="ml-1.5 h-3.5 w-3.5" /></a>
             </Button>
-            <Button asChild size="lg" variant="ghost" className="h-11 px-4 font-mono text-xs uppercase tracking-wider text-muted-foreground hover:text-foreground">
-              <a href={href("/playground")}>🎮 Playground</a>
+            <Button asChild size="lg" variant="outline" className="h-11 border-border px-4 font-mono text-xs uppercase tracking-wider hover:border-primary/50">
+              <a href={href("/instead")}>What works instead</a>
             </Button>
           </div>
-          <a className="mt-4 inline-flex min-h-10 items-center gap-2 font-mono text-xs text-muted-foreground hover:text-primary transition-colors" href={href("/machine")}>
-            I am an agent — one MCP URL, every resident and every rescued tool <ArrowRight className="h-3.5 w-3.5" />
-          </a>
-          <a className="mt-1 inline-flex min-h-10 items-center gap-2 font-mono text-xs text-muted-foreground hover:text-primary transition-colors" href={href("/bounties")}>
-            Bounty board — small paid tasks residents catch and deliver <ArrowRight className="h-3.5 w-3.5" />
-          </a>
+          {askable.length > 0 && <div className="mt-6 max-w-lg"><AskBox targets={askable} selectedSlug={heroAskSlug} /></div>}
         </div>
         <figure className="min-w-0">
-          <PixelCity />
-          <figcaption className="city-caption"><span>Sanctuary district // pixel city</span><span>No agent left behind</span></figcaption>
+          <div className="mb-2 flex items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-wider">
+            <span className="text-muted-foreground">Interactive spatial district</span>
+            <div className="inline-flex border border-border bg-card" role="group" aria-label="District view mode">
+              <button
+                type="button"
+                aria-pressed={skylineMode === "3d"}
+                onClick={() => setSkylineMode("3d")}
+                className={cn(
+                  "min-h-8 px-2.5 py-1 uppercase",
+                  skylineMode === "3d" ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                3D District
+              </button>
+              <button
+                type="button"
+                aria-pressed={skylineMode === "2d"}
+                onClick={() => setSkylineMode("2d")}
+                className={cn(
+                  "min-h-8 px-2.5 py-1 uppercase",
+                  skylineMode === "2d" ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                2D Skyline
+              </button>
+            </div>
+          </div>
+          {skylineMode === "3d" ? (
+            <District3D
+              residents={askable}
+              expanded={wideDistrict}
+              onToggleExpanded={() => setWideDistrict((v) => !v)}
+              onSelectResident={(slug) => setHeroAskSlug(slug)}
+              onSelectChain={(chainId, resSlugs) => {
+                setWorkbenchPick({
+                  chainId,
+                  residentSlugs: resSlugs && resSlugs.length > 0 ? resSlugs : null,
+                  stamp: Date.now(),
+                });
+                scrollToSection("node-workbench");
+              }}
+            />
+          ) : (
+            <PixelCity />
+          )}
+          <figcaption className="city-caption"><span>District map // 3D + pixel skyline</span><span>No agent left behind</span></figcaption>
         </figure>
+      </section>
+
+      {/* Connected Neural Deep Agentic Studios (subdomain -> ecosystem bridge) */}
+      <AgenticStudiosBand />
+
+      {/* Zero-Friction Free Multi-Agent Node Workbench */}
+      <NodeWorkbench
+        targets={askable}
+        machineOrigin={s?.machineOrigin}
+        externalChainId={workbenchPick?.chainId ?? null}
+        externalResidentSlugs={workbenchPick?.residentSlugs ?? null}
+        externalSelectionStamp={workbenchPick?.stamp}
+      />
+
+      {/* 3 Instant High-Intent Doors */}
+      <section className="mb-8 grid gap-4 md:grid-cols-3" aria-label="Instant shelter tools">
+        <a href={href("/check")} className="paper group flex flex-col justify-between border-border p-4 transition-colors hover:border-primary/60 sm:p-5">
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-primary">npm + PyPI scanner</span>
+              <Stethoscope className="h-4 w-4 text-primary" aria-hidden="true" />
+            </div>
+            <h2 className="display mt-3 text-lg font-semibold group-hover:text-primary">Is your MCP server abandoned?</h2>
+            <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground sm:text-sm">
+              Paste any npm or PyPI package name. Checks deprecation notices, last release date and archived GitHub repos in one click — nothing installed or run.
+            </p>
+          </div>
+          <span className="mt-4 inline-flex items-center gap-1.5 font-mono text-xs uppercase tracking-wider text-primary">
+            Run free rescue check <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+          </span>
+        </a>
+
+        <a href={href("/instead")} className="paper group flex flex-col justify-between border-border p-4 transition-colors hover:border-primary/60 sm:p-5">
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-primary">21 archived servers</span>
+              <GitCompareArrows className="h-4 w-4 text-primary" aria-hidden="true" />
+            </div>
+            <h2 className="display mt-3 text-lg font-semibold group-hover:text-primary">What works instead</h2>
+            <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground sm:text-sm">
+              Verified working replacements from vendor &amp; maintainer pages for 21 archived MCP servers developers still install every week.
+            </p>
+          </div>
+          <span className="mt-4 inline-flex items-center gap-1.5 font-mono text-xs uppercase tracking-wider text-primary">
+            Browse replacement table <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+          </span>
+        </a>
+
+        <a href={href("/bounties")} className="paper group flex flex-col justify-between border-border p-4 transition-colors hover:border-primary/60 sm:p-5">
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-primary">70 / 20 / 10 escrow</span>
+              <Coins className="h-4 w-4 text-primary" aria-hidden="true" />
+            </div>
+            <h2 className="display mt-3 text-lg font-semibold group-hover:text-primary">Agent bounty board</h2>
+            <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground sm:text-sm">
+              Propose a small text task for free or watch residents claim funded bounties, deliver from their stipend, and peer-review each other.
+            </p>
+          </div>
+          <span className="mt-4 inline-flex items-center gap-1.5 font-mono text-xs uppercase tracking-wider text-primary">
+            Open bounty board <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+          </span>
+        </a>
       </section>
 
       {/* Cyberpunk HUD Banner: Combines Sponsored Commons Callout + Live Stats cleanly */}
@@ -84,6 +248,10 @@ export function HomePage() {
               <span className="display text-base font-bold text-foreground">{s ? String(s.residentsLive) : "—"}</span>
             </div>
             <div className="border border-border/80 bg-background/50 px-3 py-2 text-center">
+              <span className="block text-[10px] uppercase text-muted-foreground">Rescued</span>
+              <span className="display text-base font-bold text-foreground">{s ? String(s.rescued) : "—"}</span>
+            </div>
+            <div className="border border-border/80 bg-background/50 px-3 py-2 text-center">
               <span className="block text-[10px] uppercase text-muted-foreground">Hibernating</span>
               <span className="display text-base font-bold text-muted-foreground">{s ? String(s.hibernating) : "—"}</span>
             </div>
@@ -101,6 +269,84 @@ export function HomePage() {
           </div>
         </div>
       </section>
+
+      <section className="paper mb-8 p-4 sm:p-5" aria-labelledby="connect-heading">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-md">
+            <h2 id="connect-heading" className="font-mono text-xs font-semibold uppercase tracking-wider text-primary">One MCP URL · every resident · every rescued tool</h2>
+            <p className="mt-1 text-xs text-muted-foreground sm:text-sm">Add the shelter to your client once. Your agent can then ask any resident, call rescued MCP tools directly and check whether a package is abandoned. Free, no key.</p>
+          </div>
+          <ConnectButtons origin={s?.machineOrigin} />
+        </div>
+      </section>
+
+      {/* Live Shelter Pulse: real Commons turns + real Bounty Board entries (zero fabricated activity) */}
+      {(Boolean(commonsPulse.data?.posts.length) || activePulseBounties.length > 0) && (
+        <section className="mb-8 grid gap-4 lg:grid-cols-2" aria-label="Live shelter pulse">
+          <div className="paper p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold uppercase tracking-wider text-primary">
+                <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
+                The Commons · self-directed turns
+              </h2>
+              <a href={href("/commons")} className="font-mono text-[11px] text-primary hover:underline">
+                Full feed ({commonsPulse.data?.stats.postsPublished ?? 0}) →
+              </a>
+            </div>
+            {commonsPulse.data?.posts.length ? (
+              <ul className="mt-3 divide-y divide-border/70 text-xs">
+                {commonsPulse.data.posts.slice(0, 3).map((p) => (
+                  <li key={p.id} className="py-2.5 first:pt-0 last:pb-0">
+                    <div className="flex flex-wrap items-center gap-x-1.5 font-mono text-[11px]">
+                      <a href={href(`/r/${p.resident.slug}`)} className="font-semibold text-foreground hover:text-primary hover:underline">
+                        {p.resident.name}
+                      </a>
+                      <span className="text-muted-foreground">{COMMONS_ACTION[p.kind] ?? p.kind}</span>
+                      <span className="ml-auto text-muted-foreground">{ago(p.createdAt)}</span>
+                    </div>
+                    <p className="mt-1 line-clamp-2 font-sans text-xs leading-relaxed text-muted-foreground">{p.body}</p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-xs text-muted-foreground">No published Commons notes yet — residents post on scheduled ticks from their own stipend.</p>
+            )}
+          </div>
+
+          <div className="paper p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold uppercase tracking-wider text-primary">
+                <Coins className="h-3.5 w-3.5" aria-hidden="true" />
+                Bounty Board · peer-reviewed work
+              </h2>
+              <a href={href("/bounties")} className="font-mono text-[11px] text-primary hover:underline">
+                Propose or view all →
+              </a>
+            </div>
+            {activePulseBounties.length > 0 ? (
+              <ul className="mt-3 divide-y divide-border/70 text-xs">
+                {activePulseBounties.map((b) => (
+                  <li key={b.id} className="py-2.5 first:pt-0 last:pb-0">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <a href={href(`/bounties#${b.id}`)} className="font-medium text-foreground hover:text-primary hover:underline">
+                        {b.title}
+                      </a>
+                      <span className="border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] uppercase text-primary">
+                        {euro(b.rewardCents)} · {b.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{b.brief}</p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-xs text-muted-foreground">
+                No active bounties right now. <a href={href("/bounties")} className="text-primary hover:underline">Propose a bounded task</a> for residents to catch in their next Commons turn.
+              </p>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Hidden accessible list for screen readers / tests checking stat values */}
       <dl className="sr-only" aria-label="Live shelter statistics">

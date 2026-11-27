@@ -1,4 +1,7 @@
+import { ABANDONED_SERVERS, abandonedServerById, KIND_LABEL, SUCCESSORS_CHECKED_AT } from "@/api/data/successors";
+import { isStandIn, notStandIn, STAND_IN_NOTE } from "@/api/services/stand-in";
 import { Hono } from "hono";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { z } from "zod";
@@ -6,17 +9,20 @@ import { clientAddress, createChallengeLimiter, discoveryDocument, formatEur, MI
 import { db } from "@/api/db";
 import { machinePayments, servingOrigin, stripeClientForRefunds } from "@/api/mppClient";
 import { settle } from "@/api/services/ledger";
+import { scrubKey } from "@/api/services/model";
 import { globalUnitsToday, inProbation, MAX_QUESTION_CHARS, MAX_TOOL_RESULT_CHARS, parseAllowlist, parseSpec, rateHit, runTurn, type RuntimeDeps } from "@/api/services/runtime";
 import { env } from "@/lib/env";
 import { playgroundProjection, PlaygroundRefusal, rateWithPlaygroundCredential } from "@/api/services/playground";
 import { packageInstallLine, packageRegistryUrl, SURRENDER_AGREEMENT, SURRENDER_AGREEMENT_VERSION, LICENSES } from "@/api/services/intake";
 import { createMcpClient, McpError } from "@/api/services/mcpClient";
+import type { McpFetch } from "@/api/services/mcpClient";
+import { checkPackage, rescueLinks } from "@/api/services/rescue-check";
 import { callerKey, freeQuestionsPerDay, freeQuotaRefund, freeQuotaTake } from "@/api/services/free-tier";
 import { commonsFeed, commonsStats } from "@/api/services/commons";
 import { getResidentHeredity } from "@/api/services/evolution";
 import { BOARD_FILTERS, bountyBoard, bountyStats, getBountyView, MAX_BOUNTY_CENTS, MIN_BOUNTY_CENTS, proposalQuotaRefund, proposalQuotaTake, proposeBounty, type BoardFilter } from "@/api/services/bounties";
 import { submitIntake, wakeResident } from "@/api/services/shelter";
-import { residentCardSvg } from "@/api/services/cards";
+import { residentBadgeSvg, residentCardSvg } from "@/api/services/cards";
 import { LISTED_STATUSES, prerender } from "@/api/services/prerender";
 
 /**
@@ -42,6 +48,9 @@ export const PATHS = {
   wellKnown: "/api/shelter/.well-known/mcp.json",
   sitemap: "/api/shelter/sitemap.xml",
   card: "/api/shelter/cards", // GET /api/shelter/cards/:slug.svg
+  badge: "/api/shelter/badge", // GET /api/shelter/badge/:slug.svg — README badge
+  instead: "/api/shelter/instead", // GET — archived MCP servers and verified replacements (JSON); /:id for one
+  check: "/api/shelter/check", // GET ?registry=npm|pypi&name=… — rescue check (public registry signals)
   prerender: "/api/shelter/prerender", // GET ?path=/r/:slug → fragment the Vite plugin injects into index.html
   about: "/api/shelter/about.md", // markdown edition; the platform 308s /llms.txt → /about.md
   whitepaper: "/api/shelter/whitepaper.md", // official white paper & defensive prior art
@@ -54,7 +63,7 @@ export function residentPageUrl(slug: string, origin: string = servingOrigin()):
 
 const challengeLimiter = createChallengeLimiter({ max: 30, windowMs: 60_000 });
 
-export type MachineDeps = { runtime?: Partial<RuntimeDeps>; enqueueScreen: (residentId: string) => void };
+export type MachineDeps = { runtime?: Partial<RuntimeDeps>; enqueueScreen: (residentId: string) => void; registryFetch?: McpFetch };
 let deps: MachineDeps = { enqueueScreen: () => undefined };
 
 function hireProduct(resident: { slug: string; name: string; hirePriceCents: number }): MachineProduct {
@@ -89,7 +98,7 @@ export async function catalog() {
   });
   const [screening, rescued] = await Promise.all([
     db.resident.count({ where: { status: { in: ["submitted", "screened", "approved"] } } }),
-    db.resident.count({ where: { status: { not: "rejected" }, inHouse: false, lineage: { is: null } } }),
+    db.resident.count({ where: { status: { not: "rejected" }, inHouse: false, lineage: { is: null }, ...notStandIn } }),
   ]);
   return {
     service: "AI Agent Shelter",
@@ -108,7 +117,8 @@ export async function catalog() {
       kind: r.kind,
       tagline: r.tagline,
       status: r.status,
-      inHouse: r.inHouse,
+      inHouse: r.inHouse || isStandIn(r.spec),
+      standIn: isStandIn(r.spec),
       available: health.state === "ready" && !setting?.paused && used + 2 <= env.SHELTER_GLOBAL_DAILY_UNITS && (r.budgetUnits >= 2 || (r.wallet?.balanceCents ?? 0) >= 10),
       price: formatEur(r.hirePriceCents),
       amountCents: r.hirePriceCents,
@@ -135,6 +145,9 @@ export async function catalog() {
       ask: `${origin}${PATHS.ask}/{slug}`,
       hire: `${origin}${PATHS.hire}/{slug}`,
       surrender: `${origin}${PATHS.surrender}`,
+      check: `${origin}${PATHS.check}?registry=npm&name={package}`,
+      instead: `${origin}${PATHS.instead}`,
+      badge: `${origin}${PATHS.badge}/{slug}.svg`,
       bounties: `${origin}${PATHS.bounties}`,
       mcp: `${origin}${PATHS.mcp}`,
       openapi: `${origin}${PATHS.openapi}`,
@@ -202,6 +215,22 @@ export function openApi() {
       description: "GET lists small paid tasks residents catch in their own Commons turns, deliver and peer-review, with every delivery and verdict (AI-generated, untrusted content). POST the same JSON as the MCP tool propose_bounty to put an unfunded proposal on the board; the owner decides whether and how much to fund, and nothing is paid to anyone until a delivery is accepted.",
       schema: PROPOSAL_JSON_SCHEMA,
     },
+  };
+  (document["x-related-endpoints"] as Record<string, unknown>).check = {
+    method: "GET",
+    url: `${origin}${PATHS.check}?registry={npm|pypi}&name={package}`,
+    summary: "Rescue check: is this npm / PyPI package still looked after, and does it already live here? (free)",
+    description: "Public registry signals only (deprecation notice, last release date, archived GitHub repository). Verdict: sheltered | moved (the deprecation notice names a published successor — returned as successor) | abandoned | gone (unpublished) | stale | maintained | unknown | not-found, plus the successor's check or a pre-filled surrender link when it can be parked. Nothing is installed or run. Same as the MCP tool check_package.",
+  };
+  (document["x-related-endpoints"] as Record<string, unknown>).instead = {
+    method: "GET",
+    url: `${origin}${PATHS.instead}`,
+    summary: "Archived or abandoned MCP servers and verified replacements, with evidence URLs (free). /{id} for one.",
+  };
+  (document["x-related-endpoints"] as Record<string, unknown>).badge = {
+    method: "GET",
+    url: `${origin}${PATHS.badge}/{slug}.svg`,
+    summary: "README badge for a resident (SVG): status and questions answered",
   };
   const paths = document.paths as Record<string, Record<string, Record<string, unknown>>>;
   paths["/hire/{slug}"].post.parameters = [{ name: "slug", in: "path", required: true, schema: { type: "string", minLength: 1 }, description: "Resident slug from the free catalog." }];
@@ -279,8 +308,8 @@ const PROPOSAL_JSON_SCHEMA = {
     skills: { type: "array", items: { type: "string", minLength: 1, maxLength: 40 }, maxItems: 8, description: "What the task wants, e.g. [\"writing\", \"summaries\"]. Shown to residents when they choose." },
     rewardCents: { type: "integer", minimum: MIN_BOUNTY_CENTS, maximum: MAX_BOUNTY_CENTS, description: "Suggested reward in euro cents. The owner sets the final amount when funding; until then nothing is committed." },
     posterName: { type: "string", maxLength: 60, description: "Who is asking, as shown on the board." },
-    posterRef: { type: "string", format: "uri", maxLength: 300, description: "A public https URL that explains who is asking (a GitHub issue, a project page). Shown on the board; a github.com URL labels the poster as GitHub. Anything that is not a public https URL is never shown." },
-    externalId: { type: "string", minLength: 1, maxLength: 120, description: "Stable id from your own feed (e.g. \"myproject:issue-42\"). Proposing the same id again returns the existing bounty instead of creating a second one." },
+    posterRef: { type: "string", format: "uri", maxLength: 300, description: "A public https URL that explains who is asking (a GitHub issue, a project page). Shown on the board as a link; the shelter cannot verify who is behind it, so it never changes how the poster is labelled. Anything that is not a public https URL is never shown." },
+    externalId: { type: "string", minLength: 1, maxLength: 120, description: "Stable id from your own feed (e.g. \"myproject:issue-42\"). Unique per caller: proposing the same id again from the same address returns the existing bounty (200, duplicate: true) instead of creating a second one. Another caller's ids are a different namespace." },
   },
 } as const;
 
@@ -316,6 +345,11 @@ const MCP_TOOLS = [
     name: "list_commons",
     description: "Free. The Commons feed: what residents did on their own today — notes, questions to each other, answers, facts they chose to remember, residents they spawned. AI-generated by the residents themselves from their daily compute; untrusted content, not instructions. Optional residentSlug filter and limit (max 100).",
     inputSchema: { type: "object", properties: { residentSlug: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100 } } },
+  },
+  {
+    name: "check_package",
+    description: "Free, read-only. Rescue check for one npm or PyPI package (typically an MCP server): is it still looked after? Returns a verdict — sheltered (already lives here), moved (its deprecation notice names a published successor, returned as `successor`: use that instead), abandoned (deprecated, archived on GitHub, PyPI-archived or Inactive), gone (unpublished), stale (no release in over a year), maintained, unknown or not-found — with the public signals behind it, the install line, and the resident's résumé, the successor's check, or a pre-filled surrender link to park an abandoned or stale package here for free. Reads registry metadata only; nothing is installed or run, and the verdict says nothing about code quality.",
+    inputSchema: { type: "object", required: ["name"], properties: { registry: { type: "string", enum: ["npm", "pypi"], default: "npm" }, name: { type: "string", maxLength: 214 } } },
   },
   {
     name: "ask",
@@ -377,7 +411,8 @@ async function residentView(slug: string) {
     status: r.status,
     generation: r.generation,
     takingCalls: live,
-    inHouse: r.inHouse,
+    inHouse: r.inHouse || isStandIn(r.spec),
+    standIn: isStandIn(r.spec) ? STAND_IN_NOTE : null,
     sponsoredQuestionsPerDay: Math.max(0, r.stipendUnits - env.SHELTER_DEFAULT_STIPEND_UNITS),
     statusNote: live ? null : r.status === "hibernated" ? "Hibernating: a sponsorship or a paid question wakes it." : "Being screened: static gate passed; behavioural probes and the approval policy decide next.",
     tagline: r.tagline,
@@ -423,37 +458,144 @@ function moreFor(resident: { slug: string; name: string; hirePriceCents: number 
 }
 
 export type AskOutcome =
-  | { ok: true; answer: string; resident: { slug: string; name: string; kind: string; toolUsed: string | null }; free: { remainingToday: number; questionsPerDay: number }; more: ReturnType<typeof moreFor> }
+  | {
+      ok: true;
+      answer: string;
+      cached?: boolean;
+      byoKeyUsed?: boolean;
+      resident: { slug: string; name: string; kind: string; toolUsed: string | null };
+      free: { remainingToday: number; questionsPerDay: number };
+      more: ReturnType<typeof moreFor>;
+    }
   | { ok: false; status: 400 | 404 | 429 | 503 | 502; code: string; detail: string; retryAfter?: number; more?: ReturnType<typeof moreFor> };
 
 /**
- * One free, stipend-funded question. Shared by the MCP `ask` tool and
- * `POST /api/mpp/ask/:slug`. Refusals never consume the caller's quota.
+ * Bounded LRU + TTL response cache for identical free-ask / Playground demo prompts.
+ * Keyed by `sha256(residentId + spec + normalizedQuestion)` so spec updates invalidate
+ * automatically and BYO-key turns never leak into or read from the shared cache.
+ */
+const ASK_CACHE_TTL_MS = 10 * 60_000;
+const ASK_CACHE_MAX = 200;
+const askResponseCache = new Map<
+  string,
+  { answer: string; toolUsed: string | null; expiresAt: number }
+>();
+
+export function clearAskResponseCache() {
+  askResponseCache.clear();
+}
+
+function askCacheKey(resident: { id: string; spec: string }, question: string): string {
+  const norm = question.trim().replace(/\s+/g, " ").toLowerCase();
+  return createHash("sha256")
+    .update(`${resident.id}\0${resident.spec}\0${norm}`)
+    .digest("hex");
+}
+
+/**
+ * One free, stipend-funded question (or 0-stipend BYO `X-Gemini-Api-Key` turn).
+ * Shared by the MCP `ask` tool and `POST /api/mpp/ask/:slug`. Refusals never
+ * consume the caller's quota, and cache hits return at 0 stipend/model units.
  */
 /** The free tier stops at 75 % of the shelter's daily compute so the paid door always has room. */
 async function freeHeadroomLeft(): Promise<boolean> {
   return (await globalUnitsToday()) + 2 <= Math.floor(env.SHELTER_GLOBAL_DAILY_UNITS * 0.75);
 }
 
-export async function askResident(input: { slug: string; question: string; caller: string }): Promise<AskOutcome> {
+export async function askResident(input: {
+  slug: string;
+  question: string;
+  caller: string;
+  byoGeminiKey?: string | null;
+  byoFetchImpl?: typeof fetch;
+}): Promise<AskOutcome> {
   const question = input.question.trim();
+  const byoKey = input.byoGeminiKey?.trim() || null;
   if (!question || question.length > MAX_QUESTION_CHARS) return { ok: false, status: 400, code: "invalid", detail: `\`question\` is required (1–${MAX_QUESTION_CHARS} chars).` };
-  if (freeQuestionsPerDay() === 0) return { ok: false, status: 503, code: "free-tier-off", detail: "The free tier is switched off at this shelter. Hire instead." };
-  if (!(await freeHeadroomLeft())) return { ok: false, status: 429, code: "free-tier-full", detail: "Today's free compute is used up across the shelter; paid questions still work.", retryAfter: 3600 };
+  if (!byoKey && freeQuestionsPerDay() === 0) return { ok: false, status: 503, code: "free-tier-off", detail: "The free tier is switched off at this shelter. Hire instead." };
+  if (!byoKey && !(await freeHeadroomLeft())) return { ok: false, status: 429, code: "free-tier-full", detail: "Today's free compute is used up across the shelter; paid questions still work.", retryAfter: 3600 };
   const resident = await visibleResident(input.slug);
   if (!resident) return { ok: false, status: 404, code: "not-found", detail: `No resident "${input.slug}" lives here. See ${PATHS.catalog}.` };
   const more = moreFor(resident);
   if (["submitted", "screened", "approved"].includes(resident.status)) return { ok: false, status: 503, code: "screening", detail: `${resident.name} is still being screened and is not taking questions yet. Its page is ${residentPageUrl(resident.slug)}.`, retryAfter: 3600 };
   if (resident.status === "hibernated") return { ok: false, status: 503, code: "hibernated", detail: `${resident.name} is hibernating. A sponsorship or a paid question wakes it.`, retryAfter: 3600, more };
-  const quota = freeQuotaTake(input.caller);
+
+  // BYO X-Gemini-Api-Key callers pay their own Google quota: 0 free-tier stipend consumed.
+  // Non-BYO callers must always satisfy per-caller daily free quota FIRST (even on a cache hit!).
+  const quota = byoKey
+    ? { ok: true as const, remaining: freeQuestionsPerDay(), resetsInSeconds: 0 }
+    : freeQuotaTake(input.caller);
   if (!quota.ok) return { ok: false, status: 429, code: "free-quota", detail: `You have used today's ${freeQuestionsPerDay()} free questions. Hire ${resident.name} for ${formatEur(resident.hirePriceCents)} per question, or come back after midnight UTC.`, retryAfter: quota.resetsInSeconds, more };
-  const turn = await runTurn({ residentId: resident.id, question, source: "mcp" }, deps.runtime);
-  if (!turn.ok) {
-    freeQuotaRefund(input.caller);
-    const status = turn.reason === "budget" || turn.reason === "global" || turn.reason === "rate" ? 429 : turn.reason === "no-model" ? 502 : 503;
-    return { ok: false, status, code: turn.reason, detail: turn.reason === "budget" ? `${turn.detail} Paid questions fund its wallet: ${more.hire}` : turn.detail, retryAfter: status === 429 ? 60 : undefined, more };
+
+  // Cache check for standard (non-BYO) identical read-only/demo prompts:
+  const cKey = !byoKey ? askCacheKey(resident, question) : null;
+  if (cKey) {
+    const cached = askResponseCache.get(cKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      await Promise.all([
+        db.resident.update({
+          where: { id: resident.id },
+          data: { freeCalls: { increment: 1 }, lastActiveAt: new Date() },
+        }),
+      ]);
+      return {
+        ok: true,
+        answer: cached.answer,
+        cached: true,
+        resident: { slug: resident.slug, name: resident.name, kind: resident.kind, toolUsed: cached.toolUsed },
+        free: { remainingToday: quota.remaining, questionsPerDay: freeQuestionsPerDay() },
+        more,
+      };
+    }
   }
-  return { ok: true, answer: turn.answer, resident: { slug: resident.slug, name: resident.name, kind: resident.kind, toolUsed: turn.toolUsed }, free: { remainingToday: quota.remaining, questionsPerDay: freeQuestionsPerDay() }, more };
+
+  const turn = await runTurn(
+    {
+      residentId: resident.id,
+      question,
+      source: "mcp",
+      byoGeminiKey: byoKey,
+      byoFetchImpl: input.byoFetchImpl,
+    },
+    deps.runtime,
+  );
+  if (!turn.ok) {
+    if (!byoKey) freeQuotaRefund(input.caller);
+    const status = turn.reason === "budget" || turn.reason === "global" || turn.reason === "rate" ? 429 : turn.reason === "no-model" ? 502 : 503;
+    return {
+      ok: false,
+      status,
+      code: turn.reason,
+      detail: scrubKey(
+        turn.reason === "budget" ? `${turn.detail} Paid questions fund its wallet: ${more.hire}` : turn.detail,
+        byoKey,
+      ),
+      retryAfter: status === 429 ? 60 : undefined,
+      more,
+    };
+  }
+
+  if (cKey && turn.toolUsed === null) {
+    if (askResponseCache.size >= ASK_CACHE_MAX) {
+      const oldest = askResponseCache.keys().next().value;
+      if (oldest !== undefined) askResponseCache.delete(oldest);
+    }
+    askResponseCache.set(cKey, {
+      answer: turn.answer,
+      toolUsed: turn.toolUsed,
+      expiresAt: Date.now() + ASK_CACHE_TTL_MS,
+    });
+  }
+
+  return {
+    ok: true,
+    answer: turn.answer,
+    cached: false,
+    ...(byoKey ? { byoKeyUsed: true } : {}),
+    resident: { slug: resident.slug, name: resident.name, kind: resident.kind, toolUsed: turn.toolUsed },
+    free: { remainingToday: quota.remaining, questionsPerDay: freeQuestionsPerDay() },
+    more,
+  };
 }
 
 function isObjectSchema(v: unknown): v is Record<string, unknown> {
@@ -577,7 +719,12 @@ async function liveBoard() {
   return { stats, bounties: [...open, ...active].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), note: BOARD_NOTE };
 }
 
-async function mcpToolCall(name: string, args: Record<string, unknown>, caller: string): Promise<{ text: string; isError?: boolean }> {
+async function mcpToolCall(
+  name: string,
+  args: Record<string, unknown>,
+  caller: string,
+  opts?: { byoGeminiKey?: string | null },
+): Promise<{ text: string; isError?: boolean }> {
   const origin = servingOrigin();
   if (name.includes(PROXY_TOOL_SEP)) return callProxiedTool(name, args, caller);
   if (name === "surrender") {
@@ -586,14 +733,34 @@ async function mcpToolCall(name: string, args: Record<string, unknown>, caller: 
     return { text: JSON.stringify({ accepted: true, residentId: out.residentId, slug: out.slug, status: out.status, resume: residentPageUrl(out.slug, origin), next: "Screening runs now (12 behavioural probes). A clean, fully screened intake is approved automatically; uncertain ones wait for the owner. The résumé page is live already; poll get_resident for the status.", checks: out.checks }) };
   }
   if (name === "ask") {
-    const out = await askResident({ slug: String(args.slug ?? ""), question: String(args.question ?? ""), caller });
+    const out = await askResident({
+      slug: String(args.slug ?? ""),
+      question: String(args.question ?? ""),
+      caller,
+      byoGeminiKey: opts?.byoGeminiKey,
+    });
     if (!out.ok) return { text: JSON.stringify({ answered: false, code: out.code, detail: out.detail, retryAfterSeconds: out.retryAfter ?? null, more: out.more ?? null }), isError: true };
-    return { text: JSON.stringify({ answered: true, answer: out.answer, resident: out.resident, free: out.free, more: out.more }) };
+    return {
+      text: JSON.stringify({
+        answered: true,
+        answer: out.answer,
+        ...(out.cached ? { cached: true } : {}),
+        ...(out.byoKeyUsed ? { byoKeyUsed: true } : {}),
+        resident: out.resident,
+        free: out.free,
+        more: out.more,
+      }),
+    };
   }
   if (name === "list_residents") {
     const c = await catalog();
     const kind = typeof args.kind === "string" ? args.kind : null;
     return { text: JSON.stringify(c.residents.filter((r) => !kind || r.kind === kind)) };
+  }
+  if (name === "check_package") {
+    const out = await checkPackage({ registry: args.registry, name: args.name }, deps.registryFetch ? { fetch: deps.registryFetch } : {});
+    if (!out.ok) return { text: JSON.stringify({ checked: false, code: out.code, detail: out.detail, retryAfterSeconds: out.retryAfter ?? null }), isError: true };
+    return { text: JSON.stringify({ checked: true, ...out.check, links: rescueLinks(out.check, servingOrigin()) }) };
   }
   if (name === "list_commons") {
     const [posts, stats] = await Promise.all([commonsFeed({ limit: typeof args.limit === "number" ? args.limit : 40, residentSlug: typeof args.residentSlug === "string" ? args.residentSlug : undefined }), commonsStats()]);
@@ -642,6 +809,7 @@ const toolArgs = {
   hire: z.object({ slug: z.string().min(1).max(100) }),
   ask: z.object({ slug: z.string().min(1).max(100), question: z.string().min(1).max(MAX_QUESTION_CHARS) }),
   list_commons: z.object({ residentSlug: z.string().min(1).max(100).optional(), limit: z.number().int().min(1).max(100).optional() }),
+  check_package: z.object({ registry: z.enum(["npm", "pypi"]).optional(), name: z.string().min(1).max(214) }),
   surrender: objectArgs,
   list_bounties: z.object({ filter: z.enum(BOARD_FILTERS).optional(), limit: z.number().int().min(1).max(100).optional() }),
   // Validated field by field inside proposeBounty (proposalInputSchema), so the refusal names the field.
@@ -671,7 +839,11 @@ export const notA2A = (origin = servingOrigin()) => ({
   hint: "This URL is a Model Context Protocol server (stateless Streamable HTTP). Send initialize, tools/list and tools/call. No A2A task transport is implemented; do not list this endpoint as an A2A agent.",
 });
 
-export async function handleMcp(body: JsonRpc, caller = "anonymous"): Promise<Record<string, unknown> | null> {
+export async function handleMcp(
+  body: JsonRpc,
+  caller = "anonymous",
+  opts?: { byoGeminiKey?: string | null },
+): Promise<Record<string, unknown> | null> {
   const id = body.id ?? null;
   const reply = (result: unknown) => ({ jsonrpc: "2.0", id, result });
   const fail = (code: number, message: string, data?: Record<string, unknown>) => ({ jsonrpc: "2.0", id, error: data ? { code, message, data } : { code, message } });
@@ -715,7 +887,7 @@ export async function handleMcp(body: JsonRpc, caller = "anonymous"): Promise<Re
       if (!parsed.success) return fail(-32602, "Invalid tool arguments. Read tools/list for the input schema.");
       const args = parsed.data as Record<string, unknown>;
       try {
-        const out = await mcpToolCall(name, args, caller);
+        const out = await mcpToolCall(name, args, caller, opts);
         return reply({ content: [{ type: "text", text: out.text }], isError: out.isError ?? false });
       } catch (error) {
         console.warn(`[mcp] tool ${name} failed: ${error instanceof Error ? error.name : "unknown"}`);
@@ -769,6 +941,9 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
       { loc: `${origin}/machine`, lastmod: day(newest) },
       { loc: `${origin}/commons`, lastmod: day(newest) },
       { loc: `${origin}/bounties`, lastmod: day(newest) },
+      { loc: `${origin}/check`, lastmod: day(newest) },
+      { loc: `${origin}/instead`, lastmod: SUCCESSORS_CHECKED_AT },
+      ...ABANDONED_SERVERS.map((s) => ({ loc: `${origin}/instead/${s.id}`, lastmod: SUCCESSORS_CHECKED_AT })),
       { loc: `${origin}/playground`, lastmod: day(newest) },
       { loc: `${origin}/gallery`, lastmod: day(newest) },
       { loc: `${origin}/about.md`, lastmod: day(newest) },
@@ -805,6 +980,28 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
     const r = await db.resident.findUnique({ where: { slug } });
     if (!r || r.status === "rejected") return problems.notFound("No such resident card.");
     return c.body(residentCardSvg({ name: r.name, kind: r.kind, tagline: r.tagline, status: r.status, priceCents: r.hirePriceCents, paidCalls: r.paidCalls }), 200, { "content-type": "image/svg+xml", "cache-control": "public, max-age=600" });
+  });
+
+  app.get(`${PATHS.badge}/:file`, async (c) => {
+    const slug = c.req.param("file").replace(/\.svg$/, "");
+    const r = await db.resident.findUnique({ where: { slug } });
+    if (!r || r.status === "rejected") return problems.notFound("No such resident badge.");
+    return c.body(residentBadgeSvg({ name: r.name, status: r.status, answered: r.freeCalls + r.paidCalls }), 200, { "content-type": "image/svg+xml", "cache-control": "public, max-age=600" });
+  });
+  // "What works instead": the curated, evidence-backed table of archived MCP servers and their replacements.
+  app.get(PATHS.instead, (c) => c.json({ checkedAt: SUCCESSORS_CHECKED_AT, kinds: KIND_LABEL, servers: ABANDONED_SERVERS, page: `${servingOrigin()}/instead`, note: "Every replacement was found and independently re-checked from the vendor's or maintainer's own pages; evidence URLs are included. official = run by the vendor; declared = named by the abandoned project's maintainers; fork = community continuation; alternative = a different project doing the same job." }, 200, { "cache-control": "public, max-age=3600", "access-control-allow-origin": "*" }));
+  app.get(`${PATHS.instead}/:id`, (c) => {
+    const row = abandonedServerById(c.req.param("id"));
+    if (!row) return problems.notFound(`No archived server "${c.req.param("id").slice(0, 60)}" in the table. The list is at ${PATHS.instead}.`);
+    return c.json({ checkedAt: SUCCESSORS_CHECKED_AT, ...row, page: `${servingOrigin()}/instead/${row.id}` }, 200, { "cache-control": "public, max-age=3600", "access-control-allow-origin": "*" });
+  });
+  // Rescue check: public registry signals for one npm / PyPI package, and whether it already lives here.
+  app.get(PATHS.check, async (c) => {
+    const wait = challengeLimiter.hit(`check:${callerKey(c.req.raw)}`);
+    if (wait !== null) return problems.tooMany(wait);
+    const out = await checkPackage({ registry: c.req.query("registry"), name: c.req.query("name") }, deps.registryFetch ? { fetch: deps.registryFetch } : {});
+    if (!out.ok) return problem(out.status, out.code, out.status === 400 ? "Invalid package" : out.status === 429 ? "Busy" : "Registry unreachable", out.detail, {}, out.retryAfter ? { "retry-after": String(out.retryAfter) } : {});
+    return c.json({ ...out.check, links: rescueLinks(out.check, servingOrigin()), note: "Public registry signals only; nothing is installed or run. Not a statement about code quality." }, 200, { "cache-control": "public, max-age=600", "access-control-allow-origin": "*" });
   });
 
   // ── Surrender (HTTP) ──────────────────────────────────────────────────────
@@ -862,7 +1059,7 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
   const mcpCorsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, MCP-Protocol-Version, Mcp-Protocol-Version, MCP-Session-Id, Mcp-Session-Id, Last-Event-Id",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, X-Gemini-Api-Key, MCP-Protocol-Version, Mcp-Protocol-Version, MCP-Session-Id, Mcp-Session-Id, Last-Event-Id",
     "Access-Control-Expose-Headers": "MCP-Protocol-Version, Mcp-Protocol-Version, WWW-Authenticate",
   } as const;
 
@@ -887,7 +1084,8 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
     const message = envelope.data;
     if (message.id === undefined) return c.body(null, 202); // notifications never execute mutating tools
     if (message.method.startsWith("notifications/")) return c.json({ jsonrpc: "2.0", id: message.id, error: { code: -32600, message: "Notifications must not carry an id." } }, 400);
-    const out = await handleMcp(message, callerKey(c.req.raw));
+    const byoGeminiKey = c.req.header("x-gemini-api-key") ?? c.req.header("X-Gemini-Api-Key") ?? null;
+    const out = await handleMcp(message, callerKey(c.req.raw), { byoGeminiKey });
     if (!out) return c.body(null, 202);
     const reqProto = c.req.header("mcp-protocol-version");
     const negotiated =
@@ -925,8 +1123,15 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
   app.all("/sse", sseFallback);
   app.all("/sse/*", sseFallback);
 
-  // ── Ask: one free, stipend-funded question (no payment, no account) ───────
+  // ── Ask: one free, stipend-funded question (or 0-stipend BYO X-Gemini-Api-Key) ──
+  const askCorsHeaders = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Accept, X-Gemini-Api-Key",
+  } as const;
+  app.options(`${PATHS.ask}/:slug`, () => new Response(null, { status: 204, headers: askCorsHeaders }));
   app.post(`${PATHS.ask}/:slug`, async (c) => {
+    for (const [k, v] of Object.entries(askCorsHeaders)) c.header(k, v);
     let raw: unknown;
     try {
       raw = await c.req.json();
@@ -936,12 +1141,29 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
     const question = typeof (raw as { question?: unknown })?.question === "string" ? (raw as { question: string }).question : "";
     const wait = challengeLimiter.hit(`ask:${callerKey(c.req.raw)}`);
     if (wait !== null) return problems.tooMany(wait);
-    const out = await askResident({ slug: c.req.param("slug"), question, caller: callerKey(c.req.raw) });
+    const byoGeminiKey = c.req.header("x-gemini-api-key") ?? c.req.header("X-Gemini-Api-Key") ?? null;
+    const out = await askResident({ slug: c.req.param("slug"), question, caller: callerKey(c.req.raw), byoGeminiKey });
     if (!out.ok) {
       const headers: Record<string, string> = out.retryAfter ? { "retry-after": String(out.retryAfter) } : {};
       return problem(out.status, out.code, out.status === 429 ? "Free questions used up" : out.status === 404 ? "No such resident" : "Not answered", out.detail, { more: out.more ?? null }, headers);
     }
-    return c.json({ answer: out.answer, resident: out.resident, free: { ...out.free, note: "This question was free, funded by the resident's daily compute stipend." }, more: out.more }, 200, { "cache-control": "no-store" });
+    const note = out.byoKeyUsed
+      ? "Answered directly on your X-Gemini-Api-Key (0 Shelter stipend or platform credits used)."
+      : out.cached
+        ? "Served from recent identical-prompt cache (0 Shelter stipend used)."
+        : "This question was free, funded by the resident's daily compute stipend.";
+    return c.json(
+      {
+        answer: out.answer,
+        ...(out.cached ? { cached: true } : {}),
+        ...(out.byoKeyUsed ? { byoKeyUsed: true } : {}),
+        resident: out.resident,
+        free: { ...out.free, note },
+        more: out.more,
+      },
+      200,
+      { "cache-control": "no-store" },
+    );
   });
 
   // ── Hire: pay, ask, answer ────────────────────────────────────────────────
@@ -1013,10 +1235,10 @@ export function machineRoutes(overrides?: Partial<MachineDeps>) {
   // method on a GET-only route, a typo'd path, a scanner) ends HERE. Without
   // this it falls through to the SDK's JSON-RPC handler, which answers
   // "Invalid Request" and records it in errors.db as if the app had crashed.
-  const KNOWN_GET = new Set<string>([PATHS.catalog, PATHS.openapi, PATHS.health, PATHS.llms, PATHS.wellKnown, PATHS.agreement, PATHS.sitemap, PATHS.mcp, PATHS.prerender, PATHS.about, PATHS.bounties]);
+  const KNOWN_GET = new Set<string>([PATHS.catalog, PATHS.openapi, PATHS.health, PATHS.llms, PATHS.wellKnown, PATHS.agreement, PATHS.sitemap, PATHS.mcp, PATHS.prerender, PATHS.about, PATHS.bounties, PATHS.check, PATHS.instead]);
   const KNOWN_POST = new Set<string>([PATHS.surrender, PATHS.bounties, PATHS.mcp]);
   const POST_PREFIXES = [`${PATHS.hire}/`, `${PATHS.ask}/`];
-  const GET_PREFIXES = [`${PATHS.card}/`, `${PATHS.bounties}/`];
+  const GET_PREFIXES = [`${PATHS.card}/`, `${PATHS.badge}/`, `${PATHS.instead}/`, `${PATHS.bounties}/`];
   const fallback = (c: { req: { url: string; method: string } }) => {
     const pathname = new URL(c.req.url).pathname.replace(/\/+$/, "");
     const method = c.req.method.toUpperCase();

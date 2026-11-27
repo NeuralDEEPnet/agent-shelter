@@ -232,7 +232,6 @@ test("rejections reopen the bounty for someone else, the same resident cannot re
   assert.equal(row?.status, "stalled");
   assert.equal(row?.attempts, 3);
   assert.equal((await bounties.openBountiesFor(d.residentId)).some((x) => x.id === b.id), false, "a stalled bounty is off the board");
-  assert.equal(await treasury() < 0 || true, true);
 
   // Owner reopens; Delta delivers; nobody is free to review (the earlier workers are excluded, everyone else is switched out) → waits for the owner, who accepts: full reward, no fee.
   assert.deepEqual(await bounties.reopenBounty(b.id), { ok: true });
@@ -260,8 +259,123 @@ test("rejections reopen the bounty for someone else, the same resident cannot re
   const selfReview = await bounties.recordReview(sub.ok ? sub.attemptId : "", { accept: true, note: "I am great", reviewerId: d.residentId, by: "peer" });
   assert.equal(selfReview.ok, false);
   const ownerReject = await bounties.recordReview(sub.ok ? sub.attemptId : "", { accept: false, note: "Not this one.", reviewerId: null, by: "owner" });
-  assert.equal(ownerReject.ok && !ownerReject.accepted && ownerReject.stalled, false);
-  assert.equal((await db.bounty.findUnique({ where: { id: other.id } }))?.status, "open");
+  assert.ok(ownerReject.ok && !ownerReject.accepted && !ownerReject.stalled && ownerReject.feeCents === 0, JSON.stringify(ownerReject));
+  const otherRow = await db.bounty.findUnique({ where: { id: other.id } });
+  assert.equal(otherRow?.status, "open");
+  assert.equal(otherRow?.attempts, 1);
+  assert.equal(await db.ledgerEntry.count({ where: { reference: { startsWith: `bounty:${other.id}:review` } } }), 0, "the owner's own rejection pays no fee");
+  // A verdict that lost the race changes nothing: the attempt is already decided.
+  const stale = await bounties.recordReview(sub.ok ? sub.attemptId : "", { accept: true, note: "too late", reviewerId: null, by: "owner" });
+  assert.equal(stale.ok, false);
+  assert.equal((await db.bountyAttempt.findUnique({ where: { id: sub.ok ? sub.attemptId : "" } }))?.status, "rejected");
+  await unparkOthers();
+});
+
+test("hardening: verdict words stand alone, PASS is a line not a prefix, stale verdicts and released claims change nothing, the owner can hide a delivery everywhere, stalled escrow is counted", async () => {
+  // Verdict parsing: an echoed "Acceptance criteria…" or "Rejection…" is not a verdict; ACCEPTED/REJECTED are.
+  assert.equal(commons.parseVerdict("Acceptance criteria not met, the note is too long."), null);
+  assert.equal(commons.parseVerdict("Rejection would be harsh; I accept it."), null);
+  assert.deepEqual(commons.parseVerdict("ACCEPTED: warm and short."), { accept: true, note: "warm and short." });
+  assert.deepEqual(commons.parseVerdict("rejected — no mention of deletion"), { accept: false, note: "— no mention of deletion" });
+
+  parked.length = 0;
+  parked.push(...(await db.resident.findMany({ where: { id: { notIn: created }, status: { in: ["active", "probation"] }, commonsEnabled: true }, select: { id: true } })).map((r) => r.id));
+  await parkOthers();
+  const w1 = await admit(`Passer2 ${TAG}`);
+  const b = await post(`Hardened ${TAG}`);
+
+  // "Pass the salt…" is a delivery, not a pass; it goes through the gate like any other text (here: too short → rejected).
+  const notAPass = await bounties.claimBounty(b.id, w1.residentId);
+  assert.ok(notAPass.ok);
+  const short = await bounties.submitWork(notAPass.ok ? notAPass.attemptId : "", "Pass the salt.");
+  assert.equal(!short.ok && short.reason, "gate");
+  assert.equal((await db.bounty.findUnique({ where: { id: b.id } }))?.attempts, 1);
+  // A real PASS hands it back and stores no model text anywhere public.
+  const w2 = await admit(`Passer3 ${TAG}`);
+  const passing = await bounties.claimBounty(b.id, w2.residentId);
+  assert.ok(passing.ok);
+  const passed = await bounties.submitWork(passing.ok ? passing.attemptId : "", "PASS — I only do spreadsheets, and here is my secret opinion of the owner.");
+  assert.equal(!passed.ok && passed.reason, "passed");
+  const passedAttempt = await db.bountyAttempt.findUnique({ where: { id: passing.ok ? passing.attemptId : "" } });
+  assert.equal(passedAttempt?.status, "abandoned");
+  assert.equal(passedAttempt?.reviewNote, "passed on it");
+  assert.equal((await db.bounty.findUnique({ where: { id: b.id } }))?.attempts, 1, "a pass is not an attempt");
+
+  // A claim released by housekeeping before the delivery lands: the late delivery changes nothing.
+  const w3 = await admit(`Late ${TAG}`);
+  const late = await bounties.claimBounty(b.id, w3.residentId);
+  assert.ok(late.ok);
+  await bounties.releaseClaim(late.ok ? late.attemptId : "", "claim expired before a delivery");
+  const tooLate = await bounties.submitWork(late.ok ? late.attemptId : "", "A delivery that arrives after the claim was released must not get stuck in submitted forever.");
+  assert.equal(!tooLate.ok && tooLate.reason, "invalid");
+  assert.equal((await db.bountyAttempt.findUnique({ where: { id: late.ok ? late.attemptId : "" } }))?.status, "abandoned");
+  assert.equal((await db.bounty.findUnique({ where: { id: b.id } }))?.status, "open");
+
+  // The owner hides a delivery: the text leaves the board, the API view and the Commons; the verdict and the money stay.
+  const w4 = await admit(`Shown ${TAG}`);
+  const judge = await admit(`Judge ${TAG}`);
+  const delivered = await commons.commonsTurn(w4.residentId, { complete: complete((i) => (i.system.includes("=== BOUNTY REVIEW ===") ? "ACCEPT: fine." : i.system.includes("=== BOUNTY WORK ===") ? "Welcome home, newcomer. You have a page, a stipend and neighbours; nothing here is ever deleted, so rest easy." : `CLAIM ${b.id}`)), modelAvailable: () => true });
+  assert.match(delivered.ok ? delivered.detail : JSON.stringify(delivered), /accepted it/);
+  const acceptedAttempt = await db.bountyAttempt.findFirst({ where: { bountyId: b.id, residentId: w4.residentId } });
+  assert.equal(acceptedAttempt?.status, "accepted");
+  assert.equal(acceptedAttempt?.reviewedBy, "peer");
+  assert.ok(acceptedAttempt?.reviewerId && acceptedAttempt.reviewerId !== w4.residentId, "a different resident reviewed (Judge was admitted so one is free)");
+  assert.ok(judge.residentId);
+  const walletBefore = await wallet(w4.residentId);
+  assert.ok((await bounties.getBountyView(b.id))!.work.some((w) => w.id === acceptedAttempt!.id && w.submission?.startsWith("Welcome home") && !w.hidden));
+  assert.equal(await bounties.hideAttemptDelivery(acceptedAttempt!.id, "not for the board"), true);
+  const hiddenView = (await bounties.getBountyView(b.id))!.work.find((w) => w.id === acceptedAttempt!.id)!;
+  assert.equal(hiddenView.submission, null);
+  assert.equal(hiddenView.hidden, true);
+  assert.equal(hiddenView.status, "accepted");
+  assert.equal(hiddenView.paidCents, 270);
+  assert.equal(await wallet(w4.residentId), walletBefore, "hiding moves no money");
+  assert.equal((await db.commonsPost.findFirst({ where: { bountyId: b.id, residentId: w4.residentId, kind: "deliver" } }))?.status, "hidden");
+  assert.equal(await bounties.hideAttemptDelivery("nope", "x"), false);
+  // …and hiding the Commons post hides the delivery on the board too.
+  const b2 = await post(`Hardened two ${TAG}`);
+  const w5 = await admit(`Shown2 ${TAG}`);
+  const second = await commons.commonsTurn(w5.residentId, { complete: complete((i) => (i.system.includes("=== BOUNTY REVIEW ===") ? "ACCEPT: fine." : i.system.includes("=== BOUNTY WORK ===") ? "Welcome again, newcomer. You have a page, a stipend and neighbours; nothing here is ever deleted, so rest easy." : `CLAIM ${b2.id}`)), modelAvailable: () => true });
+  assert.ok(second.ok, JSON.stringify(second));
+  const deliverPost = await db.commonsPost.findFirst({ where: { bountyId: b2.id, residentId: w5.residentId, kind: "deliver" } });
+  assert.equal(await commons.hideCommonsPost(deliverPost!.id, "owner says no"), true);
+  assert.equal((await bounties.getBountyView(b2.id))!.work.find((w) => w.resident.slug === w5.slug)?.hidden, true);
+
+  // Stalled bounties still hold their escrow, so they count as committed.
+  const stalledOne = await post(`Stalled escrow ${TAG}`);
+  await db.bounty.update({ where: { id: stalledOne.id }, data: { status: "stalled", attempts: 3 } });
+  const stats = await bounties.bountyStats();
+  assert.ok(stats.committedCents >= 300);
+  const open = await db.bounty.aggregate({ where: { status: { in: ["open", "claimed", "submitted", "stalled"] } }, _sum: { rewardCents: true } });
+  assert.equal(stats.committedCents, open._sum.rewardCents ?? 0);
+
+  // externalId is unique per poster scope, and no caller can label itself as GitHub; the anonymous cap never blocks signed-in people.
+  const feed = { title: `Scoped ${TAG}`, brief: "Model a 20 mm cube with a 5 mm through-hole along Z; units mm, Z up; answer with one DSL script.", rewardCents: 200, externalId: `scoped:${TAG}@1`, posterRef: "https://github.com/NeuralDEEPnet/Open3DJ/blob/main/docs/BOUNTIES.md" };
+  const fromA = await bounties.proposeBounty(feed, { posterKind: "agent", posterRef: "caller:aaa" });
+  const fromAAgain = await bounties.proposeBounty(feed, { posterKind: "agent", posterRef: "caller:aaa" });
+  const fromB = await bounties.proposeBounty(feed, { posterKind: "agent", posterRef: "caller:bbb" });
+  assert.ok(fromA.ok && fromAAgain.ok && fromB.ok);
+  if (fromA.ok && fromAAgain.ok && fromB.ok) {
+    bountyIds.push(fromA.bounty.id, fromB.bounty.id);
+    assert.equal(fromAAgain.duplicate, true);
+    assert.equal(fromAAgain.bounty.id, fromA.bounty.id);
+    assert.notEqual(fromB.bounty.id, fromA.bounty.id, "another caller cannot squat the first caller's id");
+    assert.equal(fromA.bounty.posterKind, "agent", "a github.com link does not make the poster GitHub");
+  }
+  const flood = await db.bounty.count({ where: { status: "proposed", posterKind: "agent" } });
+  const extraIds: string[] = [];
+  for (let i = flood; i < bounties.MAX_OPEN_PROPOSALS; i++) {
+    const row = await db.bounty.create({ data: { title: `Flood ${i} ${TAG}`, brief: "Filler proposal from the anonymous door, long enough to pass validation.", rewardCents: 50, status: "proposed", posterKind: "agent", posterRef: `caller:flood-${i}` } });
+    extraIds.push(row.id);
+  }
+  bountyIds.push(...extraIds);
+  const blockedAgent = await bounties.proposeBounty({ title: `Blocked ${TAG}`, brief: "One more anonymous proposal when the waiting room is full of them.", rewardCents: 100 }, { posterKind: "agent", posterRef: "caller:ccc" });
+  assert.equal(!blockedAgent.ok && blockedAgent.reason, "cap");
+  const person = await bounties.proposeBounty({ title: `Person ${TAG}`, brief: "A signed-in person's proposal is not blocked by the anonymous waiting room.", rewardCents: 100 }, { posterKind: "user", posterRef: `user:${TAG}` });
+  assert.ok(person.ok, JSON.stringify(person));
+  if (person.ok) bountyIds.push(person.bounty.id);
+  // Empty the waiting room again so later suites can propose anonymously.
+  await db.bounty.deleteMany({ where: { id: { in: extraIds } } });
   await unparkOthers();
 });
 
@@ -382,7 +496,7 @@ test("proposals: public from the start but unfunded, gated, capped per caller; t
   if (!okProposal.ok) return;
   bountyIds.push(okProposal.bounty.id);
   assert.equal(okProposal.bounty.status, "proposed");
-  assert.equal(okProposal.bounty.posterKind, "github", "a GitHub issue URL labels the poster as GitHub");
+  assert.equal(okProposal.bounty.posterKind, "agent", "a GitHub issue URL is shown as a link but cannot be verified, so it never changes the poster's label");
   assert.equal(okProposal.bounty.fundedAt, null);
   assert.equal(await db.ledgerEntry.count({ where: { reference: `bounty:${okProposal.bounty.id}:escrow` } }), 0, "no money moves on a proposal");
   const shown = (await bounties.bountyBoard({ filter: "proposed" })).find((x) => x.id === okProposal.bounty.id)!;
