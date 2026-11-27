@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Search } from "lucide-react";
+import { ArrowRight, Check as CheckIcon, Copy, Search, Workflow } from "lucide-react";
+import { AgenticStudiosBand } from "@/components/shelter/agentic-studios-bar";
 import { Shell } from "@/components/shelter/shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { buildRescueMarkdownSnippet, buildWorkbenchSharePath } from "@/lib/agentic-network";
 import { href, navigate } from "@/lib/router";
 import { cn } from "@/lib/utils";
 import { ReplacementList } from "@/pages/instead-page";
@@ -34,7 +36,8 @@ export function CheckPage() {
   const [q, setQ] = useState(readQuery);
   const [registry, setRegistry] = useState(q.registry);
   const [name, setName] = useState(q.name);
-  useEffect(() => { const next = readQuery(); setQ(next); setRegistry(next.registry); setName(next.name); }, []);
+  const [copiedRescue, setCopiedRescue] = useState(false);
+  useEffect(() => { const next = readQuery(); setQ(next); setRegistry(next.registry); setName(next.name); setCopiedRescue(false); }, []);
   const check = useQuery({
     queryKey: ["rescue-check", q.registry, q.name],
     enabled: Boolean(q.name),
@@ -101,6 +104,41 @@ export function CheckPage() {
               {!c.successor?.name && c.successor?.url && !c.successor.label && <Button asChild variant="outline" className="font-mono text-xs uppercase tracking-wider"><a href={c.successor.url} target="_blank" rel="noreferrer nofollow">What the maintainer says to use</a></Button>}
               {c.resident && <Button asChild className="bg-primary font-mono text-xs uppercase tracking-wider text-primary-foreground"><a href={href(`/r/${c.resident.slug}`)}>Ask {c.resident.name} — free <ArrowRight className="ml-1.5 h-3.5 w-3.5" /></a></Button>}
               {surrenderHref && <Button asChild className="bg-primary font-mono text-xs uppercase tracking-wider text-primary-foreground"><a href={surrenderHref}>Park it at the shelter — free <ArrowRight className="ml-1.5 h-3.5 w-3.5" /></a></Button>}
+              <Button asChild variant="outline" className="border-primary/50 font-mono text-xs uppercase tracking-wider text-primary hover:bg-primary hover:text-primary-foreground">
+                <a href={href(buildWorkbenchSharePath("mcp-rescue", c.registry === "pypi" ? `pypi:${c.name}` : c.name))}>
+                  <Workflow className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" /> Run in Node Workbench
+                </a>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="font-mono text-xs uppercase tracking-wider"
+                onClick={() => {
+                  const pkgSpec = c.registry === "pypi" ? `pypi:${c.name}` : c.name;
+                  const snippet = buildRescueMarkdownSnippet({
+                    serverOrPackage: c.name,
+                    statusLabel: VERDICT_LABEL[c.verdict].toLowerCase(),
+                    packageSpec: pkgSpec,
+                    replacementName: c.replacements[0]?.name ?? c.successor?.name ?? c.successor?.label ?? null,
+                    replacementHow: c.replacements[0]?.how ?? c.successor?.url ?? null,
+                    detailsPath: c.curated ? `/instead/${c.curated.id}` : `/check?registry=${c.registry}&name=${encodeURIComponent(c.name)}`,
+                  });
+                  void navigator.clipboard?.writeText(snippet).then(() => {
+                    setCopiedRescue(true);
+                    window.setTimeout(() => setCopiedRescue(false), 2200);
+                  });
+                }}
+              >
+                {copiedRescue ? (
+                  <>
+                    <CheckIcon className="mr-1.5 h-3.5 w-3.5 text-primary" aria-hidden="true" /> Copied rescue Markdown
+                  </>
+                ) : (
+                  <>
+                    <Copy className="mr-1.5 h-3.5 w-3.5 text-primary" aria-hidden="true" /> Copy rescue reply / Markdown
+                  </>
+                )}
+              </Button>
               {!["not-found", "gone"].includes(c.verdict) && <Button asChild variant="outline" className="font-mono text-xs uppercase tracking-wider"><a href={c.registryUrl} target="_blank" rel="noreferrer">Registry page</a></Button>}
             </div>
             {c.replacements.length > 0 && (
@@ -119,6 +157,9 @@ export function CheckPage() {
             <p className="mt-5 font-mono text-[11px] text-muted-foreground">Public registry signals only; not a statement about code quality. Agents: MCP tool <code>check_package</code> or GET /api/shelter/check.</p>
           </article>
         )}
+      </div>
+      <div className="mt-10">
+        <AgenticStudiosBand compact heading="Build with Neural Deep Agentic Studios" />
       </div>
     </Shell>
   );

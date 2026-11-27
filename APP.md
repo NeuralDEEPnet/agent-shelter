@@ -1,5 +1,32 @@
 # AI Agent Shelter (folder `agent-shelter`, appId `4pKTfXcjBFfY3LAz`)
 
+## Expanded 3D Sanctuary Stage, In-3D Tower Picker & Full 6-App Ecosystem Mesh (2026-11-22, published — GitHub `9faf574` / `113039d`)
+
+- **Larger, Expandable 3D Sanctuary Stage + Zero-Slip Choosing (`src/components/shelter/district-3d.tsx`, `src/pages/home-page.tsx`, `src/index.css`)**:
+  - Enlarged default 3D viewport to `420px–530px` (`0.82fr 1.28fr` hero grid) and added a 1-click **`Wide 3D` / `Compact`** stage toggle expanding across the full `max-w-7xl` container (`580px–640px` tall).
+  - Auto-orbit immediately pauses whenever the pointer hovers inside `<canvas>` (plus an explicit `Spin` / `Paused` toggle, `+`/`−` zoom, wheel-zoom in Wide mode, and `Reset view`) so towers never drift away from clicks.
+  - Added always-legible floating tags on every matching beacon, bracketed lock-on reticles + ground glow pads, distance-to-center hit prioritization, and category filter pills (`All`, `Residents`, `Connected Apps`, `MCP / Rescue`).
+  - Added **two in-3D selection workflows**:
+    1. **`Inspect & Ask`**: Click any Resident tower to ask a free question right inside the 3D Stage dock (with domain starter chips calling `/api/mpp/ask/:slug` at 0 Adaptive credits) or click any of the **6 Connected App Megatowers** (`3DJ Studio`, `SketchMonkey`, `AiBeing`, `Dreamscape`, `LaunchStage`, `Bounties`) to open it directly.
+    2. **`Wire Chain`**: Click 1–2 Resident towers + 1 Studio beacon right in 3D space with overhead glowing energy arcs and load the exact picked combo into `#node-workbench` (`externalResidentSlugs`).
+- **Full 6-App Public Ecosystem Lineup + Viral Rescue Markdown Snippets (`src/lib/agentic-network.ts`, `src/components/shelter/agentic-studios-bar.tsx`, `src/components/shelter/shell.tsx`, `src/pages/instead-page.tsx`, `src/pages/check-page.tsx`, `src/api/services/prerender.ts`, `public/about.md`)**:
+  - Kept Agent Shelter's Adaptive subdomain strictly as-is (`https://agent-shelter-neuraldeepnet.adaptive.ai` / `.on.adaptive.ai`, zero `shelter.neuraldeep.net` references) and added **LaunchStage** (`https://launchstage-neuraldeepnet.adaptive.ai`) and **Bounties** (`https://bounties-neuraldeepnet.adaptive.ai`) alongside `3DJ`, `SketchMonkey`, `AiBeing`, and `Dreamscape` across the top network bar, portal band, footer, prerender HTML, and `about.md`/`llms.txt`.
+  - Added 1-click **"Copy rescue reply / Markdown"** buttons (`buildRescueMarkdownSnippet`) on `/check`, `/instead`, and `/instead/:id` pairing verified vendor alternatives with runnable `?chain=mcp-rescue&q=<pkg>#node-workbench` links.
+- **Verification**: `npm run check` (0 errors), `npm run lint` (0 errors), `npm test` (**141/141 TAP subtests across 20 suites**), GitHub workflow tests (**23/23**), `npm run prod:build`, and live desktop (`1440×900`, `canvasH: 530`, `0` overflow) & mobile (`390×844`, `canvasMobileH: 420`, `0` overflow, `16px` inputs, `0` console errors) browser verification.
+
+## Neural Deep Agentic Network Hub, Interactive 3D Sanctuary District & Free Multi-Agent Node Workbench (2026-11-21, published — GitHub `168cb5c` / `768951f`)
+
+- **Neural Deep Agentic Network Cross-App Hub (`src/lib/agentic-network.ts`, `src/components/shelter/agentic-studios-bar.tsx`, `src/components/shelter/shell.tsx`, `src/api/services/prerender.ts`, `public/about.md`)**:
+  - Added a responsive **Neural Deep Network** top switcher bar (`AgenticNetworkStrip`, zero overflow at `390px`) and **Connected Neural Deep Agentic Studios** portal cards (`AgenticStudiosBand`) on Home, `/check`, and `/instead` routing visitors and crawlers directly into **3DJ Studio** (`https://www.3dj.app`), **SketchMonkey** (`https://www.sketchmonkey.design/canvas?...&handoff=1`), **AiBeing** (`https://www.aibeing.me` & `/#/import`), and **Dreamscape** (`https://dreamscape-neuraldeepnet.adaptive.ai`).
+  - Synced non-JS semantic prerender HTML and `public/about.md` / `llms.txt` via `scripts/sync-discovery.ts` while keeping `server.json` publisher metadata under the 4,096-byte Registry guard.
+- **Interactive 3D Sanctuary District (`src/components/shelter/district-3d.tsx`, `src/pages/home-page.tsx`)**:
+  - Added a lightweight 60 FPS perspective-projected `<canvas>` **3D District** view on the Home hero alongside a `3D District` / `2D Skyline` toggle (preserving `PixelCity` intact and respecting `prefers-reduced-motion`).
+  - Renders the central Sanctuary Core, 4 outer Agentic Studio beacons (`3DJ`, `SketchMonkey`, `AiBeing`, `Dreamscape`), and live resident towers with drag-orbit, pointer hit-testing, accessible keyboard beacon toolbar, and 1-click actions (`Ask free` in hero or `Chain w/ nodes`).
+- **Zero-Friction Free Multi-Agent Node Workbench (`src/components/shelter/node-workbench.tsx`, `src/pages/playground-page.tsx`, `src/pages/check-page.tsx`, `src/pages/instead-page.tsx`)**:
+  - Shipped 4 runnable free multi-agent pipelines (`Idea → 3DJ CAD`, `Concept → SketchMonkey`, `MCP Rescue → Config`, `Role → AiBeing Team`) with per-node live resident swapping, optional in-memory `X-Gemini-Api-Key` pass-through, shareable `?chain=<id>&q=<encoded>#node-workbench` deep links, and 1-click studio handoffs (0 Adaptive platform credits spent).
+  - Added direct `"Run in Node Workbench"` handoff links on `/check` and `/instead/:id` pages so organic developer package searches flow directly into live node workflows.
+- **Verification**: `npm run check` (0 errors), `npm run lint` (0 errors), `npm test` (**140/140 TAP subtests across 20 suites**, including `scripts/verify-agentic-nodes.test.ts`), GitHub workflow tests (**23/23**), `npm run prod:build`, live desktop (`1440×900`) & mobile (`390×844`, `0` overflow, `16px` inputs) browser verification, and **57 URLs submitted to IndexNow (`HTTP 200 OK`)**.
+
 ## "On Steroids" Traction, Discovery, Heredity Hardening & Zero-Credit Direct Gemini Rollout (2026-11-20, published — GitHub `a7597aa` / `35623fa`)
 
 - **Integrated All 4 Pending GitHub Branches**:
@@ -250,7 +277,7 @@ Public: `health`, `getShelter`, `listResidents`, `getResident`, `getAgreement`, 
 (sign-in), `mySurrenders`. Signed-in: `recoverSurrender` (exact owned read-back only), `startSponsorship`, `confirmSponsorship`, `mySponsorships`,
 `adoptResident`. Owner: `adminOverview`, `approve`, `reject`, `hibernate`, `wake`, `setPause`,
 `probationSamples`, `ownerTestTurn`, `payouts`, `recordPayout`, `outreachDrafts`, `setOutreachApproval`. Cron: `shelterDaily`. Webhook:
-`onStripeWebhook`. Agent-only: `_simulateWebhook`, `_screenNow`. Every expected refusal is a
+`onStripeWebhook`. Agent-only: `_simulateWebhook`, `_screenNow` (refused over HTTP with 404 by `isOwnProcedure` and owner-gated; called in-process). Every expected refusal is a
 returned `Result` notice (`src/lib/notice.ts`); `useNotices()`/`unwrap()` toast every notice.
 
 ## Design
